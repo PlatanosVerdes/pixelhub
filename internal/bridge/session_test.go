@@ -28,6 +28,7 @@ type fakeBridge struct {
 
 	mu      sync.Mutex
 	linked  bool
+	silent  bool
 	accepts int
 	conns   []net.Conn
 }
@@ -112,6 +113,10 @@ func (f *fakeBridge) handle(conn net.Conn, op []byte) {
 		f.linked = false
 	default:
 		cmd := op[3]
+		if f.silent {
+			f.ops <- fmt.Sprintf("unanswered:%02x", cmd)
+			return
+		}
 		if !f.linked {
 			f.ops <- fmt.Sprintf("dropped:%02x", cmd)
 			conn.Write([]byte{opLinkDown})
@@ -232,6 +237,21 @@ func TestConnectWaitsForGreeting(t *testing.T) {
 	f.greetDelay = 300 * time.Millisecond
 	startSession(t, f, new(picture(1)))
 	f.expect("dropped:74", "connect", "frame:44", "frame:74")
+}
+
+func TestSilentBridgeIsNeverSentConnect(t *testing.T) {
+	t.Parallel()
+	f := newFakeBridge(t, true)
+	f.silent = true
+	startSession(t, f, new(picture(1)))
+	f.expect("unanswered:74", "unanswered:74", "unanswered:74")
+	f.mu.Lock()
+	f.silent = false
+	f.mu.Unlock()
+	f.expect("frame:74", "frame:44", "frame:74")
+	if f.acceptCount() < 2 {
+		t.Errorf("%d TCP connections, want a redial after the silence", f.acceptCount())
+	}
 }
 
 func TestReconnects(t *testing.T) {

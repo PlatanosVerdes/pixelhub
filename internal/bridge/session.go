@@ -22,6 +22,8 @@ const (
 // A link must stay up this long before a drop counts as new trouble rather than the same flapping.
 const stableLink = time.Minute
 
+const probeAttempts = 3
+
 var (
 	errTimeout  = errors.New("timed out")
 	errReleased = errors.New("released")
@@ -49,7 +51,7 @@ func DefaultOptions(address string, mac net.HardwareAddr, channel byte) Options 
 		Channel:         channel,
 		DialTimeout:     5 * time.Second,
 		WriteTimeout:    5 * time.Second,
-		ProbeTimeout:    3 * time.Second,
+		ProbeTimeout:    5 * time.Second,
 		GreetingTimeout: 30 * time.Second,
 		Keepalive:       30 * time.Second,
 		MinBackoff:      2 * time.Second,
@@ -219,18 +221,23 @@ type link struct {
 	shown   display.Content
 }
 
+// probe never reads silence as "not connected": the bridge always answers, and connecting while the
+// link is up makes it redial and the Evo refuse. A bridge that stays silent gets a new TCP connection.
 func (l *link) probe() (bool, error) {
-	if err := l.ping(); err != nil {
-		return false, err
+	for range probeAttempts {
+		if err := l.ping(); err != nil {
+			return false, err
+		}
+		ev, err := l.next(time.Now().Add(l.opt.ProbeTimeout))
+		switch {
+		case errors.Is(err, errTimeout):
+			continue
+		case err != nil:
+			return false, err
+		}
+		return !ev.lost, nil
 	}
-	ev, err := l.next(time.Now().Add(l.opt.ProbeTimeout))
-	switch {
-	case errors.Is(err, errTimeout):
-		return false, nil
-	case err != nil:
-		return false, err
-	}
-	return !ev.lost, nil
+	return false, errors.New("no answer to the probe")
 }
 
 func (l *link) connect() error {
