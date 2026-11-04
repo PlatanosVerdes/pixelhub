@@ -105,6 +105,8 @@ func TestMessage(t *testing.T) {
 		{"brightness is clamped", Brightness(150), "0104007464dc0002"},
 		{"light", Light(color.RGBA{R: 255, G: 128, B: 1}, 100), "010d004501ff8001640001000000380202"},
 		{"clock", Clock(), "010e00450001000100000000000000550002"},
+		{"24 hour format", TimeFormat24(), "010400" + "2d01" + "3200" + "02"},
+		{"date and time", DateTime(time.Date(2026, 11, 4, 14, 56, 7, 0, time.UTC)), "010b0018" + "1a140b040e3807" + "03" + "b000" + "02"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -224,7 +226,7 @@ func TestEncode(t *testing.T) {
 		content  display.Content
 		commands []byte
 	}{
-		{"clock", display.ClockContent(), []byte{cmdView, cmdBrightness}},
+		{"clock", display.ClockContent(), []byte{cmdTimeFormat, cmdDateTime, cmdView, cmdBrightness}},
 		{"color", display.ColorContent(color.RGBA{R: 9}), []byte{cmdView, cmdBrightness}},
 		{"still", display.Content{Kind: display.Picture, Frames: []display.Frame{still}}, []byte{cmdImage, cmdBrightness}},
 		{"animation", display.Content{Kind: display.Picture, Frames: []display.Frame{still, still}}, []byte{cmdAnimation, cmdBrightness}},

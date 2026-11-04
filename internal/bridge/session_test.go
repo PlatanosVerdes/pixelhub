@@ -298,7 +298,7 @@ func TestReleaseAndClaim(t *testing.T) {
 
 	s.Show(display.ClockContent().WithBrightness(20))
 	s.Claim()
-	f.expect("dropped:74", "connect", "frame:45", "frame:74")
+	f.expect("dropped:74", "connect", "frame:2d", "frame:18", "frame:45", "frame:74")
 	if s.isReleased() {
 		t.Error("still released after the claim")
 	}

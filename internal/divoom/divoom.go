@@ -19,6 +19,8 @@ const (
 	frameEnd   = 0x02
 
 	cmdResponse   = 0x04
+	cmdDateTime   = 0x18
+	cmdTimeFormat = 0x2d
 	cmdImage      = 0x44
 	cmdView       = 0x45
 	cmdAnimation  = 0x49
@@ -32,6 +34,8 @@ const (
 	maxAnimation = 256 * chunkSize
 	pictureMark  = 0xaa
 )
+
+var now = time.Now
 
 func Message(cmd byte, payload []byte) []byte {
 	out := make([]byte, 0, len(payload)+6)
@@ -54,6 +58,18 @@ func Light(c color.RGBA, level int) []byte {
 	return Message(cmdView, []byte{0x01, c.R, c.G, c.B, byte(clamp(level)), 0x00, 0x01, 0x00, 0x00, 0x00})
 }
 
+// DateTime sets the display's own clock, which otherwise keeps whatever the phone app last told it.
+func DateTime(t time.Time) []byte {
+	return Message(cmdDateTime, []byte{
+		byte(t.Year() % 100), byte(t.Year() / 100), byte(t.Month()), byte(t.Day()),
+		byte(t.Hour()), byte(t.Minute()), byte(t.Second()), byte(t.Weekday()),
+	})
+}
+
+func TimeFormat24() []byte {
+	return Message(cmdTimeFormat, []byte{0x01})
+}
+
 func Clock() []byte {
 	return Message(cmdView, []byte{0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
 }
@@ -67,7 +83,7 @@ func Encode(c display.Content) ([][]byte, error) {
 	brightness := Brightness(c.Brightness)
 	switch {
 	case c.Kind == display.Clock:
-		return [][]byte{Clock(), brightness}, nil
+		return [][]byte{TimeFormat24(), DateTime(now()), Clock(), brightness}, nil
 	case c.Kind == display.Color:
 		return [][]byte{Light(c.Fill, c.Brightness), brightness}, nil
 	case len(c.Frames) == 0:
