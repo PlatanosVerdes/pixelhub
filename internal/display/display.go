@@ -1,0 +1,62 @@
+package display
+
+import (
+	"fmt"
+	"image"
+	"image/color"
+	"time"
+)
+
+type Kind int
+
+const (
+	Clock Kind = iota
+	Color
+	Picture
+)
+
+type Frame struct {
+	Image image.Image
+	Delay time.Duration
+}
+
+// Content is what a display should show. Picture uses Frames (one is a still image), Color uses Fill.
+type Content struct {
+	Kind       Kind
+	Name       string
+	Frames     []Frame
+	Fill       color.RGBA
+	Brightness int
+}
+
+func (c Content) WithBrightness(level int) Content {
+	c.Brightness = level
+	return c
+}
+
+// SamePicture reports whether two contents show the same thing, perhaps at different brightness.
+func (c Content) SamePicture(o Content) bool {
+	return c.Kind == o.Kind && c.Name == o.Name && c.Fill == o.Fill
+}
+
+func ClockContent() Content { return Content{Kind: Clock, Name: "clock"} }
+
+func ColorContent(fill color.RGBA) Content {
+	return Content{Kind: Color, Name: fmt.Sprintf("color #%02x%02x%02x", fill.R, fill.G, fill.B), Fill: fill}
+}
+
+type Status struct {
+	Address   string    `json:"address"`
+	Connected bool      `json:"connected"`
+	Acks      int       `json:"acks"`
+	LastAck   time.Time `json:"last_ack,omitzero"`
+}
+
+// Display drives a physical screen. Show only records what should be on screen: the driver
+// paints it when it can and again after every reconnect.
+type Display interface {
+	Show(Content)
+	Release()
+	Claim()
+	Status() Status
+}

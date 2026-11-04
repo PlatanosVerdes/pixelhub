@@ -1,0 +1,140 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"syscall"
+	"time"
+
+	"github.com/PlatanosVerdes/pixelhub/internal/bridge"
+	"github.com/PlatanosVerdes/pixelhub/internal/config"
+	"github.com/PlatanosVerdes/pixelhub/internal/demo"
+	"github.com/PlatanosVerdes/pixelhub/internal/divoom"
+	"github.com/PlatanosVerdes/pixelhub/internal/hub"
+	"github.com/PlatanosVerdes/pixelhub/internal/server"
+	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
+	"github.com/PlatanosVerdes/pixelhub/internal/state"
+)
+
+var buildVersion = "local"
+
+func main() {
+	if err := run(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+}
+
+func run(args []string) error {
+	getenv := os.Getenv
+	var demoOpt *demoFlags
+	if len(args) > 0 {
+		if args[0] != "demo" {
+			return fmt.Errorf("unknown command %q, want demo or nothing", args[0])
+		}
+		var err error
+		if getenv, demoOpt, err = parseDemo(args[1:]); err != nil {
+			return err
+		}
+	}
+	cfg, err := config.Load(getenv)
+	if err != nil {
+		return err
+	}
+	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	if cfg.LogJSON {
+		log = slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	sprites, err := sprite.Load(filepath.Join(cfg.DataDir, "sprites"), divoom.Size)
+	if err != nil {
+		return err
+	}
+	if demoOpt != nil {
+		return demo.Run(ctx, demo.Options{
+			Bridge:     bridge.DefaultOptions(cfg.Bridge, cfg.DeviceMAC, cfg.Channel),
+			Sprites:    sprites,
+			Brightness: demoOpt.brightness,
+			Hold:       demoOpt.hold,
+		}, log)
+	}
+	return serve(ctx, cfg, sprites, log)
+}
+
+func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log *slog.Logger) error {
+	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
+		return fmt.Errorf("create data dir: %w", err)
+	}
+	store, st, err := state.Open(filepath.Join(cfg.DataDir, "state.json"), log)
+	if err != nil {
+		return err
+	}
+	session := bridge.New(bridge.DefaultOptions(cfg.Bridge, cfg.DeviceMAC, cfg.Channel), log)
+	pictures := sprite.Ambient{Dir: filepath.Join(cfg.DataDir, "ambient"), Size: divoom.Size}
+	h := hub.New(session, st, store, sprites, pictures, log)
+	go session.Run(ctx)
+	go h.Run(ctx)
+
+	srv := &http.Server{
+		Addr:              ":" + strconv.Itoa(cfg.Port),
+		Handler:           (&server.Server{Hub: h, Sprites: sprites, Size: divoom.Size, Version: buildVersion}).Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    16 << 10,
+	}
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdown)
+	}()
+
+	log.Info("pixelhub listening", "version", buildVersion, "port", cfg.Port, "bridge", cfg.Bridge,
+		"channels", len(st.Channels), "sprites", len(sprites.Names()))
+	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	<-stopped
+	return nil
+}
+
+type demoFlags struct {
+	brightness int
+	hold       time.Duration
+}
+
+// parseDemo lets -bridge and -mac stand in for their environment variables.
+func parseDemo(args []string) (func(string) string, *demoFlags, error) {
+	fs := flag.NewFlagSet("demo", flag.ContinueOnError)
+	address := fs.String("bridge", "", "bridge address host:port (default $PIXELHUB_BRIDGE)")
+	mac := fs.String("mac", "", "display Bluetooth address (default $PIXELHUB_DEVICE_MAC)")
+	opt := &demoFlags{}
+	fs.IntVar(&opt.brightness, "brightness", 60, "brightness 0-100")
+	fs.DurationVar(&opt.hold, "hold", 2*time.Second, "time each sprite stays on screen")
+	if err := fs.Parse(args); err != nil {
+		return nil, nil, err
+	}
+	getenv := func(key string) string {
+		switch {
+		case key == "PIXELHUB_BRIDGE" && *address != "":
+			return *address
+		case key == "PIXELHUB_DEVICE_MAC" && *mac != "":
+			return *mac
+		}
+		return os.Getenv(key)
+	}
+	return getenv, opt, nil
+}
