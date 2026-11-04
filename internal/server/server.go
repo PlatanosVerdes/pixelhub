@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
 	"image/color"
 	"io/fs"
 	"net/http"
@@ -37,6 +38,7 @@ type Hub interface {
 	ReplaceChannel(name string, c state.Channel) (state.State, error)
 	DeleteChannel(name string) (state.State, error)
 	ListPictures(channel string) ([]string, error)
+	PictureImage(channel, file string) (image.Image, error)
 	AddPicture(channel, name string, data []byte) (string, error)
 	RemovePicture(channel, file string) error
 	Preview() (display.Content, int)
@@ -80,8 +82,9 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/channels/{name}/pictures", s.listPictures)
 	mux.HandleFunc("POST /api/channels/{name}/pictures", s.addPicture)
+	mux.HandleFunc("GET /api/channels/{name}/pictures/{file}", s.picturePNG)
 	mux.HandleFunc("DELETE /api/channels/{name}/pictures/{file}", s.removePicture)
-	return mux
+	return s.withWeb(mux)
 }
 
 type notifyRequest struct {

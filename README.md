@@ -2,7 +2,7 @@
 
 Drives a Divoom Timebox Evo, a 16x16 pixel display that only speaks Bluetooth, through an ESP32
 running the esp32-divoom bridge firmware, which turns TCP into Bluetooth. pixelhub is a JSON API
-and nothing else: a separate web UI is its client.
+under `/api`, and it also serves a [web UI](#web-ui) at `/` that uses only that public API.
 
 The display runs one **channel** at a time. The active one is a manual override from
 `POST /api/channel` if there is one, else the channel schedule, else the default channel. Each
@@ -19,6 +19,14 @@ from three layers, highest first:
 Brightness follows the sun at the configured place (day, civil twilight, night), unless a scene sets
 its own. Every change through the API is saved and applies at once. Runs on the Raspberry from
 [rpi-services](https://github.com/PlatanosVerdes/rpi-services), CalVer tag on every push to main.
+
+## Web UI
+
+`web/` holds the UI: plain files and [Lit](https://lit.dev) with no build step, embedded in the
+binary and served at `/`. `/api` and `/healthz` keep priority and any other path answers with the
+page. It shows the live preview, switches channels, edits channels, scenes, pictures, the schedule
+and the settings, and sends test alerts. Spanish for browsers set to Spanish, English otherwise.
+Browsers only give the device's location to HTTPS pages, so "use this device's location" needs one.
 
 ## The bridge
 
@@ -76,6 +84,7 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `PUT /api/channels/{name}` | Replace; a different `name` renames it, its schedule slots, its pictures and an override on it. A missing `name` or `ambient` keeps the channel's own |
 | `DELETE /api/channels/{name}` | Delete with its schedule slots and pictures; not the default or the last one |
 | `PUT /api/schedule` | Replace the channel schedule |
+| `GET /api/channels/{name}/pictures/{file}` | A picture's first frame, drawn 10x like a sprite |
 | `GET/POST /api/channels/{name}/pictures` | List, upload (multipart field `file`, GIF or PNG, up to 1 MB and 512x512; the name is cleaned up and must be new) |
 | `DELETE /api/channels/{name}/pictures/{file}` | Delete a picture |
 | `GET /api/sprites`, `GET /api/sprites/{name}.png` | Sprite names, and each one drawn 10x |

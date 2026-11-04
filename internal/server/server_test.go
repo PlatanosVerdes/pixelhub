@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image"
 	"image/color"
 	"image/png"
 	"io"
@@ -356,4 +357,60 @@ func pngBytes(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func TestWebUI(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	for _, path := range []string{"/", "/channels/office"} {
+		rec := f.do(t, "GET", path, "")
+		if rec.Code != 200 || !strings.Contains(rec.Body.String(), "<pixelhub-app>") {
+			t.Errorf("GET %s: code %d, want the page", path, rec.Code)
+		}
+	}
+	if rec := f.do(t, "GET", "/app.js", ""); rec.Code != 200 || !strings.Contains(rec.Header().Get("Content-Type"), "javascript") {
+		t.Errorf("GET /app.js: code %d type %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if rec := f.do(t, "GET", "/api/status", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"channel":"office"`) {
+		t.Errorf("GET /api/status: code %d body %s", rec.Code, rec.Body)
+	}
+	if rec := f.do(t, "GET", "/api/nothing", ""); rec.Code != 404 || strings.Contains(rec.Body.String(), "pixelhub-app") {
+		t.Errorf("GET /api/nothing: code %d body %s, want a 404 without the page", rec.Code, rec.Body)
+	}
+	if rec := f.do(t, "GET", "/healthz", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"status":"ok"`) {
+		t.Errorf("GET /healthz: code %d", rec.Code)
+	}
+}
+
+func TestPicturePNG(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	part, _ := form.CreateFormFile("file", "dot.png")
+	img := image.NewNRGBA(image.Rect(0, 0, 16, 16))
+	img.Set(3, 3, color.NRGBA{R: 255, A: 255})
+	if err := png.Encode(part, img); err != nil {
+		t.Fatal(err)
+	}
+	form.Close()
+	req := httptest.NewRequest("POST", "/api/channels/office/pictures", &body)
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	rec := httptest.NewRecorder()
+	f.srv.ServeHTTP(rec, req)
+	if rec.Code != 201 {
+		t.Fatalf("upload: %d %s", rec.Code, rec.Body)
+	}
+	rec = f.do(t, "GET", "/api/channels/office/pictures/dot.png", "")
+	if rec.Code != 200 || rec.Header().Get("Content-Type") != "image/png" {
+		t.Fatalf("thumbnail: %d %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if got, err := png.Decode(rec.Body); err != nil || got.Bounds().Dx() != 160 {
+		t.Errorf("thumbnail is not a 160 px PNG: %v", err)
+	}
+	for _, path := range []string{"/api/channels/office/pictures/none.png", "/api/channels/nope/pictures/dot.png", "/api/channels/office/pictures/..%2Fx.png"} {
+		if rec := f.do(t, "GET", path, ""); rec.Code < 400 {
+			t.Errorf("GET %s: code %d, want an error", path, rec.Code)
+		}
+	}
 }

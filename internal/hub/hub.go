@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"image"
 	"log/slog"
 	"maps"
 	"slices"
@@ -34,6 +35,7 @@ type Sprites interface {
 type Pictures interface {
 	picker
 	List(channel string) ([]string, error)
+	First(channel, file string) (image.Image, error)
 	Add(channel, name string, data []byte) (string, error)
 	Remove(channel, file string) error
 	RenameChannel(from, to string) error
@@ -214,6 +216,13 @@ func (h *Hub) ListPictures(channel string) ([]string, error) {
 		return nil, err
 	}
 	return h.pictures.List(channel)
+}
+
+func (h *Hub) PictureImage(channel, file string) (image.Image, error) {
+	if err := h.hasChannel(channel); err != nil {
+		return nil, err
+	}
+	return h.pictures.First(channel, file)
 }
 
 func (h *Hub) AddPicture(channel, name string, data []byte) (string, error) {

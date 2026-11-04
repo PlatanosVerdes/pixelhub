@@ -2,6 +2,7 @@ package hub
 
 import (
 	"errors"
+	"image"
 	"io"
 	"log/slog"
 	"slices"
@@ -40,6 +41,7 @@ func (s sprites) Get(name string) (display.Content, bool) {
 type ambientDir []string
 
 func (ambientDir) List(string) ([]string, error)              { return nil, nil }
+func (ambientDir) First(string, string) (image.Image, error)  { return nil, nil }
 func (ambientDir) Add(string, string, []byte) (string, error) { return "", nil }
 func (ambientDir) Remove(string, string) error                { return nil }
 func (ambientDir) RenameChannel(string, string) error         { return nil }

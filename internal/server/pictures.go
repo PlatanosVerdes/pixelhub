@@ -58,6 +58,17 @@ func (s *Server) addPicture(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"file": saved})
 }
 
+// picturePNG draws the first frame of a picture like a sprite, so a UI can show thumbnails.
+func (s *Server) picturePNG(w http.ResponseWriter, r *http.Request) {
+	img, err := s.Hub.PictureImage(r.PathValue("name"), r.PathValue("file"))
+	if err != nil {
+		writeError(w, statusOf(err), err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	writePNG(w, img)
+}
+
 func (s *Server) removePicture(w http.ResponseWriter, r *http.Request) {
 	if err := s.Hub.RemovePicture(r.PathValue("name"), r.PathValue("file")); err != nil {
 		writeError(w, statusOf(err), err)

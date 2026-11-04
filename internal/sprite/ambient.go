@@ -106,6 +106,22 @@ func (a Ambient) Add(channel, name string, data []byte) (string, error) {
 	return clean, atomicfile.Write(path, data)
 }
 
+// First decodes the first frame of one of the channel's own pictures.
+func (a Ambient) First(channel, file string) (image.Image, error) {
+	if file != filepath.Base(file) || !isPicture(file) {
+		return nil, fmt.Errorf("%w: %q", ErrBadName, file)
+	}
+	dir, err := a.channelDir(channel)
+	if err != nil {
+		return nil, err
+	}
+	frames, err := Decode(filepath.Join(dir, file), a.Size)
+	if err != nil {
+		return nil, err
+	}
+	return frames[0].Image, nil
+}
+
 func (a Ambient) Remove(channel, file string) error {
 	if file != filepath.Base(file) || !isPicture(file) {
 		return fmt.Errorf("%w: %q", ErrBadName, file)

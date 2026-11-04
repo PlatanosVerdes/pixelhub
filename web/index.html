@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>pixelhub</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Design tokens: every component reads these through var(--…), so both themes live here only. */
+  :root {
+    --bg: #f4f5f9; --surface: #ffffff; --ink: #161a2b; --muted: #5d6479; --line: #dde0ea; --chip: #eceef5;
+    --accent: #4b4fd6; --on-accent: #ffffff; --ok: #11804a; --warn: #a96500; --bad: #c03636;
+    --font-display: "Unbounded", "Figtree", system-ui, sans-serif;
+    --font-ui: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-data: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1020; --surface: #151a2e; --ink: #e9ebf5; --muted: #9aa1ba; --line: #252b44; --chip: #1e2439;
+      --accent: #8f93ff; --on-accent: #0d1020; --ok: #3cc47c; --warn: #f0b342; --bad: #ff7d7d; color-scheme: dark;
+    }
+  }
+  html { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font-ui); }
+</style>
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<pixelhub-app></pixelhub-app>
+</body>
+</html>
