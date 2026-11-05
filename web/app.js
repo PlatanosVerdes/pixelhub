@@ -184,7 +184,7 @@ class DurationPicker extends LitElement {
   static styles = [base, css`
     .seg { align-items: center; }
     .own { display: inline-flex; align-items: center; height: 32px; border-radius: 8px; background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); padding: 0 4px 0 8px; }
-    .own input { width: 44px; height: 28px; border: 0; background: none; padding: 0; text-align: right; font: inherit; font-size: 13px; font-weight: 500; color: var(--ink); -moz-appearance: textfield; }
+    .own input { height: 28px; border: 0; background: none; padding: 0; text-align: center; font: inherit; font-size: 13px; font-weight: 500; color: var(--ink); -moz-appearance: textfield; }
     .own input::-webkit-inner-spin-button, .own input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
     .own select { height: 28px; border: 0; background: none; padding: 0 2px 0 4px; font: inherit; font-size: 13px; font-weight: 500; color: var(--ink); cursor: pointer; }
     .own input:focus-visible, .own select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
@@ -210,7 +210,7 @@ class DurationPicker extends LitElement {
     return html`<div class="seg" role="group">
       ${this.options.map(([v, label]) => html`<button type="button" aria-pressed=${String(v === known)} @click=${() => { this.custom = false; this.emit(v); }}>${label}</button>`)}
       ${this.custom
-        ? html`<span class="own"><input type="number" min="1" step="any" aria-label=${t("Amount")} .value=${String(this.n)}
+        ? html`<span class="own"><input type="number" min="1" step="any" aria-label=${t("Amount")} .value=${String(this.n)} style=${`width:${Math.max(2, String(this.n).length) + 1}ch`}
               @input=${(e) => { this.n = e.target.value; }} @change=${() => this.typed()}>
             <select aria-label=${t("Unit")} @change=${(e) => { this.unit = e.target.value; this.typed(); }}>
               ${[["s", "s"], ["m", "min"], ["h", "h"]].map(([u, l]) => html`<option value=${u} ?selected=${u === this.unit}>${l}</option>`)}</select></span>`
@@ -436,10 +436,9 @@ class Modes extends LitElement {
     input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
     .colour { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
-    .swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
-    .colour input[type=color] { width: 28px; height: 28px; padding: 0; border: 2px dashed var(--line); border-radius: 50%; background: none; cursor: pointer; overflow: hidden; }
-    .colour input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
-    .colour input[type=color]::-webkit-color-swatch { border: 0; border-radius: 50%; }
+    .swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; display: inline-block; }
+    .swatch.other { position: relative; background: conic-gradient(#ff3b30, #ffd60a, #30d158, #40c8e0, #0a84ff, #bf5af2, #ff3b30); }
+    .swatch.other input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
     .swatch[aria-pressed=true] { border-color: var(--ink); }
     .score { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .team { border-radius: 14px; padding: 12px; display: grid; justify-items: center; gap: 8px; background: color-mix(in srgb, var(--team) 16%, transparent); border: 1px solid color-mix(in srgb, var(--team) 45%, transparent); }
@@ -488,12 +487,14 @@ class Modes extends LitElement {
     return html`<div class="colour">
       <div class="swatches" role="group" aria-label=${t("Colour")}>
         ${presets.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c} aria-pressed=${String(v.color?.toLowerCase() === c)} @click=${() => change({ color: c })}></button>`)}
+        <label class="swatch other" title=${t("Other colour")} aria-pressed=${String(!!v.color && !presets.includes(v.color.toLowerCase()))}
+          style=${v.color && !presets.includes(v.color.toLowerCase()) ? `background:${v.color}` : ""}>
+          <input type="color" aria-label=${t("Other colour")} .value=${v.color ?? "#ffffff"} @change=${(e) => change({ color: e.target.value })}></label>
       </div>
-      <input type="color" aria-label=${t("Other colour")} .value=${v.color ?? "#ffffff"} @change=${(e) => change({ color: e.target.value })}>
     </div>`;
   }
 
-  options(mode, v = this.viewFor(mode), change = (p) => change(p)) {
+  options(mode, v = this.viewFor(mode), change = (p) => this.change(p)) {
     const choices = (names, key = "style") => html`<div class="choices" role="group">${names.map((n, i) =>
       html`<button class="choice ${typeof n === "number" ? "num" : ""}" aria-pressed=${String((v[key] ?? 0) === i)} @click=${() => change({ [key]: i })}>${n}</button>`)}</div>`;
     switch (mode) {
