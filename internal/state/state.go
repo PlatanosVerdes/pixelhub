@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"slices"
 	"time"
+
+	"github.com/PlatanosVerdes/pixelhub/internal/display"
 )
 
 const AllSources = "*"
@@ -26,11 +28,37 @@ type State struct {
 	DefaultChannel string    `json:"default_channel"`
 	Channels       []Channel `json:"channels"`
 	Schedule       []Slot    `json:"schedule"`
+	// Mode, when set, is one of the display's own modes picked by hand; it shows over scenes and
+	// ambient until cleared, alerts still go on top.
+	Mode display.View `json:"mode,omitzero"`
+	// Music shows what a linked music account plays, when it plays: its cover, or View instead.
+	Music Music `json:"music,omitzero"`
+	// Clock is how the clock looks wherever pixelhub shows it, so the display's stored look never leaks in.
+	Clock display.View `json:"clock,omitzero"`
+}
+
+var defaultClock = display.View{Mode: display.ModeClock, Color: "#ff1e28"}
+
+// ClockView is the clock to show: Clock, or a plain red one until it is set.
+func (s State) ClockView() display.View {
+	if s.Clock.IsZero() {
+		return defaultClock
+	}
+	return s.Clock
+}
+
+type Music struct {
+	Enabled bool         `json:"enabled"`
+	View    display.View `json:"view,omitzero"`
+	// Devices, when set, limits the music layer to what plays on these devices.
+	Devices []string `json:"devices,omitempty"`
 }
 
 type Location struct {
 	Latitude  float64 `json:"latitude"`
 	Longitude float64 `json:"longitude"`
+	// Name is the place as the user picked it, only for showing.
+	Name string `json:"name,omitempty"`
 }
 
 type Levels struct {
@@ -50,6 +78,8 @@ type Channel struct {
 type Ambient struct {
 	Pictures Duration `json:"pictures"`
 	Clock    Duration `json:"clock"`
+	// List, when set, is the list of pictures to show instead of the channel's own folder.
+	List string `json:"list,omitempty"`
 }
 
 // Window is a time range on a set of weekdays.
@@ -62,7 +92,10 @@ type Window struct {
 type Scene struct {
 	Name string `json:"name"`
 	Window
-	Sprite     string `json:"sprite,omitempty"`
+	Sprite string       `json:"sprite,omitempty"`
+	View   display.View `json:"view,omitzero"`
+	// List shows the pictures of a list in turn, with the channel's own timing, during the window.
+	List       string `json:"list,omitempty"`
 	Brightness *Level `json:"brightness,omitempty"`
 }
 
@@ -171,11 +204,20 @@ func (s *State) ApplySettings(data []byte) error {
 		Brightness     *Levels   `json:"brightness"`
 		ReleaseFor     *Duration `json:"release_for"`
 		DefaultChannel *string   `json:"default_channel"`
-	}{&s.Location, &s.Brightness, &s.ReleaseFor, &s.DefaultChannel}
+		// Music is replaced whole: leaving out its view means the cover.
+		Music *Music        `json:"music"`
+		Clock *display.View `json:"clock"`
+	}{Location: &s.Location, Brightness: &s.Brightness, ReleaseFor: &s.ReleaseFor, DefaultChannel: &s.DefaultChannel}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&settings); err != nil {
 		return fmt.Errorf("%w: settings: %w", ErrInvalid, err)
+	}
+	if settings.Music != nil {
+		s.Music = *settings.Music
+	}
+	if settings.Clock != nil {
+		s.Clock = *settings.Clock
 	}
 	return nil
 }
@@ -210,6 +252,23 @@ func (s State) Validate() error {
 		seen[c.Name] = true
 		errs = append(errs, c.validate()...)
 	}
+	if !s.Mode.IsZero() {
+		if err := s.Mode.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("mode: %w", err))
+		}
+	}
+	if !s.Clock.IsZero() {
+		if err := s.Clock.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("clock: %w", err))
+		} else if s.Clock.Mode != display.ModeClock || s.Clock.Color == "" {
+			errs = append(errs, errors.New("clock: must be the clock mode with a colour"))
+		}
+	}
+	if !s.Music.View.IsZero() {
+		if err := s.Music.View.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("music.view: %w", err))
+		}
+	}
 	for i, slot := range s.Schedule {
 		if s.index(slot.Channel) < 0 {
 			errs = append(errs, fmt.Errorf("schedule[%d]: %q is not a channel", i, slot.Channel))
@@ -242,6 +301,14 @@ func (c Channel) validate() []error {
 		if sc.From == sc.To {
 			errs = append(errs, fmt.Errorf("channel %s: scene %q: from and to are the same", c.Name, sc.Name))
 		}
+		if n := btoi(sc.Sprite != "") + btoi(!sc.View.IsZero()) + btoi(sc.List != ""); n > 1 {
+			errs = append(errs, fmt.Errorf("channel %s: scene %q: give a sprite, a view or a list, not more than one", c.Name, sc.Name))
+		}
+		if !sc.View.IsZero() {
+			if err := sc.View.Validate(); err != nil {
+				errs = append(errs, fmt.Errorf("channel %s: scene %q: %w", c.Name, sc.Name, err))
+			}
+		}
 	}
 	return errs
 }
@@ -271,4 +338,11 @@ func (w Window) ActiveAt(t time.Time) bool {
 		return w.Days.Has(t.Weekday())
 	}
 	return now < w.To && w.Days.Has(t.AddDate(0, 0, -1).Weekday())
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

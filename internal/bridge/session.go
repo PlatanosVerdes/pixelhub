@@ -288,8 +288,15 @@ func (l *link) hold() error {
 			if ev.lost {
 				return errLinkLost
 			}
+			if ev.battery > 0 || ev.light > 0 || ev.sound {
+				l.sensed(ev)
+				continue
+			}
 			l.acked()
 			unanswered = nil
+			if v, ok := divoom.ParseState(ev.frame); ok {
+				l.reported(v)
+			}
 			if divoom.IsGreeting(ev.frame) {
 				l.painted, l.shown = 0, display.Content{}
 			}
@@ -315,6 +322,10 @@ func (l *link) next(deadline time.Time) (event, error) {
 			if ev.err != nil {
 				return event{}, fmt.Errorf("read bridge: %w", ev.err)
 			}
+			if ev.battery > 0 || ev.light > 0 || ev.sound {
+				l.sensed(ev)
+				continue
+			}
 			if !ev.lost {
 				l.acked()
 			}
@@ -331,8 +342,11 @@ func (l *link) repaint() error {
 	l.painted = version
 	msgs := [][]byte{divoom.Brightness(content.Brightness)}
 	var err error
-	if content.Kind != display.Picture || !content.SamePicture(l.shown) {
+	// Native modes are sent again to keep the clock right, but a tool sent again would restart.
+	resend := content.Kind != display.Picture && !content.View.Mode.Tool()
+	if resend || !content.SamePicture(l.shown) {
 		msgs, err = divoom.Encode(content)
+		msgs = append(divoom.Leave(l.shown, content), msgs...)
 	}
 	l.shown = content
 	if err != nil {
@@ -424,6 +438,38 @@ func (s *Session) isReleased() bool {
 func (s *Session) setConnected(up bool) {
 	s.mu.Lock()
 	s.status.Connected = up
+	if !up {
+		s.status.Device = nil
+	}
+	s.mu.Unlock()
+}
+
+func (s *Session) sensed(ev event) {
+	if ev.battery > 0 {
+		s.batteryReported(ev.battery - 1)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ev.light > 0 {
+		light := ev.light - 1
+		s.status.Light, s.status.LightAt = &light, time.Now()
+	}
+	if ev.sound {
+		s.status.SoundAt = time.Now()
+	}
+}
+
+func (s *Session) batteryReported(level int) {
+	s.mu.Lock()
+	s.status.Battery, s.status.BatteryAt = &level, time.Now()
+	s.mu.Unlock()
+	s.log.Info("battery reported", "level", level)
+}
+
+func (s *Session) reported(v display.View) {
+	s.mu.Lock()
+	s.status.Device = &v
 	s.mu.Unlock()
 }
 

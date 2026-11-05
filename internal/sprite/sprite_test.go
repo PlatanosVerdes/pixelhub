@@ -25,11 +25,11 @@ func TestBuiltins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"alert", "check", "coffee", "heart", "heartbeat", "lunch", "moon", "sun", "sunrise", "zzz"}
+	want := []string{"alert", "battery-full", "battery-low", "check", "coffee", "heart", "heartbeat", "lunch", "moon", "sun", "sunrise", "zzz"}
 	if got := lib.Names(); !slices.Equal(got, want) {
 		t.Errorf("names %v, want %v", got, want)
 	}
-	frames := map[string]int{"heartbeat": 2, "zzz": 3, "moon": 1}
+	frames := map[string]int{"heartbeat": 2, "zzz": 3, "moon": 1, "battery-low": 2}
 	for name, n := range frames {
 		c, _ := lib.Get(name)
 		if len(c.Frames) != n {
@@ -302,5 +302,25 @@ func writePNG(t *testing.T, path string, size int, c color.NRGBA) {
 	defer f.Close()
 	if err := png.Encode(f, img); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSleepyClock(t *testing.T) {
+	t.Parallel()
+	c := SleepyClock(time.Date(2026, 1, 1, 3, 47, 0, 0, time.UTC), color.RGBA{255, 0, 0, 255})
+	img := c.Frames[0].Image
+	lit := 0
+	for y := range 16 {
+		for x := range 16 {
+			if _, _, _, a := img.At(x, y).RGBA(); a > 0 {
+				if r, _, _, _ := img.At(x, y).RGBA(); r > 0 {
+					lit++
+				}
+			}
+		}
+	}
+	// 0, 3, 4 and 7 in the 3x5 font light 12+10+9+7 pixels, plus 17 for the zz
+	if c.Key != "03:47" || lit != 55 {
+		t.Errorf("key %s, %d lit pixels", c.Key, lit)
 	}
 }

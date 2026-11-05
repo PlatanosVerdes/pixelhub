@@ -17,11 +17,16 @@ import (
 	"github.com/PlatanosVerdes/pixelhub/internal/bridge"
 	"github.com/PlatanosVerdes/pixelhub/internal/config"
 	"github.com/PlatanosVerdes/pixelhub/internal/demo"
+	"github.com/PlatanosVerdes/pixelhub/internal/display"
 	"github.com/PlatanosVerdes/pixelhub/internal/divoom"
+	"github.com/PlatanosVerdes/pixelhub/internal/gallery"
 	"github.com/PlatanosVerdes/pixelhub/internal/hub"
+	"github.com/PlatanosVerdes/pixelhub/internal/lists"
 	"github.com/PlatanosVerdes/pixelhub/internal/server"
+	"github.com/PlatanosVerdes/pixelhub/internal/spotify"
 	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
+	"github.com/PlatanosVerdes/pixelhub/internal/weather"
 )
 
 var buildVersion = "local"
@@ -81,12 +86,31 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 	session := bridge.New(bridge.DefaultOptions(cfg.Bridge, cfg.DeviceMAC, cfg.Channel), log)
 	pictures := sprite.Ambient{Dir: filepath.Join(cfg.DataDir, "ambient"), Size: divoom.Size}
 	h := hub.New(session, st, store, sprites, pictures, log)
+	music, err := spotify.Open(filepath.Join(cfg.DataDir, "spotify.json"), log)
+	if err != nil {
+		return err
+	}
+	h.Music = music
+	station := weather.New(func() weather.Place {
+		l := h.State().Location
+		return weather.Place{Latitude: l.Latitude, Longitude: l.Longitude}
+	}, log)
+	h.Weather = station
+	kept, err := lists.Open(filepath.Join(cfg.DataDir, "lists"))
+	if err != nil {
+		return err
+	}
+	h.Lists = hub.ListFunc(func(list string, turn int) (display.Content, bool, error) { return kept.Pick(list, turn, divoom.Size) })
 	go session.Run(ctx)
 	go h.Run(ctx)
+	go music.Run(ctx)
+	go station.Run(ctx)
 
+	api := &server.Server{Hub: h, Sprites: sprites, Spotify: music, Weather: station, Gallery: gallery.NewClient(), Lists: kept, IndexPath: filepath.Join(cfg.DataDir, "gallery-index.json"), Size: divoom.Size, Version: buildVersion}
+	go api.WarmGallery(ctx)
 	srv := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),
-		Handler:           (&server.Server{Hub: h, Sprites: sprites, Size: divoom.Size, Version: buildVersion}).Handler(),
+		Handler:           api.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,

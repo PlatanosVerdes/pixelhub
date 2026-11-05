@@ -2,6 +2,7 @@ package hub
 
 import (
 	"errors"
+	"fmt"
 	"image"
 	"io"
 	"log/slog"
@@ -19,6 +20,7 @@ type fakeDisplay struct {
 	mu       sync.Mutex
 	shown    []display.Content
 	released bool
+	battery  *int
 }
 
 func (d *fakeDisplay) Show(c display.Content) {
@@ -26,9 +28,13 @@ func (d *fakeDisplay) Show(c display.Content) {
 	defer d.mu.Unlock()
 	d.shown = append(d.shown, c)
 }
-func (d *fakeDisplay) Release()               { d.released = true }
-func (d *fakeDisplay) Claim()                 { d.released = false }
-func (d *fakeDisplay) Status() display.Status { return display.Status{} }
+func (d *fakeDisplay) Release() { d.released = true }
+func (d *fakeDisplay) Claim()   { d.released = false }
+func (d *fakeDisplay) Status() display.Status {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return display.Status{Battery: d.battery}
+}
 
 type sprites map[string]bool
 
@@ -115,7 +121,7 @@ func newHub(t *testing.T, stateJSON string, ambient ambientDir) (*Hub, *fakeDisp
 		}
 	}
 	d := &fakeDisplay{}
-	h := New(d, st, &memorySaver{}, sprites{"zzz": true, "lunch": true, "heart": true}, ambient, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := New(d, st, &memorySaver{}, sprites{"zzz": true, "lunch": true, "heart": true, "battery-full": true, "battery-low": true}, ambient, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	now := friday(12, 0)
 	h.now = func() time.Time { return now }
 	return h, d, &now
@@ -164,6 +170,99 @@ func TestLayers(t *testing.T) {
 				t.Errorf("display got %d contents, want 1", len(d.shown))
 			}
 		})
+	}
+}
+
+func TestModeLayer(t *testing.T) {
+	t.Parallel()
+	h, _, now := newHub(t, twoChannels, ambientDir{"a.gif"})
+	*now = time.Date(2026, 11, 7, 14, 0, 0, 0, madrid)
+	visualizer := display.View{Mode: display.ModeVisualizer, Style: 3}
+	if _, err := h.Update(func(s *state.State) error { s.Mode = visualizer; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	h.update()
+	if st := h.Status(); st.Layer != LayerMode || st.Showing != "visualizer 3" {
+		t.Errorf("mode over a scene: showing %s %s", st.Layer, st.Showing)
+	}
+	h.Notify(heart(""))
+	h.update()
+	if st := h.Status(); st.Layer != LayerAlert {
+		t.Errorf("alert over a mode: showing %s %s", st.Layer, st.Showing)
+	}
+	*now = now.Add(2 * time.Minute)
+	if _, err := h.Update(func(s *state.State) error { s.Mode = display.View{}; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	h.update()
+	if st := h.Status(); st.Layer != LayerScene || st.Showing != "lunch" {
+		t.Errorf("cleared mode: showing %s %s, want the lunch scene back", st.Layer, st.Showing)
+	}
+}
+
+type fakeMusic struct{ playing bool }
+
+func (m fakeMusic) Content() (display.Content, string, bool) {
+	return display.Content{Kind: display.Picture, Name: "♪ song"}, "Living room", m.playing
+}
+
+func TestMusicLayer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		music   state.Music
+		playing bool
+		mode    bool
+		layer   string
+		showing string
+	}{
+		{"cover over a scene", state.Music{Enabled: true}, true, false, LayerMusic, "♪ song"},
+		{"a view instead of the cover", state.Music{Enabled: true, View: display.View{Mode: display.ModeVisualizer, Style: 2}}, true, false, LayerMusic, "visualizer 2"},
+		{"nothing playing", state.Music{Enabled: true}, false, false, LayerScene, "lunch"},
+		{"switched off", state.Music{}, true, false, LayerScene, "lunch"},
+		{"a picked mode wins", state.Music{Enabled: true}, true, true, LayerMode, "animations"},
+		{"one of the picked devices", state.Music{Enabled: true, Devices: []string{"Living room"}}, true, false, LayerMusic, "♪ song"},
+		{"another device", state.Music{Enabled: true, Devices: []string{"Office"}}, true, false, LayerScene, "lunch"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h, _, now := newHub(t, twoChannels, nil)
+			*now = time.Date(2026, 11, 7, 14, 0, 0, 0, madrid)
+			h.Music = fakeMusic{tt.playing}
+			_, err := h.Update(func(s *state.State) error {
+				s.Music = tt.music
+				if tt.mode {
+					s.Mode = display.View{Mode: display.ModeAnimations}
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.update()
+			if st := h.Status(); st.Layer != tt.layer || st.Showing != tt.showing {
+				t.Errorf("showing %s %s, want %s %s", st.Layer, st.Showing, tt.layer, tt.showing)
+			}
+		})
+	}
+}
+
+func TestSceneWithAView(t *testing.T) {
+	t.Parallel()
+	h, _, now := newHub(t, oneChannel("1m", "1m"), nil)
+	*now = friday(21, 0)
+	_, err := h.Update(func(s *state.State) error {
+		s.Channels[0].Scenes = []state.Scene{{Name: "music", Window: state.Window{From: 20 * 60, To: 23 * 60},
+			View: display.View{Mode: display.ModeVisualizer, Style: 1}}}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.update()
+	if st := h.Status(); st.Layer != LayerScene || st.Showing != "visualizer 1" {
+		t.Errorf("showing %s %s, want the scene's visualizer", st.Layer, st.Showing)
 	}
 }
 
@@ -544,5 +643,203 @@ func TestPicturesNeedTheirChannel(t *testing.T) {
 	}
 	if _, err := h.ListPictures("gym"); !errors.Is(err, state.ErrNotFound) {
 		t.Errorf("list a missing channel: %v", err)
+	}
+}
+
+func TestClockLooksAsSet(t *testing.T) {
+	t.Parallel()
+	h, d, now := newHub(t, oneChannel("0s", "1m"), nil)
+	rain := display.Weather{Known: true, Celsius: 14, Sky: display.SkyRain}
+	h.Weather = fakeWeather{rain}
+	*now = friday(10, 0)
+	h.update()
+	last := func() display.Content { d.mu.Lock(); defer d.mu.Unlock(); return d.shown[len(d.shown)-1] }
+	if c := last(); c.Kind != display.Native || c.View.Color == "" || h.Status().Showing != "clock" {
+		t.Fatalf("the clock must carry its colour, not leave the display's own: %+v", c)
+	}
+	purple := display.View{Mode: display.ModeClock, Style: 3, Color: "#bf5af2"}
+	if _, err := h.Update(func(s *state.State) error { s.Clock = purple; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	h.update()
+	if c := last(); c.View != purple || c.Weather != rain {
+		t.Errorf("after changing the clock: %+v", c.View)
+	}
+}
+
+type fakeWeather struct{ w display.Weather }
+
+func (f fakeWeather) Current() display.Weather { return f.w }
+
+func TestIdleToolGivesTheScreenBack(t *testing.T) {
+	t.Parallel()
+	h, _, now := newHub(t, oneChannel("0s", "1m"), nil)
+	*now = friday(10, 0)
+	set := func(v display.View) {
+		if _, err := h.Update(func(s *state.State) error { s.Mode = v; return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set(display.View{Mode: display.ModeStopwatch})
+	h.update()
+	*now = now.Add(59 * time.Second)
+	h.update()
+	if h.State().Mode.IsZero() {
+		t.Fatal("cleared before a minute at zero")
+	}
+	*now = now.Add(2 * time.Second)
+	h.update()
+	if !h.State().Mode.IsZero() {
+		t.Error("a stopped stopwatch should give the screen back after a minute")
+	}
+
+	set(display.View{Mode: display.ModeCountdown, Seconds: 60})
+	*now = now.Add(time.Hour)
+	h.update()
+	if h.State().Mode.IsZero() {
+		t.Error("a paused countdown has time left and stays")
+	}
+
+	set(display.View{Mode: display.ModeCountdown, Seconds: 60, Running: true, Since: now.Unix()})
+	*now = now.Add(90 * time.Second)
+	h.update()
+	if h.State().Mode.IsZero() {
+		t.Error("30 s after the countdown ended is too soon")
+	}
+	*now = now.Add(31 * time.Second)
+	h.update()
+	if !h.State().Mode.IsZero() {
+		t.Error("a countdown a minute past its end should give the screen back")
+	}
+}
+
+func TestListsPlay(t *testing.T) {
+	t.Parallel()
+	h, _, now := newHub(t, oneChannel("1m", "1m"), nil)
+	h.Lists = ListFunc(func(list string, turn int) (display.Content, bool, error) {
+		return display.Content{Kind: display.Picture, Name: fmt.Sprintf("%s %d", list, turn), Key: fmt.Sprint(turn)}, list != "Empty", nil
+	})
+	*now = friday(10, 0)
+	if _, err := h.Update(func(s *state.State) error {
+		s.Channels[0].Ambient.List = "Cats"
+		s.Channels[0].Ambient.Clock = 0
+		s.Channels[0].Scenes = []state.Scene{{Name: "lunch", Window: state.Window{From: 14 * 60, To: 15 * 60}, List: "Food"}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.update()
+	if st := h.Status(); st.Layer != LayerAmbient || st.Showing != "Cats 0" {
+		t.Errorf("ambient with a list: %s %s", st.Layer, st.Showing)
+	}
+	*now = now.Add(61 * time.Second)
+	h.update()
+	if st := h.Status(); st.Showing != "Cats 1" {
+		t.Errorf("the next picture of the list: %s", st.Showing)
+	}
+	*now = friday(14, 30)
+	h.update()
+	if st := h.Status(); st.Layer != LayerScene || st.Showing != "Food 2" {
+		t.Errorf("a scene with a list plays it: %s %s", st.Layer, st.Showing)
+	}
+}
+
+func TestShowReplacesTheLastShown(t *testing.T) {
+	t.Parallel()
+	h, _, now := newHub(t, oneChannel("0s", "1m"), nil)
+	*now = friday(10, 0)
+	h.Show(display.Content{Kind: display.Picture, Name: "first"}, 30*time.Second)
+	h.update()
+	*now = now.Add(5 * time.Second)
+	h.Show(display.Content{Kind: display.Picture, Name: "second"}, 30*time.Second)
+	h.update()
+	if st := h.Status(); st.Showing != "second" {
+		t.Fatalf("the second picture should show at once, showing %s", st.Showing)
+	}
+	*now = now.Add(31 * time.Second)
+	h.update()
+	if st := h.Status(); st.Layer == LayerAlert {
+		t.Errorf("the first picture came back after the second: %s", st.Showing)
+	}
+}
+
+func TestBatteryAlerts(t *testing.T) {
+	t.Parallel()
+	h, d, now := newHub(t, oneChannel("0s", "1m"), nil)
+	*now = friday(10, 0)
+	report := func(level int) string {
+		d.mu.Lock()
+		d.battery = &level
+		d.mu.Unlock()
+		*now = now.Add(20 * time.Second)
+		h.update()
+		if st := h.Status(); st.Layer == LayerAlert {
+			return st.Showing
+		}
+		return ""
+	}
+	if got := report(9); got != "" {
+		t.Errorf("full when first seen is not news: %s", got)
+	}
+	if got := report(8); got != "" {
+		t.Errorf("draining: %s", got)
+	}
+	if got := report(9); got != "battery-full" {
+		t.Errorf("charged back to full: %q", got)
+	}
+	if got := report(1); got != "battery-low" {
+		t.Errorf("low: %q", got)
+	}
+	if got := report(1); got != "" {
+		t.Errorf("still low 20 s later shows again: %q", got)
+	}
+	*now = now.Add(time.Hour)
+	if got := report(0); got != "battery-low" {
+		t.Errorf("still low an hour later: %q", got)
+	}
+}
+
+func TestSensors(t *testing.T) {
+	t.Parallel()
+	h, _, now := newHub(t, oneChannel("0s", "1m"), nil)
+	*now = friday(13, 0)
+	if _, err := h.Update(func(s *state.State) error {
+		off := state.Level(0)
+		s.Channels[0].Scenes = []state.Scene{{Name: "night", Window: state.Window{From: 0, To: 7 * 60}, View: display.View{Mode: display.ModeClock}, Brightness: &off}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dim := 0
+	h.Sense(&dim, false)
+	h.update()
+	if b := h.Status().Brightness; b != h.State().Brightness.Night {
+		t.Errorf("a dark room: brightness %d, want the night level", b)
+	}
+	h.Sense(nil, true)
+	h.update()
+	if st := h.Status(); st.Layer == LayerAlert {
+		t.Errorf("a sound by day while the display is on wakes nothing: %s", st.Showing)
+	}
+
+	*now = now.Add(14 * time.Hour) // 03:00 the next day
+	h.update()
+	if st := h.Status(); st.Brightness != 0 {
+		t.Fatalf("the night scene keeps it off: %d", st.Brightness)
+	}
+	h.Sense(nil, true)
+	h.update()
+	if st := h.Status(); st.Showing != "sleepy clock" || st.Brightness != wakeLevel {
+		t.Errorf("a sound at night shows the dim clock: %s %d", st.Showing, st.Brightness)
+	}
+	*now = now.Add(11 * time.Second)
+	h.update()
+	if st := h.Status(); st.Brightness != 0 {
+		t.Errorf("back off after the wake: %s %d", st.Showing, st.Brightness)
+	}
+	h.Sense(nil, true)
+	h.update()
+	if st := h.Status(); st.Layer == LayerAlert {
+		t.Errorf("woken again within %s: %s", wakeEvery, st.Showing)
 	}
 }

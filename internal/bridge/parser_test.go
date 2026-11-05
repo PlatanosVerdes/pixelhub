@@ -59,3 +59,22 @@ func describe(ev event) string {
 		return hex.EncodeToString(ev.frame)
 	}
 }
+
+func TestParserBattery(t *testing.T) {
+	t.Parallel()
+	var p parser
+	got := p.feed([]byte{0x42})
+	got = append(got, p.feed([]byte{0x07, 0x42, 0x0c, 0x96})...)
+	if len(got) != 2 || got[0].battery != 8 || !got[1].lost {
+		t.Errorf("a battery level split over reads, a bad level skipped, then link down: %+v", got)
+	}
+}
+
+func TestParserSensors(t *testing.T) {
+	t.Parallel()
+	var p parser
+	got := p.feed([]byte{0x4c, 0x00, 0x53, 0x01, 0x4c, 0xff})
+	if len(got) != 3 || got[0].light != 1 || !got[1].sound || got[2].light != 256 {
+		t.Errorf("light 0, a sound, light 255: %+v", got)
+	}
+}

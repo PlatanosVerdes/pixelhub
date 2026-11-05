@@ -36,6 +36,35 @@ that lists nearby Bluetooth devices, to find the display's address. A display pa
 in the Divoom app needs the bridge's `bt_pin` setting, and a bridge on a weak WiFi signal may need a
 higher `wifi_power`.
 
+### A Linux machine as the bridge
+
+`pixelbridge`, built into the same image, speaks the same TCP protocol over the machine's own
+Bluetooth (an RFCOMM socket, no BlueZ D-Bus needed), so no ESP32 is needed while the display is in
+reach. Pair the display once with `bluetoothctl` (`pair` with the display's PIN, then `trust`), then
+run it on the host network and point pixelhub at it:
+
+```sh
+docker run --network host ghcr.io/platanosverdes/pixelhub pixelbridge -listen 172.17.0.1:7777
+PIXELHUB_BRIDGE=host.docker.internal:7777   # in pixelhub, with extra_hosts host.docker.internal:host-gateway
+```
+
+Bluetooth sockets only work in the host's network namespace, which is why the bridge runs apart
+from pixelhub. It needs no extra capabilities.
+
+### A Mac as the bridge
+
+`bridges/macos/pixelbridge.swift` speaks the same TCP protocol over the Mac's own Bluetooth, so no
+ESP32 is needed while the display is near the Mac. Pair the display in System Settings first, then:
+
+```sh
+cd bridges/macos && swiftc -O pixelbridge.swift -o pixelbridge && ./pixelbridge   # 127.0.0.1:7777
+PIXELHUB_BRIDGE=127.0.0.1:7777 PIXELHUB_DEVICE_MAC=01:12:23:45:56:67 go run ./cmd/pixelhub
+```
+
+A display that is also a headset shares its serial channel with Hands-Free, which macOS opens by
+itself; the bridge drops that link before opening the serial one, so the display cannot play the
+Mac's sound while the bridge holds it. It logs every frame it sends and receives.
+
 ## Running it
 
 ```sh
@@ -56,7 +85,7 @@ The environment only says where the hardware is; everything else is state, edite
 | `PIXELHUB_DEVICE_MAC` | required | The display's Bluetooth address |
 | `PIXELHUB_CHANNEL` | `1` | The display's RFCOMM channel |
 | `PIXELHUB_PORT` | `8000` | HTTP port |
-| `PIXELHUB_DATA_DIR` | `/data` | Holds `state.json`, `sprites/` and `ambient/` |
+| `PIXELHUB_DATA_DIR` | `/data` | Holds `state.json`, `spotify.json`, `lists/`, `gallery-index.json`, `sprites/` and `ambient/` |
 | `PIXELHUB_LOG_JSON` | | `1` logs JSON (set in the image) |
 | `TZ` | | Time zone for scenes, the schedule and the sun, e.g. `Europe/London` |
 
@@ -79,11 +108,29 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `DELETE /api/channel` | Back to the schedule |
 | `POST /api/release`, `POST /api/claim` | Let the phone app have the display, and take it back (it comes back by itself after `release_for`) |
 | `GET /api/state` | Everything that is saved |
-| `PUT /api/settings` | Any of `location`, `brightness`, `release_for`, `default_channel`; fields left out, nested ones too, stay as they are |
+| `PUT /api/settings` | Any of `location`, `brightness`, `release_for`, `default_channel`, `music`, `clock`; fields left out, nested ones too, stay as they are (`music` and `clock` are replaced whole) |
+| `GET /api/weather` | The weather the clock shows: `celsius`, `sky`, when it was read, and an `error` if the last read failed |
 | `GET /api/channels`, `POST /api/channels` | List, create |
 | `PUT /api/channels/{name}` | Replace; a different `name` renames it, its schedule slots, its pictures and an override on it. A missing `name` or `ambient` keeps the channel's own |
 | `DELETE /api/channels/{name}` | Delete with its schedule slots and pictures; not the default or the last one |
 | `PUT /api/schedule` | Replace the channel schedule |
+| `GET /api/modes` | How many styles each display mode has |
+| `PUT /api/mode` | Show one of the display's own modes until cleared: `{"mode": ...}` plus its options (below) |
+| `DELETE /api/mode` | Back to alerts, scenes and ambient |
+| `GET /api/gallery/categories` | Categories of the Divoom community gallery |
+| `GET /api/gallery?category=&sort=likes\|new&page=` | One page of 16x16 pictures and animations: `file`, `name`, `author`, `likes` |
+| `GET /api/gallery/search?q=&page=` | Words looked for at the start of the names, authors, tags and descriptions of the 16 most liked pages of every category (about 7,500 pictures), read one page every 3 s from the first search on, again every 6 h, and kept across restarts (the gallery has no search without signing in and answers 429 to bursts); `indexed`/`of` say how far it got |
+| `GET /api/gallery/gif?file=` | A gallery file as an animated GIF |
+| `POST /api/gallery/show` | `{"file", "name", "for"}`: show it now, like an alert that every profile accepts (30 s by default) |
+| `POST /api/gallery/save` | `{"file", "name", "channel"}`: keep it among a profile's ambient pictures |
+| `POST /api/lists/{name}/upload` | A GIF or PNG of your own into a list (multipart field `file`) |
+| `GET /api/lists`, `POST /api/lists` | Your lists of gallery pictures, and a new one (`{"name"}`); GIFs are kept in `/data/lists/`, so they stay if the gallery drops them |
+| `PUT /api/lists/{name}`, `DELETE /api/lists/{name}` | Rename (`{"name"}`), delete |
+| `POST /api/lists/{name}/items`, `DELETE /api/lists/{name}/items?file=` | Add a gallery picture (`{"file", "name", "author", "likes"}`), remove one |
+| `GET /api/spotify` | Whether a Spotify app and account are linked, and what plays now |
+| `PUT /api/spotify` | `{"client_id": ...}` of your Spotify app; a new one forgets the signed-in account |
+| `GET /api/spotify/login` | Sends the browser to Spotify to sign in; it comes back to `/api/spotify/callback` on the same host |
+| `DELETE /api/spotify` | Forget the signed-in account |
 | `GET /api/channels/{name}/pictures/{file}` | A picture's first frame, drawn 10x like a sprite |
 | `GET/POST /api/channels/{name}/pictures` | List, upload (multipart field `file`, GIF or PNG, up to 1 MB and 512x512; the name is cleaned up and must be new) |
 | `DELETE /api/channels/{name}/pictures/{file}` | Delete a picture |
@@ -106,10 +153,71 @@ curl -o now.png localhost:8000/api/preview.png
 Times are `HH:MM` (`24:00` ends a range at midnight); a range past midnight belongs to the day it
 starts on. Days are `mon-fri`, `sat,sun`, `daily`. Durations are Go durations like `90s` or `2m`. A
 scene's `brightness` is 0-100 or `"off"`; without it the sun decides, and a scene without a sprite
-shows the clock. An ambient `pictures` or `clock` of `0s` skips that part. An alert without a source
+shows the clock. An ambient `pictures` or `clock` of `0s` skips that part. An ambient or a scene
+with `"list"` shows the pictures of that list in turn instead (the web uses the default channel
+this way: its ambient list and its scenes are "In automatic" and "Schedule" on the Display tab). An alert without a source
 only shows on channels that accept `*`, and a channel with no sources is a quiet one; a dropped
 alert answers 200 with `"dropped": true`. A channel created without `ambient` alternates 2 minutes of
 pictures with 3 of the clock.
+
+### Battery
+
+A bridge that can read the display's battery sends `0x42` and the level, 0 (empty) to 9 (full).
+The display only reports it over hands-free, to a gateway that answers `AT+XAPL` as an iPhone; the
+macOS bridge cannot, an ESP32 bridge with hands-free can. pixelhub shows it in the status
+(`battery`, `battery_at`) and on the display: a full battery once when it gets there, a low one
+(1 or 0) at once and every hour while it stays low.
+
+### Room sensors
+
+A light sensor and a sound sensor, on the bridge (`0x4c` and the light 0-255, `0x53` and any byte
+for a sound) or anywhere else (`POST /api/sensors` with `{"light": 0-255, "sound": true}`), make
+the room count. While a light reading is under two minutes old, brightness goes from the night
+level in the dark to the day level in full light, instead of following the sun. A sound while a
+schedule exception keeps the display off shows the time with a "zz", at brightness 5 for 10 s, at
+most every 30 s.
+
+### Display modes
+
+The display's own modes, the ones its side button cycles through. A mode set with `PUT /api/mode`
+shows over scenes and ambient and is saved; alerts still show on top. A scene can show one too with
+`"view"` instead of `"sprite"`.
+
+| `mode` | Options |
+| :--- | :--- |
+| `clock` | `style` 0-5 (full screen, rainbow, boxed, analog round, negative, analog square), `weather`, `temperature`, `calendar`, `color` `#rrggbb` (replaces the red parts) |
+| `light` | `color`, `style` 0-4 (plain, love, plants, no mosquitoes, sleep) |
+| `visualizer` | `style` 0-11; it follows what the display plays as a speaker |
+| `animations` | none: plays the list kept on the display from the Divoom app, which pixelhub never writes |
+| `scoreboard` | `red`, `blue`, 0-999 |
+| `stopwatch` | `running` |
+| `countdown` | `seconds` 1-5999, `running` |
+| `noise` | `running`: the noise meter, with the display's microphone |
+
+A running stopwatch, countdown or noise meter is stopped when something else takes the screen.
+
+The clock pixelhub shows between pictures, and any clock without a `color`, takes its look from
+`"clock"` in `PUT /api/settings` (a `clock` view; red until set), so the look kept on the display
+from the Divoom app never shows through. With `weather` or `temperature` on, the clock gets the
+current weather for `location` from [Open-Meteo](https://open-meteo.com) every 15 minutes.
+
+```sh
+curl -X PUT localhost:8000/api/mode -d '{"mode":"clock","style":1,"calendar":true}'
+curl -X DELETE localhost:8000/api/mode
+```
+
+### Spotify
+
+pixelhub can follow what a Spotify account plays on any of its devices and show the album cover, or
+a display mode, while it plays (`"music": {"enabled": true, "view": {...}, "devices": [...]}` in `PUT /api/settings`;
+with `devices`, only what plays on those Spotify devices shows, so music played away from home does
+not reach the display at home; `GET /api/spotify` lists the devices seen).
+It sits under alerts and a picked mode, over scenes and ambient. Create an app at
+developer.spotify.com/dashboard with the Web API, add `<pixelhub URL>/api/spotify/callback` as a
+redirect URI (Spotify takes `http://127.0.0.1:<port>` but not `localhost`, and otherwise wants
+HTTPS), and paste its client ID in Settings. Sign-in uses PKCE, so no client secret is stored; the
+refresh token is kept in `/data/spotify.json` (mode 0600). Development-mode apps need a Premium
+account. Spotify no longer gives beat or tempo data to new apps.
 
 ## Sprites
 

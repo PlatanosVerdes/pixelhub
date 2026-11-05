@@ -96,6 +96,9 @@ func Decode(path string, size int) ([]display.Frame, error) {
 	return frames, nil
 }
 
+// DecodeBytes reads a GIF or PNG held in memory.
+func DecodeBytes(data []byte, size int) ([]display.Frame, error) { return decode(data, size) }
+
 // decode trusts the bytes, not the file name, to tell GIF from PNG.
 func decode(data []byte, size int) ([]display.Frame, error) {
 	var frames []display.Frame
@@ -239,6 +242,8 @@ func Render(c display.Content, size int) image.Image {
 	switch {
 	case c.Kind == display.Picture && len(c.Frames) > 0:
 		return c.Frames[0].Image
+	case c.Kind == display.Native:
+		return renderView(c.View, size)
 	case c.Kind == display.Color:
 		img := image.NewNRGBA(image.Rect(0, 0, size, size))
 		draw.Draw(img, img.Bounds(), image.NewUniform(c.Fill), image.Point{}, draw.Src)

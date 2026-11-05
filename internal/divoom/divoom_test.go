@@ -3,6 +3,7 @@ package divoom
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"image"
 	"image/color"
 	"os"
@@ -118,6 +119,54 @@ func TestMessage(t *testing.T) {
 	}
 }
 
+// The view messages are the ones the Evo acknowledged with 04 45 55 <view> on 2026-11-05.
+func TestView(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 11, 4, 14, 56, 7, 0, time.UTC)
+	now = func() time.Time { return at }
+	t.Cleanup(func() { now = time.Now })
+	tests := []struct {
+		name string
+		view display.View
+		want []string
+	}{
+		{"clock with options and colour", display.View{Mode: display.ModeClock, Style: 1, Weather: true, Calendar: true, Color: "#FF8000"},
+			[]string{hex.EncodeToString(TimeFormat24()), hex.EncodeToString(DateTime(at)), "010d004500010101010001ff8000d60102"}},
+		{"plain clock style", display.View{Mode: display.ModeClock, Style: 2},
+			[]string{hex.EncodeToString(TimeFormat24()), hex.EncodeToString(DateTime(at)), "010a004500010201000000530002"}},
+		{"light effect", display.View{Mode: display.ModeLight, Style: 1, Color: "#ff0000"}, []string{"010d004501ff0000500101000000a40102"}},
+		{"visualizer", display.View{Mode: display.ModeVisualizer, Style: 3}, []string{"010500450403510002"}},
+		{"animations", display.View{Mode: display.ModeAnimations}, []string{"01040045054e0002"}},
+		{"scoreboard", display.View{Mode: display.ModeScoreboard, Red: 12, Blue: 7}, []string{"0109004506000c000700670002"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			for _, m := range View(tt.view, 80) {
+				got = append(got, hex.EncodeToString(m))
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEncodeRejectsAnInvalidView(t *testing.T) {
+	t.Parallel()
+	for _, v := range []display.View{
+		{Mode: "vj"},
+		{Mode: display.ModeVisualizer, Style: 12},
+		{Mode: display.ModeScoreboard, Red: 1000},
+		{Mode: display.ModeLight, Color: "red"},
+		{Mode: display.ModeAnimations, Weather: true},
+	} {
+		if _, err := Encode(v.Content()); err == nil {
+			t.Errorf("%+v: want an error", v)
+		}
+	}
+}
+
 func TestPaletteFollowsFirstSeenOrder(t *testing.T) {
 	t.Parallel()
 	img := image.NewNRGBA(image.Rect(0, 0, 3, 2))
@@ -230,6 +279,8 @@ func TestEncode(t *testing.T) {
 		{"color", display.ColorContent(color.RGBA{R: 9}), []byte{cmdView, cmdBrightness}},
 		{"still", display.Content{Kind: display.Picture, Frames: []display.Frame{still}}, []byte{cmdImage, cmdBrightness}},
 		{"animation", display.Content{Kind: display.Picture, Frames: []display.Frame{still, still}}, []byte{cmdAnimation, cmdBrightness}},
+		{"native clock", display.View{Mode: display.ModeClock}.Content(), []byte{cmdTimeFormat, cmdDateTime, cmdView, cmdBrightness}},
+		{"native visualizer", display.View{Mode: display.ModeVisualizer}.Content(), []byte{cmdView, cmdBrightness}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -274,5 +325,81 @@ func TestAck(t *testing.T) {
 				t.Errorf("Ack = %x %v, greeting %v", cmd, ok, IsGreeting(tt.frame))
 			}
 		})
+	}
+}
+
+func TestParseState(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ frame, want string }{
+		{"000000ff3b30500001005001bf5af200010000005500", "clock 0 #bf5af2"},
+		{"000000ff3b3050000103500111223302010000005500", "clock 2 #112233"},
+		{"01000044556650010100500111223302010000005500", "light 1 #445566"},
+		{"04000044556650010103500111223302010000005500", "visualizer 3 "},
+	} {
+		payload, _ := hex.DecodeString(tc.frame)
+		frame := append([]byte{0x01, 0x1b, 0x00, 0x04, 0x46, 0x55}, append(payload, 0x00, 0x00, 0x02)...)
+		v, ok := ParseState(frame)
+		if got := fmt.Sprintf("%s %d %s", v.Mode, v.Style, v.Color); !ok || got != tc.want {
+			t.Errorf("%s: %q %v, want %q", tc.frame, got, ok, tc.want)
+		}
+	}
+	if _, ok := ParseState(Brightness(50)); ok {
+		t.Error("a command is not a state report")
+	}
+}
+
+func TestTools(t *testing.T) {
+	t.Parallel()
+	countdown := display.View{Mode: display.ModeCountdown, Seconds: 90, Running: true}
+	for _, tc := range []struct {
+		v    display.View
+		want string
+	}{
+		{display.View{Mode: display.ModeStopwatch, Running: true}, "720001"},
+		{display.View{Mode: display.ModeStopwatch, Seconds: 12}, "720000"},
+		{display.View{Mode: display.ModeStopwatch}, "720002"},
+		{display.View{Mode: display.ModeNoise, Running: true}, "720201"},
+		{display.View{Mode: display.ModeNoise}, "720202"},
+		{countdown, "720301011e"},
+	} {
+		got := View(tc.v, 50)
+		if len(got) != 1 || !bytes.Equal(got[0], Message(got[0][3], mustHex(t, tc.want)[1:])) || got[0][3] != mustHex(t, tc.want)[0] {
+			t.Errorf("%s: %x, want payload %s", tc.v, got, tc.want)
+		}
+	}
+	clock := display.View{Mode: display.ModeClock, Color: "#ffffff"}.Content()
+	if stop := Leave(countdown.Content(), clock); len(stop) != 1 || !bytes.Equal(stop[0], Message(cmdTool, []byte{toolCountdown, 0, 1, 30})) {
+		t.Errorf("leaving a running countdown: %x", stop)
+	}
+	if stop := Leave(countdown.Content(), countdown.Content()); stop != nil {
+		t.Errorf("staying on the countdown sent %x", stop)
+	}
+	clock.Weather = display.Weather{Known: true, Celsius: -3, Sky: display.SkySnow}
+	msgs, err := Encode(clock)
+	if err != nil || !bytes.Equal(msgs[0], Message(cmdWeather, []byte{0xfd, 0x08})) {
+		t.Errorf("a clock with weather starts with it: %x %v", msgs, err)
+	}
+}
+
+func mustHex(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestCountdownResumes(t *testing.T) {
+	at := time.Unix(1_800_000_000, 0)
+	now = func() time.Time { return at }
+	defer func() { now = time.Now }()
+	v := display.View{Mode: display.ModeCountdown, Seconds: 300, Running: true, Since: at.Unix() - 70}
+	if got := View(v, 50)[0]; !bytes.Equal(got, Message(cmdTool, []byte{toolCountdown, 1, 3, 50})) {
+		t.Errorf("70 s into 5 minutes: %x, want 3:50 left", got)
+	}
+	v.Since = at.Unix() - 600
+	if got := View(v, 50)[0]; !bytes.Equal(got, Message(cmdTool, []byte{toolCountdown, 1, 0, 0})) {
+		t.Errorf("an ended countdown: %x", got)
 	}
 }

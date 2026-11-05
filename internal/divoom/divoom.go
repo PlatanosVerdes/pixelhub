@@ -3,6 +3,7 @@ package divoom
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"math/bits"
@@ -25,8 +26,17 @@ const (
 	cmdView       = 0x45
 	cmdAnimation  = 0x49
 	cmdBrightness = 0x74
+	cmdWeather    = 0x5f
+	cmdTool       = 0x72
+
+	viewClock      = 0x00
+	viewLight      = 0x01
+	viewVisualizer = 0x04
+	viewAnimations = 0x05
+	viewScoreboard = 0x06
 
 	respOK       = 0x55
+	respState    = 0x46
 	respGreeting = 0xbd
 
 	chunkSize    = 200
@@ -55,7 +65,96 @@ func Brightness(level int) []byte {
 }
 
 func Light(c color.RGBA, level int) []byte {
-	return Message(cmdView, []byte{0x01, c.R, c.G, c.B, byte(clamp(level)), 0x00, 0x01, 0x00, 0x00, 0x00})
+	return lightView(c, level, 0)
+}
+
+// lightView's effect is one of the display's light effects; 0 is a plain colour.
+func lightView(c color.RGBA, level, effect int) []byte {
+	return Message(cmdView, []byte{viewLight, c.R, c.G, c.B, byte(clamp(level)), byte(effect), 0x01, 0x00, 0x00, 0x00})
+}
+
+func clockView(v display.View) []byte {
+	payload := []byte{viewClock, 0x01, byte(v.Style), 0x01, flag(v.Weather), flag(v.Temperature), flag(v.Calendar)}
+	if v.Color != "" {
+		c := v.RGB()
+		payload = append(payload, c.R, c.G, c.B)
+	}
+	return Message(cmdView, payload)
+}
+
+func scoreboardView(red, blue int) []byte {
+	payload := binary.LittleEndian.AppendUint16([]byte{viewScoreboard, 0x00}, uint16(red))
+	return Message(cmdView, binary.LittleEndian.AppendUint16(payload, uint16(blue)))
+}
+
+// View paints one of the display's own modes.
+func View(v display.View, level int) [][]byte {
+	switch v.Mode {
+	case display.ModeClock:
+		return [][]byte{TimeFormat24(), DateTime(now()), clockView(v)}
+	case display.ModeLight:
+		return [][]byte{lightView(v.RGB(), level, v.Style)}
+	case display.ModeVisualizer:
+		return [][]byte{Message(cmdView, []byte{viewVisualizer, byte(v.Style)})}
+	case display.ModeAnimations:
+		return [][]byte{Message(cmdView, []byte{viewAnimations})}
+	case display.ModeScoreboard:
+		return [][]byte{scoreboardView(v.Red, v.Blue)}
+	case display.ModeStopwatch, display.ModeCountdown, display.ModeNoise:
+		return [][]byte{tool(v)}
+	}
+	return nil
+}
+
+const (
+	toolStopwatch = 0x00
+	toolNoise     = 0x02
+	toolCountdown = 0x03
+)
+
+func tool(v display.View) []byte {
+	switch v.Mode {
+	case display.ModeStopwatch:
+		// 1 runs, 0 pauses, 2 puts it back to zero.
+		state := flag(v.Running)
+		if !v.Running && v.Seconds == 0 {
+			state = 2
+		}
+		return Message(cmdTool, []byte{toolStopwatch, state})
+	case display.ModeNoise:
+		// The noise meter takes 1 to start and 2 to stop.
+		return Message(cmdTool, []byte{toolNoise, 2 - flag(v.Running)})
+	}
+	left := v.Seconds
+	if v.Running && v.Since != 0 {
+		left = max(0, v.Seconds-int(now().Unix()-v.Since))
+	}
+	return Message(cmdTool, []byte{toolCountdown, flag(v.Running), byte(left / 60), byte(left % 60)})
+}
+
+// Leave stops a running tool that next no longer shows, so it does not keep going out of sight.
+func Leave(prev, next display.Content) [][]byte {
+	if prev.Kind != display.Native || !prev.View.Mode.Tool() || !prev.View.Running {
+		return nil
+	}
+	if next.Kind == display.Native && next.View.Mode == prev.View.Mode {
+		return nil
+	}
+	stopped := prev.View
+	stopped.Running = false
+	return [][]byte{tool(stopped)}
+}
+
+// Weather sets what the clock shows as weather and temperature.
+func Weather(w display.Weather) []byte {
+	return Message(cmdWeather, []byte{byte(int8(max(-127, min(127, w.Celsius)))), byte(w.Sky)})
+}
+
+func flag(b bool) byte {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // DateTime sets the display's own clock, which otherwise keeps whatever the phone app last told it.
@@ -84,6 +183,15 @@ func Encode(c display.Content) ([][]byte, error) {
 	switch {
 	case c.Kind == display.Clock:
 		return [][]byte{TimeFormat24(), DateTime(now()), Clock(), brightness}, nil
+	case c.Kind == display.Native:
+		if err := c.View.Validate(); err != nil {
+			return nil, err
+		}
+		msgs := View(c.View, c.Brightness)
+		if c.View.Mode == display.ModeClock && c.Weather.Known {
+			msgs = append([][]byte{Weather(c.Weather)}, msgs...)
+		}
+		return append(msgs, brightness), nil
 	case c.Kind == display.Color:
 		return [][]byte{Light(c.Fill, c.Brightness), brightness}, nil
 	case len(c.Frames) == 0:
@@ -221,4 +329,28 @@ func FrameLen(buf []byte) int {
 		return 0
 	}
 	return int(binary.LittleEndian.Uint16(buf[1:3])) + 4
+}
+
+// ParseState reads what the display reports it is showing: one of its own modes with the
+// settings it keeps for it. Pictures sent to it report as the clock, so ok is false for them.
+func ParseState(frame []byte) (display.View, bool) {
+	cmd, ok := Ack(frame)
+	if !ok || cmd != respState || len(frame) < 6+16 {
+		return display.View{}, false
+	}
+	p := frame[6:]
+	hex := func(b []byte) string { return fmt.Sprintf("#%02x%02x%02x", b[0], b[1], b[2]) }
+	switch p[0] {
+	case viewClock:
+		return display.View{Mode: display.ModeClock, Style: int(p[15]), Color: hex(p[12:15])}, true
+	case viewLight:
+		return display.View{Mode: display.ModeLight, Style: int(p[7]), Color: hex(p[3:6])}, true
+	case viewVisualizer:
+		return display.View{Mode: display.ModeVisualizer, Style: int(p[9])}, true
+	case viewAnimations:
+		return display.View{Mode: display.ModeAnimations}, true
+	case viewScoreboard:
+		return display.View{Mode: display.ModeScoreboard}, true
+	}
+	return display.View{}, false
 }

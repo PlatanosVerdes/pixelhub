@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -14,12 +15,15 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
+	"github.com/PlatanosVerdes/pixelhub/internal/gallery"
 	"github.com/PlatanosVerdes/pixelhub/internal/hub"
+	"github.com/PlatanosVerdes/pixelhub/internal/lists"
 	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
 )
@@ -147,6 +151,24 @@ func TestEndpoints(t *testing.T) {
 		{"PUT", "/api/schedule", `[{"channel":"evening","days":"sat,sun","from":"10:00","to":"12:00"}]`, 200, `"days":"sat,sun"`},
 		{"PUT", "/api/schedule", `[{"channel":"gym","from":"10:00","to":"12:00"}]`, 400, "schedule[0]"},
 		{"PUT", "/api/schedule", `[{"channel":"evening","from":"25:00","to":"12:00"}]`, 400, "not a time"},
+		{"GET", "/api/modes", "", 200, `"visualizer":12`},
+		{"PUT", "/api/mode", `{"mode":"visualizer","style":4}`, 200, `"mode":{"mode":"visualizer","style":4}`},
+		{"PUT", "/api/mode", `{"mode":"clock","style":1,"weather":true,"color":"#00ff00"}`, 200, `"color":"#00ff00"`},
+		{"PUT", "/api/mode", `{"mode":"scoreboard","red":3,"blue":5}`, 200, `"red":3`},
+		{"PUT", "/api/mode", `{"mode":"countdown","seconds":90,"running":true}`, 200, `"since":`},
+		{"PUT", "/api/mode", `{"mode":"countdown","seconds":0}`, 400, "1-5999"},
+		{"POST", "/api/weather/show?what=temperature", "", 202, `"showing":"temperature"`},
+		{"POST", "/api/weather/show?what=rain", "", 400, "want weather or temperature"},
+		{"POST", "/api/sensors", `{"light":300}`, 400, "0-255"},
+		{"POST", "/api/sensors", `{"light":40,"sound":true}`, 204, ""},
+		{"PUT", "/api/mode", `{"mode":"vj","style":1}`, 400, "mode"},
+		{"PUT", "/api/mode", `{"mode":"visualizer","style":12}`, 400, "outside 0-11"},
+		{"PUT", "/api/mode", `{"mode":"light","color":"red"}`, 400, "#rrggbb"},
+		{"PUT", "/api/mode", `{"mode":"animations","list":1}`, 400, "unknown field"},
+		{"DELETE", "/api/mode", "", 200, `"default_channel"`},
+		{"PUT", "/api/settings", `{"music":{"enabled":true}}`, 200, `"music":{"enabled":true}`},
+		{"PUT", "/api/settings", `{"music":{"enabled":true,"view":{"mode":"visualizer","style":40}}}`, 400, "music.view"},
+		{"GET", "/api/spotify", "", 404, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.method+" "+tt.path+" "+tt.body, func(t *testing.T) {
@@ -156,6 +178,38 @@ func TestEndpoints(t *testing.T) {
 				t.Errorf("code %d body %s, want %d with %s", rec.Code, rec.Body, tt.code, tt.contains)
 			}
 		})
+	}
+}
+
+func TestMusicSettingsReplaceTheView(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.do(t, "PUT", "/api/settings", `{"music":{"enabled":true,"view":{"mode":"visualizer"}}}`)
+	rec := f.do(t, "PUT", "/api/settings", `{"music":{"enabled":true}}`)
+	if strings.Contains(rec.Body.String(), "visualizer") {
+		t.Errorf("going back to the cover kept the view: %s", rec.Body)
+	}
+}
+
+func TestCallbackURL(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		host, proto, want string
+	}{
+		{"localhost:8765", "", "http://127.0.0.1:8765/api/spotify/callback"},
+		{"127.0.0.1:8765", "", "http://127.0.0.1:8765/api/spotify/callback"},
+		{"pixelhub.example.com", "https", "https://pixelhub.example.com/api/spotify/callback"},
+		{"pixelhub.pi", "", "http://pixelhub.pi/api/spotify/callback"},
+	}
+	for _, tt := range tests {
+		r := httptest.NewRequest("GET", "/api/spotify/login", nil)
+		r.Host = tt.host
+		if tt.proto != "" {
+			r.Header.Set("X-Forwarded-Proto", tt.proto)
+		}
+		if got := callbackURL(r); got != tt.want {
+			t.Errorf("%s %s: %s, want %s", tt.proto, tt.host, got, tt.want)
+		}
 	}
 }
 
@@ -412,5 +466,155 @@ func TestPicturePNG(t *testing.T) {
 		if rec := f.do(t, "GET", path, ""); rec.Code < 400 {
 			t.Errorf("GET %s: code %d, want an error", path, rec.Code)
 		}
+	}
+}
+
+type fakeGallery struct{}
+
+func (fakeGallery) List(_ context.Context, category int, _ gallery.Sort, page, _ int) ([]gallery.Item, error) {
+	if page > 1 {
+		return nil, nil
+	}
+	return []gallery.Item{{Name: "cat", Author: "someone", Likes: 3, FileID: "group1/M00/aa", About: "a sleepy kitten", Class: 32},
+		{Name: "Corazón", Tags: []string{"love"}, Likes: 9, FileID: fmt.Sprintf("group1/M00/heart-%d", category)},
+		{Name: "Super Mario Bros", Likes: 1, FileID: "group1/M00/mario"}}, nil
+}
+
+func (fakeGallery) Download(_ context.Context, file string) ([]byte, error) {
+	if file == "group1/M00/aa" {
+		return []byte("not a gallery file"), nil
+	}
+	frame := image.NewRGBA(image.Rect(0, 0, 16, 16))
+	return gallery.Encode([]*image.RGBA{frame}, 100*time.Millisecond), nil
+}
+
+func TestLists(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	kept, err := lists.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := (&Server{Hub: f.hub, Gallery: fakeGallery{}, Lists: kept, Size: 16}).Handler()
+	tests := []struct {
+		method, path, body string
+		code               int
+		contains           string
+	}{
+		{"POST", "/api/lists", `{"name":"Games"}`, 201, `"name":"Games"`},
+		{"POST", "/api/lists", `{"name":"games"}`, 409, "already"},
+		{"POST", "/api/lists", `{"name":" "}`, 400, "1 to 40"},
+		{"POST", "/api/lists/Games/items", `{"file":"group1/M00/mario","name":"Mario","likes":4}`, 201, `"name":"Mario"`},
+		{"POST", "/api/lists/Games/items", `{"file":"group1/M00/aa","name":"broken"}`, 422, "not a 16x16"},
+		{"POST", "/api/lists/Nope/items", `{"file":"group1/M00/mario"}`, 404, "no list"},
+		{"GET", "/api/gallery/gif?file=group1/M00/mario", "", 200, "GIF"},
+		{"PUT", "/api/lists/Games", `{"name":"Retro games"}`, 200, `"name":"Retro games"`},
+		{"DELETE", "/api/lists/Retro%20games/items?file=group1/M00/mario", "", 200, `"items":[]`},
+		{"DELETE", "/api/lists/Retro%20games/items?file=group1/M00/mario", "", 404, "not in"},
+		{"DELETE", "/api/lists/Retro%20games", "", 200, `"lists":[]`},
+	}
+	for _, tt := range tests {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body)))
+		if rec.Code != tt.code || !strings.Contains(rec.Body.String(), tt.contains) {
+			t.Errorf("%s %s %s: %d %s, want %d with %s", tt.method, tt.path, tt.body, rec.Code, rec.Body, tt.code, tt.contains)
+		}
+	}
+}
+
+func TestGallery(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	srv := (&Server{Hub: f.hub, Sprites: nil, Gallery: fakeGallery{}, Size: 16, GalleryPace: time.Microsecond}).Handler()
+	search := func(q string) string {
+		for range 200 {
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, httptest.NewRequest("GET", "/api/gallery/search?q="+q, nil))
+			if strings.Contains(rec.Body.String(), `"indexed":256,`) {
+				return rec.Body.String()
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest("GET", "/api/gallery/search?q=x", nil))
+		t.Fatalf("the gallery index never finished: %s", rec.Body)
+		return ""
+	}
+	for q, want := range map[string]string{"corazon": `"name":"Corazón"`, "LOVE": `"name":"Corazón"`, "cat+someone": `"name":"cat"`, "dog": `"items":[]`, "ove": `"items":[]`, "mariobros": `"name":"Super Mario Bros"`, "bros": `"name":"Super Mario Bros"`, "kitten": `"category":"animal"`} {
+		if got := search(q); !strings.Contains(got, want) {
+			t.Errorf("search %s: %s, want %s", q, got, want)
+		}
+	}
+	tests := []struct {
+		path     string
+		code     int
+		contains string
+	}{
+		{"/api/gallery/categories", 200, `"recommended"`},
+		{"/api/gallery?category=animal", 200, `"file":"group1/M00/aa"`},
+		{"/api/gallery?category=animal&page=2", 200, `"more":false`},
+		{"/api/gallery?category=cars", 400, "category"},
+		{"/api/gallery?category=animal&page=0", 400, "page"},
+		{"/api/gallery/gif?file=group1/M00/aa", 422, "not a 16x16"},
+		{"/api/gallery/search?q=", 400, "q:"},
+	}
+	for _, tt := range tests {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest("GET", tt.path, nil))
+		if rec.Code != tt.code || !strings.Contains(rec.Body.String(), tt.contains) {
+			t.Errorf("%s: code %d body %s, want %d with %s", tt.path, rec.Code, rec.Body, tt.code, tt.contains)
+		}
+	}
+}
+
+func TestListUploadAndReferences(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	kept, _ := lists.Open(t.TempDir())
+	srv := (&Server{Hub: f.hub, Gallery: fakeGallery{}, Lists: kept, Size: 16}).Handler()
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
+		return rec
+	}
+	do("POST", "/api/lists", `{"name":"Mine"}`)
+
+	var form bytes.Buffer
+	mw := multipart.NewWriter(&form)
+	part, _ := mw.CreateFormFile("file", "dot.png")
+	_ = png.Encode(part, image.NewRGBA(image.Rect(0, 0, 16, 16)))
+	mw.Close()
+	req := httptest.NewRequest("POST", "/api/lists/Mine/upload", &form)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"name":"dot"`) {
+		t.Fatalf("upload: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do("POST", "/api/lists/Mine/upload", ""); rec.Code != http.StatusBadRequest {
+		t.Errorf("an upload without a file: %d", rec.Code)
+	}
+
+	name := f.hub.State().DefaultChannel
+	if _, err := f.hub.Update(func(st *state.State) error {
+		for i := range st.Channels {
+			if st.Channels[i].Name == name {
+				st.Channels[i].Ambient.List = "Mine"
+				st.Channels[i].Scenes = append(st.Channels[i].Scenes, state.Scene{Name: "late", Window: state.Window{From: 60, To: 120}, List: "mine"})
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	do("PUT", "/api/lists/Mine", `{"name":"Ours"}`)
+	c, _ := f.hub.State().Channel(name)
+	if c.Ambient.List != "Ours" || c.Scenes[len(c.Scenes)-1].List != "Ours" {
+		t.Errorf("a renamed list is followed: %+v", c)
+	}
+	do("DELETE", "/api/lists/Ours", "")
+	c, _ = f.hub.State().Channel(name)
+	if c.Ambient.List != "" || slices.ContainsFunc(c.Scenes, func(s state.Scene) bool { return s.Name == "late" }) {
+		t.Errorf("a deleted list leaves nothing behind: %+v", c)
 	}
 }

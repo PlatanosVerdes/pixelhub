@@ -14,6 +14,7 @@ import (
 	"github.com/PlatanosVerdes/pixelhub/internal/hub"
 	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
+	"github.com/PlatanosVerdes/pixelhub/internal/weather"
 )
 
 const (
@@ -22,11 +23,14 @@ const (
 
 	defaultAlert = 10 * time.Second
 	maxAlert     = time.Hour
+	weatherFor   = 15 * time.Second
 	maxPriority  = 10
 )
 
 type Hub interface {
 	Notify(hub.Alert) (channel string, accepted bool)
+	Show(c display.Content, d time.Duration)
+	Sense(light *int, sound bool)
 	SetChannel(name string, d time.Duration) error
 	ClearChannel()
 	Release() time.Time
@@ -52,6 +56,21 @@ type Sprites interface {
 type Server struct {
 	Hub     Hub
 	Sprites Sprites
+	// Spotify, when set, links a Spotify account under /api/spotify.
+	Spotify Spotify
+	// Weather, when set, answers GET /api/weather.
+	Weather interface{ Reading() weather.Reading }
+	// Gallery, when set, browses the Divoom community gallery under /api/gallery.
+	Gallery Gallery
+	// Lists, with Gallery, keeps named lists of gallery pictures under /api/lists.
+	Lists Lists
+	// IndexPath, when set, keeps the gallery search index across restarts.
+	IndexPath string
+	// GalleryPace is the pause between the gallery pages read for search; 0 means 3 s.
+	GalleryPace time.Duration
+	gifs        gifCache
+	lists       listCache
+	index       galleryIndex
 	// Size is the display's side in pixels, for drawing previews.
 	Size    int
 	Version string
@@ -63,6 +82,9 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": s.Version})
 	})
 	mux.HandleFunc("GET /api/status", s.status)
+	mux.HandleFunc("GET /api/weather", s.weather)
+	mux.HandleFunc("POST /api/weather/show", s.showWeather)
+	mux.HandleFunc("POST /api/sensors", s.sense)
 	mux.HandleFunc("POST /api/notify", s.notify)
 	mux.HandleFunc("POST /api/channel", s.setChannel)
 	mux.HandleFunc("DELETE /api/channel", s.clearChannel)
@@ -79,11 +101,20 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/channels/{name}", s.updateChannel)
 	mux.HandleFunc("DELETE /api/channels/{name}", s.deleteChannel)
 	mux.HandleFunc("PUT /api/schedule", s.putSchedule)
+	mux.HandleFunc("GET /api/modes", s.modes)
+	mux.HandleFunc("PUT /api/mode", s.putMode)
+	mux.HandleFunc("DELETE /api/mode", s.clearMode)
 
 	mux.HandleFunc("GET /api/channels/{name}/pictures", s.listPictures)
 	mux.HandleFunc("POST /api/channels/{name}/pictures", s.addPicture)
 	mux.HandleFunc("GET /api/channels/{name}/pictures/{file}", s.picturePNG)
 	mux.HandleFunc("DELETE /api/channels/{name}/pictures/{file}", s.removePicture)
+	if s.Spotify != nil {
+		s.spotifyRoutes(mux)
+	}
+	if s.Gallery != nil {
+		s.galleryRoutes(mux)
+	}
 	return s.withWeb(mux)
 }
 
@@ -239,4 +270,29 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func (s *Server) weather(w http.ResponseWriter, _ *http.Request) {
+	if s.Weather == nil {
+		writeError(w, http.StatusNotFound, errors.New("weather is not set up"))
+		return
+	}
+	writeJSON(w, http.StatusOK, s.Weather.Reading())
+}
+
+// sense takes readings from room sensors that are not on the bridge: {"light": 0-255, "sound": true}.
+func (s *Server) sense(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Light *int `json:"light"`
+		Sound bool `json:"sound"`
+	}
+	if !decode(w, r, &req, smallBody) {
+		return
+	}
+	if req.Light != nil && (*req.Light < 0 || *req.Light > 255) {
+		writeError(w, http.StatusBadRequest, errors.New("light: want 0-255"))
+		return
+	}
+	s.Hub.Sense(req.Light, req.Sound)
+	w.WriteHeader(http.StatusNoContent)
 }

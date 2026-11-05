@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/PlatanosVerdes/pixelhub/internal/atomicfile"
@@ -63,6 +64,7 @@ func (st *Store) Save(s State) error {
 func (s State) Clone() State {
 	out := s
 	out.Schedule = append([]Slot{}, s.Schedule...)
+	out.Music.Devices = slices.Clone(s.Music.Devices)
 	out.Channels = make([]Channel, len(s.Channels))
 	for i, c := range s.Channels {
 		c.Sources = append([]string{}, c.Sources...)

@@ -30,6 +30,16 @@ func (q *queue) push(a Alert, now time.Time) {
 	q.items = slices.Insert(q.items, at, a)
 }
 
+// drop removes every alert from source; the next one starts its time now if the head went.
+func (q *queue) drop(source string, now time.Time) {
+	q.advance(now)
+	headGone := len(q.items) > 0 && q.items[0].Source == source
+	q.items = slices.DeleteFunc(q.items, func(a Alert) bool { return a.Source == source })
+	if headGone {
+		q.since = now
+	}
+}
+
 func (q *queue) head(now time.Time) (Alert, bool) {
 	q.advance(now)
 	if len(q.items) == 0 {

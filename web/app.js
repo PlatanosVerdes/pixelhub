@@ -1,6 +1,7 @@
 // pixelhub's web UI: the app element fetches, every component below renders what it is given.
 import { LitElement, html, svg, css, nothing, keyed, repeat } from "./vendor/lit-all.min.js";
 import { lang, t } from "./i18n.js";
+import { clockFace, lightFace } from "./faces.js";
 
 document.documentElement.lang = lang;
 
@@ -24,9 +25,7 @@ async function api(method, path, body, init = {}) {
   return data;
 }
 
-const clone = (x) => structuredClone(x);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-const errorLines = (e) => String(e.message ?? e).split("\n").map((s) => s.trim().replace(/^(invalid|conflict|not found): /, "")).filter(Boolean);
 
 // Times and durations.
 const known = (at) => { const d = at ? new Date(at) : null; return d && !isNaN(d) && d.getFullYear() > 2000 ? d : null; };
@@ -56,9 +55,6 @@ const span = (d) => {
   if (s >= 3600) return t("{n} h", { n: s / 3600 });
   return s >= 60 ? t("{n} min", { n: Math.round(s / 60) }) : t("{n} s", { n: Math.round(s) });
 };
-const minutesOf = (d) => Math.round((seconds(d) / 60) * 100) / 100;
-const durationOf = (minutes) => `${Math.round(Number(minutes) * 60)}s`;
-const minutesLeftToday = () => { const n = new Date(); return Math.max(1, Math.ceil((new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1) - n) / 60000)); };
 
 // Weekdays, Monday first, and a window's clock times in minutes after midnight.
 const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -92,25 +88,6 @@ const clock = (text) => {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(text ?? "").trim());
   return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
 };
-const tidyTime = (text) => {
-  const digits = String(text).trim();
-  if (/^\d{1,2}:\d{2}$/.test(digits)) return digits.padStart(5, "0");
-  const m = /^(\d{1,2})(\d{2})?$/.exec(digits);
-  return m ? `${m[1].padStart(2, "0")}:${m[2] ?? "00"}` : digits;
-};
-const windowActive = (w, day, minute) => {
-  const from = clock(w.from), to = clock(w.to);
-  if (isNaN(from) || isNaN(to)) return false;
-  if (from < to) return w.set.has(day) && minute >= from && minute < to;
-  if (minute >= from) return w.set.has(day);
-  return minute < to && w.set.has((day + 6) % 7);
-};
-// Which slot of the schedule holds this moment: its index, or -1 for the default channel.
-const matchingSlot = (slots, day, minute) => slots.findIndex((s) => windowActive(s, day, minute));
-const withSets = (slots) => slots.map((s) => ({ ...s, set: parseDays(s.days) }));
-const dayOf = (d) => (d.getDay() + 6) % 7;
-const minuteOf = (d) => d.getHours() * 60 + d.getMinutes();
-const channelColor = (names, name) => ["#4b4fd6", "#11a36a", "#e08a2c", "#d4477b", "#2f9bd6", "#8a63d2", "#b8a21f", "#5f7f8f"][Math.max(0, names.indexOf(name)) % 8];
 
 const icon = (d) => svg`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const icons = {
@@ -122,10 +99,13 @@ const icons = {
   close: icon(svg`<path d="M6 6l12 12M18 6 6 18"/>`),
   upload: icon(svg`<path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>`),
   locate: icon(svg`<circle cx="12" cy="12" r="3.5"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>`),
+  bookmark: icon(svg`<path d="M6 3.5h12v17l-6-4-6 4z"/>`),
+  back: icon(svg`<path d="m15 18-6-6 6-6"/>`),
 };
 
 const base = css`
   :host { display: block; }
+  :host([hidden]) { display: none; }
   * { box-sizing: border-box; }
   .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; min-width: 0; }
   .muted { color: var(--muted); }
@@ -158,6 +138,7 @@ const base = css`
   .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
   .btn.primary:hover { filter: brightness(1.08); }
   .btn:disabled { opacity: .45; cursor: default; filter: none; }
+  .btn.primary:disabled { background: var(--chip); border-color: var(--line); color: var(--muted); opacity: 1; }
   .btn.small { height: 32px; padding: 0 11px; font-size: 13px; }
   .btn svg { width: 16px; height: 16px; }
   @media (min-width: 700px) { .btn { height: 34px; } .btn.small { height: 30px; } }
@@ -193,41 +174,51 @@ const send = (el, name, detail) => el.dispatchEvent(new CustomEvent(name, { deta
 const toast = (el, text, opts = {}) => send(el, "toast", { text, ...opts });
 const saved = (el, st) => send(el, "state", st);
 
-// Messages the API wrote about a field: each goes to the first matcher it fits, the rest are returned.
-function route(lines, matchers) {
-  const by = {};
-  const rest = [];
-  for (const line of lines) {
-    const hit = Object.entries(matchers).find(([, re]) => re.test(line));
-    if (hit) (by[hit[0]] ??= []).push(line);
-    else rest.push(line);
-  }
-  return { by, rest };
-}
-const fieldErr = (lines) => lines?.length ? html`${lines.map((l) => html`<p class="err">${l}</p>`)}` : nothing;
-
 const segmented = (options, value, pick) => html`<div class="seg" role="group">${options.map(([v, label]) =>
   html`<button type="button" aria-pressed=${String(v === value)} @click=${() => pick(v)}>${label}</button>`)}</div>`;
 
-class SpriteGrid extends LitElement {
-  static properties = { sprites: { attribute: false }, value: {}, withClock: { type: Boolean } };
+
+// A length of time: a few usual ones, and Custom for any other, typed with its unit.
+class DurationPicker extends LitElement {
+  static properties = { options: { attribute: false }, value: {}, max: { type: Number }, custom: { state: true }, n: { state: true }, unit: { state: true } };
   static styles = [base, css`
-    .grid { display: flex; flex-wrap: wrap; gap: 6px; }
-    button { width: 54px; height: 54px; padding: 3px; border-radius: 10px; border: 1px solid var(--line); background: #000; cursor: pointer; position: relative; display: flex; align-items: center; justify-content: center; }
-    button:hover { border-color: var(--muted); }
-    button[aria-pressed=true] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
-    img { width: 46px; height: 46px; display: block; }
-    .clock { color: #d8dcf0; font-family: var(--font-data); font-size: 11px; }
+    .seg { align-items: center; }
+    .own { display: inline-flex; align-items: center; height: 32px; border-radius: 8px; background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); padding: 0 4px 0 8px; }
+    .own input { height: 28px; border: 0; background: none; padding: 0; text-align: center; font: inherit; font-size: 13px; font-weight: 500; color: var(--ink); -moz-appearance: textfield; }
+    .own input::-webkit-inner-spin-button, .own input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    .own select { height: 28px; border: 0; background: none; padding: 0 2px 0 4px; font: inherit; font-size: 13px; font-weight: 500; color: var(--ink); cursor: pointer; }
+    .own input:focus-visible, .own select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
   `];
-  pick(v) { this.dispatchEvent(new CustomEvent("pick", { detail: v })); }
+  get known() { return this.options.find(([v]) => seconds(v) === seconds(this.value))?.[0]; }
+  willUpdate(c) {
+    if (c.has("value") && !this.custom && this.known === undefined && this.value !== undefined) this.openCustom();
+  }
+  openCustom() {
+    const s = seconds(this.value);
+    this.unit = s && s % 3600 === 0 ? "h" : s && s % 60 === 0 ? "m" : "s";
+    this.n = s ? s / { h: 3600, m: 60, s: 1 }[this.unit] : 1;
+    this.custom = true;
+  }
+  emit(v) { this.dispatchEvent(new CustomEvent("change", { detail: v })); }
+  typed() {
+    const n = Number(this.n), total = n * { h: 3600, m: 60, s: 1 }[this.unit];
+    if (!(n > 0) || (this.max && total > this.max)) return;
+    this.emit(`${n}${this.unit}`);
+  }
   render() {
-    return html`<div class="grid" role="group">
-      ${this.withClock ? html`<button type="button" class="clock" aria-pressed=${String(!this.value)} title=${t("Clock")} @click=${() => this.pick("")}>${t("Clock")}</button>` : nothing}
-      ${(this.sprites ?? []).map((n) => html`<button type="button" aria-pressed=${String(this.value === n)} title=${n} aria-label=${n} @click=${() => this.pick(n)}><img class="pix" src="api/sprites/${encodeURIComponent(n)}.png" alt="" loading="lazy"></button>`)}
+    const known = this.custom ? null : this.known;
+    return html`<div class="seg" role="group">
+      ${this.options.map(([v, label]) => html`<button type="button" aria-pressed=${String(v === known)} @click=${() => { this.custom = false; this.emit(v); }}>${label}</button>`)}
+      ${this.custom
+        ? html`<span class="own"><input type="number" min="1" step="any" aria-label=${t("Amount")} .value=${String(this.n)} style=${`width:${Math.max(2, String(this.n).length) + 1}ch`}
+              @input=${(e) => { this.n = e.target.value; }} @change=${() => this.typed()}>
+            <select aria-label=${t("Unit")} @change=${(e) => { this.unit = e.target.value; this.typed(); }}>
+              ${[["s", "s"], ["m", "min"], ["h", "h"]].map(([u, l]) => html`<option value=${u} ?selected=${u === this.unit}>${l}</option>`)}</select></span>`
+        : html`<button type="button" aria-pressed="false" @click=${() => this.openCustom()}>${t("Custom")}</button>`}
     </div>`;
   }
 }
-customElements.define("ph-sprite-grid", SpriteGrid);
+customElements.define("ph-duration", DurationPicker);
 
 class DaysPicker extends LitElement {
   static properties = { value: {} };
@@ -245,9 +236,6 @@ class DaysPicker extends LitElement {
 }
 customElements.define("ph-days", DaysPicker);
 
-const timeField = (value, label, onchange, bad) => html`<input class="time ${bad ? "bad" : ""}" type="text" inputmode="numeric" maxlength="5" placeholder="09:00" aria-label=${label}
-  .value=${value} @change=${(e) => { e.target.value = tidyTime(e.target.value); onchange(e.target.value); }}>`;
-
 const linkState = (s) => {
   if (s.released_until) return ["warn", t("Released to the phone app")];
   if (s.connected) return ["ok", t("Connected")];
@@ -256,704 +244,1214 @@ const linkState = (s) => {
   return ["bad", t("Not connected")];
 };
 
-// The channel the schedule picks right now, and the slot that picked it (-1: the default channel).
-const scheduledNow = (st, at = new Date()) => {
-  const slots = withSets(st.schedule ?? []);
-  const i = matchingSlot(slots, dayOf(at), minuteOf(at));
-  return { index: i, channel: i < 0 ? st.default_channel : slots[i].channel };
-};
-
-class NowCard extends LitElement {
-  static properties = { status: { attribute: false }, state: { attribute: false }, offline: { type: Boolean }, busy: { state: true } };
-  static styles = [base, css`
-    .stage { display: flex; justify-content: center; margin: 2px 0 16px; }
-    .frame { background: #05060b; border-radius: 18px; padding: 12px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08), 0 6px 24px rgba(0, 0, 0, .18); position: relative; }
-    .frame img { width: 160px; height: 160px; display: block; border-radius: 4px; background: #000; transition: opacity .3s; }
-    .frame.released img { opacity: .35; }
-    .frame .over { position: absolute; inset: 12px; display: flex; align-items: center; justify-content: center; color: #e9ebf5; font-size: 12px; text-align: center; padding: 8px; }
-    @media (min-width: 980px) { .frame img { width: 320px; height: 320px; } .frame { padding: 16px; } .frame .over { inset: 16px; } }
-    dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; }
-    dt, dd { margin: 0; padding: 8px 0; border-top: 1px solid var(--line); min-width: 0; }
-    dt { color: var(--muted); font-size: 12px; padding-right: 16px; display: flex; align-items: center; }
-    dd { font-size: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; text-align: right; overflow-wrap: anywhere; }
-    .actions { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .banner { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; font-size: 13px; background: color-mix(in srgb, var(--warn) 14%, transparent); }
-    .banner.bad { background: color-mix(in srgb, var(--bad) 14%, transparent); }
-  `];
-
-  async call(path, method = "POST") {
-    this.busy = true;
-    try { await api(method, path); send(this, "refresh"); } catch (e) { toast(this, e.message); }
-    this.busy = false;
-  }
-
-  why(s) {
-    if (s.channel_reason === "override") {
-      return s.override_until ? t("Manual override until {time}", { time: until(s.override_until) }) : t("Manual override until the schedule changes");
-    }
-    const m = this.state ? scheduledNow(this.state) : null;
-    return m && m.index < 0 ? t("Default channel, no schedule slot matches now") : t("By the schedule");
-  }
-
-  render() {
-    const s = this.status;
-    if (!s) return html`<section class="card"><div class="head"><h2>${t("Now")}</h2></div><p class="muted">${this.offline ? t("Could not reach pixelhub") : t("Loading")}</p></section>`;
-    const [tone, linkText] = linkState(s);
-    const released = !!s.released_until;
-    return html`<section class="card" aria-labelledby="now-h">
-      <div class="head"><h2 id="now-h">${t("Now")}</h2>${s.channel_reason === "override" ? html`<span class="tag on">${t("Override")}</span>` : nothing}</div>
-      ${this.offline ? html`<p class="banner bad" role="alert">${t("No answer from pixelhub. Showing the last status.")}</p>` : nothing}
-      <div class="stage"><div class="frame ${released ? "released" : ""}">
-        <img class="pix" src="api/preview.png?v=${s.preview_version}" alt=${t("What the display should show: {name}", { name: s.showing })}>
-        ${released ? html`<div class="over">${t("The phone app has the display")}</div>` : nothing}
-      </div></div>
-      <dl>
-        <dt>${t("Channel")}</dt><dd><strong>${s.channel}</strong></dd>
-        <dt>${t("Chosen by")}</dt><dd>${this.why(s)}</dd>
-        <dt>${t("Layer")}</dt><dd>${{ alert: t("Alert"), scene: t("Scene"), ambient: t("Ambient") }[s.layer] ?? s.layer}</dd>
-        <dt>${t("Showing")}</dt><dd class="mono">${s.showing}</dd>
-        <dt>${t("Brightness")}</dt><dd class="mono">${s.brightness}</dd>
-        <dt>${t("Connection")}</dt><dd><span class="dot ${tone}"></span>${linkText}</dd>
-        <dt>${t("Last ack")}</dt><dd><span title=${known(s.last_ack) ? known(s.last_ack).toLocaleString() : ""}>${ago(s.last_ack)}</span></dd>
-        <dt>${t("Bridge")}</dt><dd class="mono small">${s.address}</dd>
-      </dl>
-      <div class="actions">
-        ${released
-          ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.call("claim")}>${t("Take back")}</button>
-              <span class="small muted">${t("Released until {time}", { time: until(s.released_until) })}</span>`
-          : html`<button class="btn" ?disabled=${this.busy} @click=${() => this.call("release")}>${t("Release")}</button>
-              <span class="small muted">${t("Lets the phone app use the display.")}</span>`}
-      </div>
-    </section>`;
-  }
-}
-customElements.define("ph-now", NowCard);
-
-class QuickSwitch extends LitElement {
-  static properties = { state: { attribute: false }, status: { attribute: false }, span: { state: true }, busy: { state: true } };
-  static styles = [base, css`
-    .row { margin-bottom: 12px; }
-    .row .label { margin-bottom: 6px; }
-    .row .seg { display: flex; }
-    .row .seg button { flex: 1 1 auto; padding: 0 8px; white-space: nowrap; }
-    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
-    .tile { text-align: left; height: auto; min-height: 56px; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-    .tile:hover { border-color: var(--muted); }
-    .tile[aria-pressed=true] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-    .tile b { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .tile span { font-size: 12px; color: var(--muted); }
-    .back { margin-top: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  `];
-  constructor() { super(); this.span = "schedule"; }
-
-  async pick(name) {
-    const body = { name };
-    if (this.span === "1h" || this.span === "4h") body.for = this.span;
-    if (this.span === "day") body.for = `${minutesLeftToday()}m`;
-    this.busy = true;
-    try { await api("POST", "channel", body); send(this, "refresh"); } catch (e) { toast(this, e.message); }
-    this.busy = false;
-  }
-  async back() {
-    this.busy = true;
-    try { await api("DELETE", "channel"); send(this, "refresh"); } catch (e) { toast(this, e.message); }
-    this.busy = false;
-  }
-
-  render() {
-    const st = this.state;
-    if (!st) return nothing;
-    const active = this.status?.channel;
-    const overridden = this.status?.channel_reason === "override";
-    const scheduled = scheduledNow(st).channel;
-    const spans = [["schedule", t("Next schedule change")], ["1h", span("1h")], ["4h", span("4h")], ["day", t("End of day")]];
-    return html`<section class="card" aria-labelledby="sw-h">
-      <div class="head"><h2 id="sw-h">${t("Quick switch")}</h2></div>
-      <div class="row"><span class="label">${t("For")}</span>${segmented(spans, this.span, (v) => { this.span = v; })}</div>
-      <div class="tiles">${st.channels.map((c) => html`<button type="button" class="tile" aria-pressed=${String(c.name === active)} ?disabled=${this.busy} @click=${() => this.pick(c.name)}>
-        <b>${c.name}</b><span>${c.name === active ? (overridden ? t("Override") : t("Showing")) : c.name === scheduled ? t("Scheduled now") : ""}&nbsp;</span></button>`)}</div>
-      <div class="back"><button class="btn small" ?disabled=${!overridden || this.busy} @click=${() => this.back()}>${t("Back to schedule")}</button>
-        <span class="small muted">${overridden ? t("The schedule says {name} now.", { name: scheduled }) : t("No override is active.")}</span></div>
-    </section>`;
-  }
-}
-customElements.define("ph-switch", QuickSwitch);
-
-class NotifyCard extends LitElement {
-  static properties = { sprites: { attribute: false }, mode: { state: true }, sprite: { state: true }, color: { state: true }, priority: { state: true }, duration: { state: true }, busy: { state: true } };
-  static styles = [base, css`
-    .form { display: grid; gap: 14px; }
-    .line { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; }
-    input[type=number] { width: 72px; }
-    .foot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  `];
-  constructor() { super(); this.mode = "sprite"; this.sprite = "heart"; this.color = "#ff3b30"; this.priority = 5; this.duration = "10s"; }
-
-  async send() {
-    const body = { priority: Number(this.priority), duration: this.duration, source: "ui" };
-    if (this.mode === "sprite") body.sprite = this.sprite;
-    else body.color = [1, 3, 5].map((i) => parseInt(this.color.slice(i, i + 2), 16));
-    this.busy = true;
-    try {
-      const r = await api("POST", "notify", body);
-      if (r.dropped) toast(this, t("Dropped: {channel} does not accept the source ui.", { channel: r.channel }));
-      else toast(this, t("Showing {name} on {channel} for {time}", { name: r.showing, channel: r.channel, time: span(r.duration) }));
-      send(this, "refresh");
-    } catch (e) { toast(this, e.message); }
-    this.busy = false;
-  }
-
-  render() {
-    const names = this.sprites ?? [];
-    return html`<section class="card" aria-labelledby="no-h">
-      <div class="head"><h2 id="no-h">${t("Test alert")}</h2></div>
-      <div class="form">
-        <div>${segmented([["sprite", t("Sprite")], ["color", t("Color")]], this.mode, (v) => { this.mode = v; })}</div>
-        ${this.mode === "sprite"
-          ? html`<ph-sprite-grid .sprites=${names} .value=${this.sprite} @pick=${(e) => { this.sprite = e.detail; }}></ph-sprite-grid>`
-          : html`<div class="line"><div><label class="label" for="col">${t("Color")}</label><input id="col" type="color" .value=${this.color} @input=${(e) => { this.color = e.target.value; }}></div></div>`}
-        <div class="line">
-          <div><label class="label" for="pr">${t("Priority")}</label><input id="pr" type="number" min="0" max="10" step="1" .value=${String(this.priority)} @input=${(e) => { this.priority = e.target.value; }}></div>
-          <div><label class="label" for="du">${t("Duration")}</label>
-            <select id="du" .value=${this.duration} @change=${(e) => { this.duration = e.target.value; }}>
-              ${["10s", "30s", "1m", "5m", "15m", "1h"].map((v) => html`<option value=${v} ?selected=${v === this.duration}>${span(v)}</option>`)}
-            </select></div>
-        </div>
-        <div class="foot"><button class="btn primary" ?disabled=${this.busy} @click=${() => this.send()}>${t("Send alert")}</button>
-          <span class="small muted">${t("Sent with the source ui; the active channel must accept it.")}</span></div>
-      </div>
-    </section>`;
-  }
-}
-customElements.define("ph-notify", NotifyCard);
-
-const releaseDraft = (d) => { const s = seconds(d); return s % 3600 === 0 ? { n: s / 3600, unit: "h" } : { n: Math.round((s / 60) * 100) / 100, unit: "m" }; };
-const settingsDraft = (st) => ({
-  latitude: String(st.location.latitude), longitude: String(st.location.longitude),
-  day: st.brightness.day, dusk: st.brightness.dusk, night: st.brightness.night,
-  release: releaseDraft(st.release_for), def: st.default_channel,
-});
-
+// Every change saves at once; there is nothing to save or undo by hand.
 class SettingsCard extends LitElement {
-  static properties = { base: { attribute: false }, draft: { state: true }, errors: { state: true }, busy: { state: true } };
+  static properties = { base: { attribute: false }, levels: { state: true }, query: { state: true }, places: { state: true }, busy: { state: true } };
   static styles = [base, css`
-    .grid { display: grid; gap: 18px; }
-    .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .pair input { width: 100%; }
-    .level { display: grid; grid-template-columns: 52px 1fr 36px; align-items: center; gap: 10px; }
-    .level span:first-child { font-size: 13px; color: var(--muted); }
+    .grid { display: grid; gap: 22px; }
+    h3 { font-size: 15px; margin: 0 0 4px; font-weight: 600; }
+    .hint { margin: 0 0 10px; }
+    .here { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 15px; margin-bottom: 10px; }
+    .here b { font-weight: 600; }
+    .find { display: flex; gap: 8px; }
+    .find input { flex: 1; min-width: 0; }
+    .places { list-style: none; margin: 6px 0 0; padding: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+    .places button { width: 100%; text-align: left; border: 0; border-top: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 10px 12px; font: inherit; font-size: 14px; cursor: pointer; }
+    .places li:first-child button { border-top: 0; }
+    .places button:hover { background: var(--chip); }
+    .places small { color: var(--muted); margin-left: 6px; }
+    .level { display: grid; grid-template-columns: 84px 1fr 36px; align-items: center; gap: 10px; }
+    .level span { font-size: 14px; color: var(--muted); }
     .level output { font-family: var(--font-data); font-size: 13px; text-align: right; }
-    .unit { display: flex; gap: 8px; }
-    .unit input { width: 90px; }
-    .foot { display: flex; gap: 8px; margin-top: 18px; align-items: center; }
-    .where { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
-    h3 { font-size: 13px; margin: 0 0 8px; font-weight: 600; }
   `];
-  willUpdate(c) {
-    if (c.has("base") && this.base && (!this.draft || same(this.draft, c.get("base") ? settingsDraft(c.get("base")) : null))) this.draft = settingsDraft(this.base);
-  }
-  get dirty() { return this.draft && this.base && !same(this.draft, settingsDraft(this.base)); }
-  set(key, value) { this.draft = { ...this.draft, [key]: value }; }
 
+  async put(body, done) {
+    this.busy = true;
+    try { saved(this, await api("PUT", "settings", body)); send(this, "refresh"); if (done) toast(this, done); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+
+  async search(e) {
+    e.preventDefault();
+    const q = (this.query ?? "").trim();
+    if (!q) return;
+    try {
+      const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=6&language=${lang}&name=${encodeURIComponent(q)}`).then((x) => x.json());
+      this.places = r.results ?? [];
+      if (!this.places.length) toast(this, t("No place called {q}", { q }));
+    } catch { toast(this, t("Could not look the place up")); }
+  }
+  async pickPlace(p) {
+    this.places = null;
+    this.query = "";
+    await this.put({ location: { latitude: Math.round(p.latitude * 1e4) / 1e4, longitude: Math.round(p.longitude * 1e4) / 1e4, name: p.name } }, t("Location set to {name}", { name: p.name }));
+  }
   locate() {
     if (!navigator.geolocation || !window.isSecureContext) { toast(this, t("The browser only gives the location to pages served over HTTPS.")); return; }
     navigator.geolocation.getCurrentPosition(
-      (p) => { this.draft = { ...this.draft, latitude: p.coords.latitude.toFixed(4), longitude: p.coords.longitude.toFixed(4) }; },
+      (p) => this.put({ location: { latitude: Number(p.coords.latitude.toFixed(4)), longitude: Number(p.coords.longitude.toFixed(4)), name: t("This device's location") } }, t("Location saved")),
       (e) => toast(this, t("Could not get this device's location: {reason}", { reason: e.message })),
       { timeout: 15000 });
   }
 
-  async save() {
-    const d = this.draft;
-    this.busy = true;
-    this.errors = [];
-    try {
-      const st = await api("PUT", "settings", {
-        location: { latitude: Number(d.latitude), longitude: Number(d.longitude) },
-        brightness: { day: Number(d.day), dusk: Number(d.dusk), night: Number(d.night) },
-        release_for: `${d.release.n}${d.release.unit}`,
-        default_channel: d.def,
-      });
-      this.draft = settingsDraft(st);
-      saved(this, st);
-      toast(this, t("Settings saved"));
-    } catch (e) {
-      this.errors = errorLines(e);
-      toast(this, this.errors[0]);
-    }
-    this.busy = false;
-  }
-
   render() {
-    const d = this.draft;
-    if (!d) return nothing;
-    const { by, rest } = route(this.errors ?? [], { location: /^location/, brightness: /^brightness/, release: /^release_for/, def: /^default_channel/ });
-    const level = (key, label) => html`<div class="level"><span>${label}</span>
-      <input type="range" min="0" max="100" .value=${String(d[key])} aria-label=${label} @input=${(e) => this.set(key, Number(e.target.value))}><output>${d[key]}</output></div>`;
+    const st = this.base;
+    if (!st) return nothing;
+    const loc = st.location, b = { ...st.brightness, ...this.levels };
+    const placeName = loc.name || `${loc.latitude}, ${loc.longitude}`;
+    const level = (key, label) => html`<label class="level"><span>${label}</span>
+      <input type="range" min="0" max="100" .value=${String(b[key])} ?disabled=${this.busy}
+        @input=${(e) => { this.levels = { ...this.levels, [key]: Number(e.target.value) }; }}
+        @change=${() => { this.put({ brightness: { ...st.brightness, ...this.levels } }); this.levels = undefined; }}><output>${b[key]}</output></label>`;
     return html`<section class="card" aria-labelledby="se-h">
       <div class="head"><h2 id="se-h">${t("Settings")}</h2></div>
       <div class="grid">
-        <div><h3>${t("Location")}</h3>
-          <div class="pair">
-            <div><label class="label" for="lat">${t("Latitude")}</label><input id="lat" type="number" step="any" class=${by.location ? "bad" : ""} .value=${d.latitude} @input=${(e) => this.set("latitude", e.target.value)}></div>
-            <div><label class="label" for="lon">${t("Longitude")}</label><input id="lon" type="number" step="any" class=${by.location ? "bad" : ""} .value=${d.longitude} @input=${(e) => this.set("longitude", e.target.value)}></div>
-          </div>
-          <div class="where"><button class="btn small" @click=${() => this.locate()}>${icons.locate}${t("Use this device's location")}</button></div>
-          <p class="hint">${t("The sun at this place decides between day, dusk and night brightness.")}</p>
-          ${fieldErr(by.location)}</div>
-        <div><h3>${t("Brightness")}</h3>${level("day", t("Day"))}${level("dusk", t("Dusk"))}${level("night", t("Night"))}${fieldErr(by.brightness)}</div>
-        <div class="pair">
-          <div><label class="label" for="rel">${t("Release duration")}</label>
-            <div class="unit"><input id="rel" type="number" min="1" step="any" class=${by.release ? "bad" : ""} .value=${String(d.release.n)} @input=${(e) => this.set("release", { ...d.release, n: e.target.value })}>
-              <select aria-label=${t("Unit")} .value=${d.release.unit} @change=${(e) => this.set("release", { ...d.release, unit: e.target.value })}>
-                <option value="m" ?selected=${d.release.unit === "m"}>${t("minutes")}</option><option value="h" ?selected=${d.release.unit === "h"}>${t("hours")}</option></select></div>
-            ${fieldErr(by.release)}</div>
-          <div><label class="label" for="def">${t("Default channel")}</label>
-            <select id="def" class=${by.def ? "bad" : ""} .value=${d.def} @change=${(e) => this.set("def", e.target.value)}>
-              ${this.base.channels.map((c) => html`<option value=${c.name} ?selected=${c.name === d.def}>${c.name}</option>`)}</select>
-            ${fieldErr(by.def)}</div>
+        <div>
+          <h3>${t("Location")}</h3>
+          <p class="hint">${t("Used for the weather and to know when it is day, dusk or night.")}</p>
+          <div class="here">${icons.locate}<b>${placeName}</b></div>
+          <form class="find" @submit=${(e) => this.search(e)}>
+            <input type="search" placeholder=${t("Search a city")} aria-label=${t("Search a city")} .value=${this.query ?? ""} @input=${(e) => { this.query = e.target.value; }}>
+            <button class="btn" type="submit">${t("Search")}</button>
+            <button class="btn" type="button" title=${t("Use this device's location")} aria-label=${t("Use this device's location")} @click=${() => this.locate()}>${icons.locate}</button>
+          </form>
+          ${this.places?.length ? html`<ul class="places">${this.places.map((p) => html`<li><button @click=${() => this.pickPlace(p)}>${p.name}<small>${[p.admin1, p.country].filter(Boolean).join(", ")}</small></button></li>`)}</ul>` : nothing}
         </div>
+        <div>
+          <h3>${t("Brightness")}</h3>
+          <p class="hint">${t("It changes by itself with the sun.")}</p>
+          ${level("day", t("Day"))}${level("dusk", t("Dusk"))}${level("night", t("Night"))}
+        </div>
+        ${st.channels.length > 1 ? html`<div>
+          <h3>${t("Default profile")}</h3>
+          <select aria-label=${t("Default profile")} .value=${st.default_channel} ?disabled=${this.busy} @change=${(e) => this.put({ default_channel: e.target.value })}>
+            ${st.channels.map((c) => html`<option value=${c.name} ?selected=${c.name === st.default_channel}>${c.name}</option>`)}</select>
+        </div>` : nothing}
       </div>
-      ${rest.length ? html`<ul class="errors">${rest.map((l) => html`<li class="err">${l}</li>`)}</ul>` : nothing}
-      <div class="foot"><button class="btn primary" ?disabled=${!this.dirty || this.busy} @click=${() => this.save()}>${t("Save settings")}</button>
-        <button class="btn" ?disabled=${!this.dirty || this.busy} @click=${() => { this.draft = settingsDraft(this.base); this.errors = []; }}>${t("Revert")}</button></div>
     </section>`;
   }
 }
 customElements.define("ph-settings", SettingsCard);
 
-class Pictures extends LitElement {
-  static properties = { channel: {}, files: { state: true }, gone: { state: true }, busy: { state: true }, over: { state: true } };
+// The display drawn as what it is: a grid of round LEDs, lit from the preview, dark where off.
+const LED_SIZE = 16;
+class LedMatrix extends LitElement {
+  static properties = { src: {}, dim: { type: Boolean }, label: {} };
   static styles = [base, css`
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px; }
-    .pic { position: relative; min-width: 0; }
-    .pic .img { aspect-ratio: 1; background: #000; border-radius: 10px; border: 1px solid var(--line); overflow: hidden; display: block; }
-    .pic img { width: 100%; height: 100%; display: block; }
-    .pic .name { font-family: var(--font-data); font-size: 11px; color: var(--muted); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pic .icon { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; background: rgba(5, 6, 11, .72); color: #e9ebf5; }
-    .pic .icon:hover { background: rgba(5, 6, 11, .9); color: #ff9c9c; }
-    .pic .icon svg { width: 16px; height: 16px; }
-    .add { aspect-ratio: 1; border: 1.5px dashed var(--line); border-radius: 10px; background: none; color: var(--muted); cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px; padding: 4px; text-align: center; }
-    .add:hover, .grid.over .add { border-color: var(--accent); color: var(--accent); }
-    .grid.over { outline: 2px dashed var(--accent); outline-offset: 6px; border-radius: 6px; }
-    input[type=file] { display: none; }
+    :host { display: block; }
+    .case { background: var(--case); border-radius: 22px; padding: 14px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 18px 50px -18px rgba(0, 0, 0, .7); }
+    canvas { display: block; width: 100%; aspect-ratio: 1; transition: opacity .3s; }
+    .dim canvas { opacity: .3; }
   `];
-  connectedCallback() { super.connectedCallback(); this.gone = new Set(); this.load(); }
-  async load() {
-    try { this.files = (await api("GET", `channels/${encodeURIComponent(this.channel)}/pictures`)).pictures ?? []; }
-    catch (e) { this.files = this.files ?? []; toast(this, e.message); }
+  updated(c) { if (c.has("src")) this.load(); }
+  load() {
+    const img = new Image(), src = this.src;
+    img.onload = () => { if (src === this.src) { this.img = img; this.draw(); } };
+    img.src = src;
   }
-  async upload(list) {
-    this.busy = true;
-    for (const file of list) {
-      const form = new FormData();
-      form.append("file", file);
-      try { await api("POST", `channels/${encodeURIComponent(this.channel)}/pictures`, form); }
-      catch (e) { toast(this, `${file.name}: ${e.message}`); }
+  draw() {
+    const canvas = this.renderRoot.querySelector("canvas");
+    if (!canvas || !this.img) return;
+    const px = Math.round(canvas.clientWidth * devicePixelRatio) || 320;
+    canvas.width = canvas.height = px;
+    const ctx = canvas.getContext("2d");
+    const sample = document.createElement("canvas");
+    sample.width = sample.height = LED_SIZE;
+    const sctx = sample.getContext("2d", { willReadFrequently: true });
+    sctx.imageSmoothingEnabled = false;
+    sctx.drawImage(this.img, 0, 0, LED_SIZE, LED_SIZE);
+    const data = sctx.getImageData(0, 0, LED_SIZE, LED_SIZE).data;
+    const cell = px / LED_SIZE, r = cell * 0.4;
+    ctx.clearRect(0, 0, px, px);
+    for (let y = 0; y < LED_SIZE; y++) for (let x = 0; x < LED_SIZE; x++) {
+      const i = (y * LED_SIZE + x) * 4;
+      const [cr, cg, cb] = [data[i], data[i + 1], data[i + 2]];
+      const lit = cr + cg + cb > 24;
+      const cx = x * cell + cell / 2, cy = y * cell + cell / 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      if (lit) {
+        ctx.shadowColor = `rgb(${cr},${cg},${cb})`;
+        ctx.shadowBlur = cell * 0.55;
+        ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
+      } else {
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "rgba(255,255,255,.045)";
+      }
+      ctx.fill();
     }
-    await this.load();
-    this.busy = false;
   }
-  remove(file) {
-    this.gone = new Set(this.gone).add(file);
-    const unhide = () => { const h = new Set(this.gone); h.delete(file); this.gone = h; };
-    const path = `channels/${encodeURIComponent(this.channel)}/pictures/${encodeURIComponent(file)}`;
-    toast(this, t("{file} deleted", { file }), {
-      action: { label: t("Undo"), run: unhide },
-      expire: async () => {
-        try { await api("DELETE", path, undefined, { keepalive: true }); } catch (e) { toast(this, e.message); }
-        await this.load();
-        unhide();
-      },
-    });
-  }
-  render() {
-    if (!this.files) return html`<p class="muted small">${t("Loading")}</p>`;
-    const shown = this.files.filter((f) => !this.gone.has(f));
-    return html`
-      <div class="grid ${this.over ? "over" : ""}" @dragover=${(e) => { e.preventDefault(); this.over = true; }} @dragleave=${(e) => { if (!e.currentTarget.contains(e.relatedTarget)) this.over = false; }}
-        @drop=${(e) => { e.preventDefault(); this.over = false; this.upload([...e.dataTransfer.files]); }}>
-        ${repeat(shown, (f) => f, (f) => html`<div class="pic"><span class="img"><img class="pix" loading="lazy" alt=${f} src="api/channels/${encodeURIComponent(this.channel)}/pictures/${encodeURIComponent(f)}"></span>
-          <button class="icon trash" aria-label=${t("Delete {file}", { file: f })} title=${t("Delete")} @click=${() => this.remove(f)}>${icons.trash}</button>
-          <div class="name" title=${f}>${f}</div></div>`)}
-        <button class="add" ?disabled=${this.busy} @click=${(e) => e.currentTarget.nextElementSibling.click()}>${icons.upload}<span>${this.busy ? t("Uploading…") : t("Add GIF or PNG")}</span></button>
-        <input type="file" accept="image/gif,image/png" multiple @change=${(e) => { this.upload([...e.target.files]); e.target.value = ""; }}>
-      </div>
-      <p class="hint">${shown.length ? t("Drop files here or use the button. Up to 1 MB and 512 by 512 pixels.") : t("No pictures. The display uses the shared ones when there are any. Drop GIF or PNG files here or use the button.")}</p>`;
-  }
+  connectedCallback() { super.connectedCallback(); this.resize = new ResizeObserver(() => this.draw()); }
+  firstUpdated() { this.resize.observe(this.renderRoot.querySelector("canvas")); }
+  disconnectedCallback() { super.disconnectedCallback(); this.resize.disconnect(); }
+  render() { return html`<div class="case ${this.dim ? "dim" : ""}"><canvas role="img" aria-label=${this.label ?? ""}></canvas></div>`; }
 }
-customElements.define("ph-pictures", Pictures);
+customElements.define("ph-led", LedMatrix);
 
-const brightnessMode = (b) => (b === undefined || b === null ? "auto" : b === 0 ? "off" : "set");
-const editorDraft = (c) => ({
-  name: c.name,
-  sources: [...(c.sources ?? [])],
-  ambient: { pictures: minutesOf(c.ambient.pictures), clock: minutesOf(c.ambient.clock) },
-  scenes: (c.scenes ?? []).map((s) => ({
-    name: s.name, days: s.days, from: s.from, to: s.to, sprite: s.sprite ?? "",
-    bmode: brightnessMode(s.brightness), bval: s.brightness > 0 ? s.brightness : 50,
-  })),
-});
-const editorBody = (d) => ({
-  name: d.name.trim(),
-  sources: d.sources,
-  ambient: { pictures: durationOf(d.ambient.pictures || 0), clock: durationOf(d.ambient.clock || 0) },
-  scenes: d.scenes.map((s) => {
-    const out = { name: s.name, days: s.days, from: s.from, to: s.to };
-    if (s.sprite) out.sprite = s.sprite;
-    if (s.bmode === "off") out.brightness = "off";
-    if (s.bmode === "set") out.brightness = Math.round(Number(s.bval));
-    return out;
-  }),
-});
+// The display's own modes, as its side button cycles them. Each tap is sent at once, like the button.
+const MODES = ["clock", "light", "animations"];
+const modeName = (m) => ({ clock: t("Clock"), light: t("Light"), animations: t("My animations"), visualizer: t("Music"), scoreboard: t("Scoreboard"), stopwatch: t("Stopwatch"), countdown: t("Countdown"), noise: t("Noise meter") })[m];
+const modeIcons = {
+  clock: icon(svg`<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>`),
+  light: icon(svg`<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.8V16h5v-.3c0-.7.4-1.4 1-1.8A6 6 0 0 0 12 3Z"/>`),
+  animations: icon(svg`<rect x="3.5" y="6.5" width="13" height="13" rx="2"/><path d="M7.5 3.5h11a2 2 0 0 1 2 2v11M8.5 10.5v5l4-2.5z"/>`),
+  visualizer: icon(svg`<path d="M5 15v4M9 9v10M13 12v7M17 5v14M21 10v9M1 17v2"/>`),
+  scoreboard: icon(svg`<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M12 6v12M6.5 10.5h2v3M15.5 10.5h2.5v1.5h-2.5v1.5H18"/>`),
+};
+// Named from photos of the real display; the docs had 3 and 5 the other way round.
+const CLOCK_STYLES = () => [t("Full screen"), t("Rainbow"), t("Boxed"), t("Analog round"), t("Negative"), t("Analog square")];
+const LIGHT_TYPES = () => [t("Plain"), t("Love"), t("Plants"), t("No mosquitoes"), t("Sleep")];
 
-class ChannelEditor extends LitElement {
-  static properties = { channel: { attribute: false }, sprites: { attribute: false }, draft: { state: true }, errors: { state: true }, busy: { state: true }, source: { state: true } };
+class Modes extends LitElement {
+  static properties = { current: { attribute: false }, clock: { attribute: false }, styles: { attribute: false }, draft: { state: true }, busy: { state: true }, now: { state: true } };
+  connectedCallback() { super.connectedCallback(); this.now = new Date(); this.tick = setInterval(() => { this.now = new Date(); }, 15000); }
+  disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.tick); }
   static styles = [base, css`
-    .sec { padding: 16px 0; border-top: 1px solid var(--line); }
-    .sec:first-child { border-top: 0; padding-top: 4px; }
-    h3 { font-size: 13px; margin: 0 0 10px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-    h3 .grow { flex: 1; }
-    .name { max-width: 280px; width: 100%; font-family: var(--font-data); }
-    .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-    .chips input { width: 150px; }
-    .ambient { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; }
-    .ambient input { width: 84px; }
-    .mix { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--chip); margin-top: 12px; max-width: 280px; }
-    .mix i { display: block; height: 100%; }
-    .scene { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; display: grid; gap: 12px; }
-    .scene .top { display: flex; gap: 8px; align-items: center; }
-    .scene .top input { flex: 1; }
-    .when { display: flex; gap: 12px 16px; flex-wrap: wrap; align-items: flex-end; }
-    .bright { display: flex; gap: 8px; align-items: center; }
-    .bright input[type=range] { width: 130px; }
-    .bright output { font-family: var(--font-data); font-size: 13px; min-width: 28px; }
-    .foot { display: flex; gap: 8px; padding-top: 16px; border-top: 1px solid var(--line); align-items: center; flex-wrap: wrap; }
+    .modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    @media (min-width: 560px) { .modes { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+    .mode { border: 1px solid var(--line); background: var(--surface); border-radius: 16px; padding: 12px 6px 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 500; min-width: 0; }
+    .mode svg { width: 24px; height: 24px; }
+    .mode span { text-align: center; line-height: 1.25; max-width: 100%; }
+    .mode:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); }
+    .mode[aria-pressed=true] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+    .mode[aria-pressed=true] svg { color: var(--accent); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 70%, transparent)); }
+    .mode.auto[aria-pressed=true] svg { color: var(--ok); filter: none; }
+    .panel { margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: grid; gap: 16px; }
+    .panel h3 { margin: 0; font-size: 15px; font-weight: 600; }
+    .panel p { margin: 0; }
+    .choices { display: flex; flex-wrap: wrap; gap: 6px; }
+    .choice { border: 1px solid var(--line); background: none; border-radius: 999px; height: 34px; padding: 0 14px; font-size: 13px; color: var(--muted); cursor: pointer; }
+    .choice:hover { color: var(--ink); }
+    .choice[aria-pressed=true] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+    .choice.num { width: 40px; padding: 0; }
+    .faces { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    @media (min-width: 560px) { .faces { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+    .face { border: 1px solid var(--line); background: none; border-radius: 14px; padding: 8px 6px; display: grid; justify-items: center; gap: 6px; cursor: pointer; color: var(--muted); font-size: 12px; min-width: 0; }
+    .face img { width: 100%; max-width: 72px; aspect-ratio: 1; border-radius: 6px; background: #000; }
+    .face span { text-align: center; line-height: 1.25; max-width: 100%; }
+    .face:hover { color: var(--ink); }
+    .face[aria-pressed=true] { border-color: var(--accent); color: var(--ink); box-shadow: 0 0 0 1px var(--accent); }
+    .toggles { display: flex; flex-wrap: wrap; gap: 16px; }
+    .toggles label { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+    input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
+    .colour { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+    .swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; display: inline-block; }
+    .swatch.other { position: relative; background: conic-gradient(#ff3b30, #ffd60a, #30d158, #40c8e0, #0a84ff, #bf5af2, #ff3b30); }
+    .swatch.other input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+    .swatch[aria-pressed=true] { border-color: var(--ink); }
+    .score { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .team { border-radius: 14px; padding: 12px; display: grid; justify-items: center; gap: 8px; background: color-mix(in srgb, var(--team) 16%, transparent); border: 1px solid color-mix(in srgb, var(--team) 45%, transparent); }
+    .team output { font-family: var(--font-pixel); font-size: 40px; line-height: 1; color: var(--team); }
+    .team .row { display: flex; gap: 8px; }
+    .team button { width: 44px; height: 40px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--team) 45%, transparent); background: var(--surface); font-size: 20px; cursor: pointer; }
+    .foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   `];
 
-  willUpdate(c) {
-    if (c.has("channel") && this.channel && (!this.draft || same(this.draft, c.get("channel") ? editorDraft(c.get("channel")) : null))) this.draft = editorDraft(this.channel);
-  }
-  get dirty() { return this.draft && !same(this.draft, editorDraft(this.channel)); }
-  patch(change) { this.draft = { ...this.draft, ...change }; }
-  setScene(i, change) { this.patch({ scenes: this.draft.scenes.map((s, j) => (j === i ? { ...s, ...change } : s)) }); }
-
-  addSource(text) {
-    const add = String(text ?? "").split(/[\s,]+/).filter(Boolean).filter((s) => !this.draft.sources.includes(s));
-    if (add.length) this.patch({ sources: [...this.draft.sources, ...add] });
-    this.source = "";
-  }
-  addScene() {
-    const n = this.draft.scenes.length + 1;
-    this.patch({ scenes: [...this.draft.scenes, { name: t("Scene {n}", { n }), days: "daily", from: "09:00", to: "18:00", sprite: "", bmode: "auto", bval: 50 }] });
-  }
-  removeScene(i) {
-    const scene = this.draft.scenes[i];
-    this.patch({ scenes: this.draft.scenes.filter((_, j) => j !== i) });
-    toast(this, t("Scene {name} removed", { name: scene.name }), {
-      action: { label: t("Undo"), run: () => { const list = [...this.draft.scenes]; list.splice(i, 0, scene); this.patch({ scenes: list }); } },
-    });
+  // Each mode keeps its last options while another one is picked.
+  viewFor(mode) {
+    if (this.current?.mode === mode) return { ...this.current };
+    const kept = this.draft?.[mode];
+    return kept ? { ...kept } : { mode, ...(mode === "light" ? { color: "#ff3b30" } : {}) };
   }
 
-  async save() {
+  async apply(view) {
+    this.draft = { ...this.draft, [view.mode]: view };
     this.busy = true;
-    this.errors = [];
-    try {
-      const st = await api("PUT", `channels/${encodeURIComponent(this.channel.name)}`, editorBody(this.draft));
-      const name = this.draft.name.trim();
-      if (name !== this.channel.name) send(this, "renamed", name);
-      saved(this, st);
-      toast(this, t("{name} saved", { name }));
-    } catch (e) {
-      this.errors = errorLines(e);
-      toast(this, this.errors[0]);
-    }
+    try { saved(this, await api("PUT", "mode", view)); send(this, "refresh"); } catch (e) { toast(this, e.message); }
     this.busy = false;
   }
 
-  render() {
-    const d = this.draft;
-    if (!d) return nothing;
-    const mine = { name: [], ambient: [], scenes: {}, rest: [] };
-    const sceneOf = (line) => {
-      const m = /scenes\[(\d+)\]/.exec(line);
-      return m ? Number(m[1]) : d.scenes.findIndex((s) => line.includes(`scene "${s.name}"`));
-    };
-    for (const line of this.errors ?? []) {
-      const i = /scene/.test(line) ? sceneOf(line) : -1;
-      if (i >= 0) (mine.scenes[i] ??= []).push(line);
-      else if (/ambient/.test(line)) mine.ambient.push(line);
-      else if (/channel name|already exists/.test(line)) mine.name.push(line);
-      else mine.rest.push(line);
+  async automatic() {
+    this.busy = true;
+    try { saved(this, await api("DELETE", "mode")); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+
+  // The clock has one look, the same in Automatic and when picked by hand.
+  pick(mode) { this.apply(mode === "clock" ? { mode } : this.viewFor(mode)); }
+
+  change(patch) { this.apply({ ...this.viewFor(this.current.mode), ...patch }); }
+
+  // The clock pixelhub shows by itself, between pictures and in Automatic; a setting, not a mode.
+  async setClock(patch) {
+    const next = { mode: "clock", color: "#ff1e28", ...this.clock, ...patch };
+    for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k];
+    this.busy = true;
+    try { saved(this, await api("PUT", "settings", { clock: next })); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+
+  colour(v, change = (p) => this.change(p)) {
+    const presets = ["#ffffff", "#ff3b30", "#ff9f0a", "#ffd60a", "#30d158", "#40c8e0", "#0a84ff", "#bf5af2"];
+    return html`<div class="colour">
+      <div class="swatches" role="group" aria-label=${t("Colour")}>
+        ${presets.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c} aria-pressed=${String(v.color?.toLowerCase() === c)} @click=${() => change({ color: c })}></button>`)}
+        <label class="swatch other" title=${t("Other colour")} aria-pressed=${String(!!v.color && !presets.includes(v.color.toLowerCase()))}
+          style=${v.color && !presets.includes(v.color.toLowerCase()) ? `background:${v.color}` : ""}>
+          <input type="color" aria-label=${t("Other colour")} .value=${v.color ?? "#ffffff"} @change=${(e) => change({ color: e.target.value })}></label>
+      </div>
+    </div>`;
+  }
+
+  options(mode, v = this.viewFor(mode), change = (p) => this.change(p)) {
+    const choices = (names, key = "style") => html`<div class="choices" role="group">${names.map((n, i) =>
+      html`<button class="choice ${typeof n === "number" ? "num" : ""}" aria-pressed=${String((v[key] ?? 0) === i)} @click=${() => change({ [key]: i })}>${n}</button>`)}</div>`;
+    switch (mode) {
+      case "clock": return html`
+        <h3>${t("Clock style")}</h3>
+        <div class="faces" role="group">${CLOCK_STYLES().map((name, i) => html`<button class="face" aria-pressed=${String((v.style ?? 0) === i)} @click=${() => change({ style: i || undefined })}>
+          <img class="pix" src=${clockFace(i, this.now, v.color)} alt=""><span>${name}</span></button>`)}</div>
+        <div class="toggles">
+          ${[["weather", t("Weather")], ["temperature", t("Temperature")], ["calendar", t("Date")]].map(([k, l]) =>
+            html`<label><input type="checkbox" .checked=${!!v[k]} @change=${(e) => change({ [k]: e.target.checked || undefined })}>${l}</label>`)}
+        </div>
+        <div><h3>${t("Colour")}</h3></div>${this.colour(v, change)}`;
+      case "light": return html`
+        <h3>${t("Effect")}</h3>${choices(LIGHT_TYPES())}
+        <h3>${t("Colour")}</h3>${this.colour(v)}`;
+      case "visualizer": return html`
+        <h3>${t("Visualiser")}</h3>${choices(Array.from({ length: this.styles?.visualizer ?? 12 }, (_, i) => i + 1))}
+        <p class="small muted">${t("It follows what the Evo plays as a speaker, not the room's sound.")}</p>`;
+      case "animations": return html`
+        <h3>${t("My animations")}</h3>
+        <p class="muted">${t("Plays the list you keep in the Divoom app. pixelhub only switches to it and never changes it.")}</p>`;
+      case "scoreboard": {
+        const team = (key, label, colour) => html`<div class="team" style="--team:${colour}">
+          <span class="small">${label}</span><output>${v[key] ?? 0}</output>
+          <div class="row"><button aria-label=${t("{team} minus one", { team: label })} @click=${() => this.change({ [key]: Math.max(0, (v[key] ?? 0) - 1) || undefined })}>−</button>
+            <button aria-label=${t("{team} plus one", { team: label })} @click=${() => this.change({ [key]: Math.min(999, (v[key] ?? 0) + 1) })}>+</button></div></div>`;
+        return html`<div class="score">${team("red", t("Red"), "#ff453a")}${team("blue", t("Blue"), "#0a84ff")}</div>
+          <div class="foot"><button class="btn small" @click=${() => this.change({ red: undefined, blue: undefined })}>${t("Reset")}</button></div>`;
+      }
     }
-    const total = (d.ambient.pictures || 0) + (d.ambient.clock || 0);
-    const quiet = d.sources.length === 0;
+    return nothing;
+  }
+
+  render() {
+    const active = this.current?.mode;
     return html`
-      <div class="sec">
-        <label class="label" for="n-${this.channel.name}">${t("Name")}</label>
-        <input id="n-${this.channel.name}" class="name ${mine.name.length ? "bad" : ""}" maxlength="32" autocapitalize="none" spellcheck="false" .value=${d.name} @input=${(e) => this.patch({ name: e.target.value })}>
-        ${mine.name.length ? fieldErr(mine.name) : html`<p class="hint">${t("Renaming also renames its schedule slots, its pictures and an override on it.")}</p>`}
+      <div class="modes" role="group" aria-label=${t("Display modes")}>
+        <button class="mode auto" aria-pressed=${String(!active)} ?disabled=${this.busy} @click=${() => this.automatic()} title=${t("Alerts, scenes and pictures, by the schedule")}>
+          ${icon(svg`<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/>`)}<span>${t("Automatic")}</span></button>
+        ${MODES.map((m) => html`<button class="mode" aria-pressed=${String(active === m)} ?disabled=${this.busy} @click=${() => this.pick(m)}>${modeIcons[m]}<span>${modeName(m)}</span></button>`)}
       </div>
-      <div class="sec">
-        <h3>${t("Accepted alert sources")}</h3>
-        <div class="chips">
-          ${d.sources.map((s) => html`<span class="chip">${s === "*" ? t("* all sources") : s}<button aria-label=${t("Remove {name}", { name: s })} @click=${() => this.patch({ sources: d.sources.filter((x) => x !== s) })}>${icons.close}</button></span>`)}
-          <input type="text" placeholder=${t("Add a source")} aria-label=${t("Add a source")} autocapitalize="none" spellcheck="false" .value=${this.source ?? ""}
-            @input=${(e) => { this.source = e.target.value; }}
-            @keydown=${(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); this.addSource(e.target.value); } }} @blur=${(e) => this.addSource(e.target.value)}>
-          ${d.sources.includes("*") ? nothing : html`<button class="btn small" @click=${() => this.addSource("*")}>${t("Accept all")}</button>`}
-        </div>
-        <p class="hint">${quiet ? t("No sources: this channel is quiet and shows no alerts.") : t("An alert shows only when its source is listed here. * accepts every source, including alerts without one.")}</p>
-      </div>
-      <div class="sec">
-        <h3>${t("Ambient rotation")}</h3>
-        <div class="ambient">
-          <div><label class="label" for="ap-${d.name}">${t("Pictures, minutes")}</label><input id="ap-${d.name}" type="number" min="0" step="any" class=${mine.ambient.length ? "bad" : ""} .value=${String(d.ambient.pictures)} @input=${(e) => this.patch({ ambient: { ...d.ambient, pictures: e.target.value === "" ? "" : Number(e.target.value) } })}></div>
-          <div><label class="label" for="ac-${d.name}">${t("Clock, minutes")}</label><input id="ac-${d.name}" type="number" min="0" step="any" class=${mine.ambient.length ? "bad" : ""} .value=${String(d.ambient.clock)} @input=${(e) => this.patch({ ambient: { ...d.ambient, clock: e.target.value === "" ? "" : Number(e.target.value) } })}></div>
-        </div>
-        ${total > 0 ? html`<div class="mix" aria-hidden="true"><i style="width:${(100 * (d.ambient.pictures || 0)) / total}%;background:var(--accent)"></i></div>` : nothing}
-        <p class="hint">${t("Either can be 0 to skip it. Together they must add up to 10 seconds or more.")}</p>
-        ${fieldErr(mine.ambient)}
-      </div>
-      <div class="sec">
-        <h3><span class="grow">${t("Scenes")}</span><button class="btn small" @click=${() => this.addScene()}>${icons.plus}${t("Add scene")}</button></h3>
-        ${d.scenes.length ? nothing : html`<p class="hint" style="margin:0">${t("No scenes. Ambient plays all day.")}</p>`}
-        ${d.scenes.map((s, i) => html`<div class="scene">
-          <div class="top"><input aria-label=${t("Scene name")} .value=${s.name} @input=${(e) => this.setScene(i, { name: e.target.value })}>
-            <button class="icon trash" aria-label=${t("Remove scene {name}", { name: s.name })} title=${t("Remove")} @click=${() => this.removeScene(i)}>${icons.trash}</button></div>
-          <div class="when">
-            <div><span class="label">${t("Days")}</span><ph-days .value=${s.days} @change=${(e) => this.setScene(i, { days: e.detail })}></ph-days></div>
-            <div><span class="label">${t("From")}</span>${timeField(s.from, t("From"), (v) => this.setScene(i, { from: v }), mine.scenes[i])}</div>
-            <div><span class="label">${t("To")}</span>${timeField(s.to, t("To"), (v) => this.setScene(i, { to: v }), mine.scenes[i])}</div>
-          </div>
-          <div><span class="label">${t("Shows")}</span><ph-sprite-grid .withClock=${true} .sprites=${this.sprites} .value=${s.sprite} @pick=${(e) => this.setScene(i, { sprite: e.detail })}></ph-sprite-grid></div>
-          <div><span class="label">${t("Brightness")}</span><div class="bright">
-            <select aria-label=${t("Brightness")} .value=${s.bmode} @change=${(e) => this.setScene(i, { bmode: e.target.value })}>
-              <option value="auto" ?selected=${s.bmode === "auto"}>${t("By the sun")}</option><option value="set" ?selected=${s.bmode === "set"}>${t("Fixed")}</option><option value="off" ?selected=${s.bmode === "off"}>${t("Off")}</option></select>
-            ${s.bmode === "set" ? html`<input type="range" min="1" max="100" .value=${String(s.bval)} aria-label=${t("Brightness")} @input=${(e) => this.setScene(i, { bval: Number(e.target.value) })}><output>${s.bval}</output>` : nothing}
-          </div></div>
-          ${fieldErr(mine.scenes[i])}
-        </div>`)}
-      </div>
-      <div class="sec">
-        <h3>${t("Pictures")}</h3>
-        ${keyed(this.channel.name, html`<ph-pictures channel=${this.channel.name}></ph-pictures>`)}
-      </div>
-      ${mine.rest.length ? html`<ul class="errors">${mine.rest.map((l) => html`<li class="err">${l}</li>`)}</ul>` : nothing}
-      <div class="foot"><button class="btn primary" ?disabled=${!this.dirty || this.busy} @click=${() => this.save()}>${t("Save channel")}</button>
-        <button class="btn" ?disabled=${!this.dirty || this.busy} @click=${() => { this.draft = editorDraft(this.channel); this.errors = []; }}>${t("Revert")}</button>
-        <span class="small muted">${t("Pictures upload and delete at once; the rest waits for Save.")}</span></div>`;
+      ${active && !MODES.includes(active) ? html`<div class="panel"><p>${t("{app} is on. Change it in Apps or Music.", { app: modeName(active) })}</p></div>`
+        : active && active !== "clock" ? html`<div class="panel">${this.options(active)}</div>`
+        : html`<div class="panel">${active ? html`<p class="small muted">${t("Only the clock, until you pick something else.")}</p>` : nothing}
+          ${this.options("clock", { mode: "clock", color: "#ff1e28", ...this.clock }, (p) => this.setClock(p))}</div>`}`;
   }
 }
-customElements.define("ph-channel-editor", ChannelEditor);
+customElements.define("ph-modes", Modes);
 
-const ambientSummary = (a) => {
-  const p = minutesOf(a.pictures), c = minutesOf(a.clock);
-  if (p && c) return t("{p} min pictures, {c} min clock", { p, c });
-  if (p) return t("Pictures only");
-  return t("Clock only");
+// Brightness right now: the level of the sun's current phase, the same one Settings edits.
+const phaseNow = (status, st) => {
+  const b = st?.brightness;
+  if (!b || status?.brightness === undefined) return null;
+  return ["day", "dusk", "night"].find((k) => b[k] === status.brightness) ?? null;
 };
 
-class Channels extends LitElement {
-  static properties = { state: { attribute: false }, status: { attribute: false }, sprites: { attribute: false }, open: { state: true }, name: { state: true }, error: { state: true }, busy: { state: true } };
-  static styles = [base, css`
-    .create { display: flex; gap: 8px; flex-wrap: wrap; }
-    .create input { flex: 1; min-width: 160px; max-width: 320px; font-family: var(--font-data); }
-    ul.list { list-style: none; margin: 14px 0 0; padding: 0; }
-    li.item { border-top: 1px solid var(--line); }
-    .row { display: flex; align-items: center; gap: 4px; }
-    .toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; text-align: left; background: none; border: 0; padding: 12px 0; cursor: pointer; }
-    .toggle svg { color: var(--muted); transition: transform .15s; flex: none; }
-    .item.open .toggle svg { transform: rotate(180deg); }
-    .title { min-width: 0; flex: 1; }
-    .title b { font-size: 15px; font-weight: 600; display: inline-block; margin-right: 8px; }
-    .facts { display: flex; flex-wrap: wrap; gap: 2px 18px; margin-top: 3px; font-size: 12px; color: var(--muted); }
-    .facts span b { font-weight: 500; color: var(--ink); margin-left: 4px; font-size: 12px; margin-right: 0; }
-    .body { padding: 4px 0 18px; }
-  `];
+const defaultChannel = (st) => st?.channels?.find((c) => c.name === st.default_channel);
+async function saveChannel(el, st, patch) {
+  const ch = defaultChannel(st);
+  try { saved(el, await api("PUT", `channels/${encodeURIComponent(ch.name)}`, { ...ch, ...patch })); send(el, "refresh"); return true; }
+  catch (e) { toast(el, e.message); return false; }
+}
+const daysText = (days) => {
+  const set = parseDays(days);
+  if (set.size === 0 || set.size === 7) return t("Every day");
+  if (formatDays(set) === "mon-fri") return t("Weekdays");
+  if (formatDays(set) === "sat,sun") return t("Weekends");
+  return [...set].sort().map(dayLabel).join(" ");
+};
+const STEPS = [["30s", "30 s"], ["1m", "1 min"], ["2m", "2 min"], ["5m", "5 min"]];
 
-  async create(e) {
+const RULE_KINDS = () => [["off", t("Display off")], ["clock", t("Only the clock")], ["light", t("Light")], ["animations", t("My animations")]];
+
+// What automatic shows: one usual choice, and exceptions at set times. Read as a sentence.
+class Automatic extends LitElement {
+  static properties = { state: { attribute: false }, lists: { attribute: false }, draft: { state: true }, busy: { state: true } };
+  static styles = [base, css`
+    h3 { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
+    .block + .block { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+    .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+    .opt { border: 1px solid var(--line); background: none; border-radius: 10px; min-height: 38px; padding: 0 14px; font-size: 14px; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+    .opt small { font-size: 12px; opacity: .8; }
+    .opt:hover { color: var(--ink); }
+    .opt[aria-pressed=true] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+    .rows { display: grid; gap: 12px; margin-top: 14px; }
+    .row { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: center; gap: 10px; }
+    .row > span { font-size: 14px; color: var(--muted); }
+    .hint { margin: 10px 0 0; }
+    ul { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+    li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--case); font-size: 14px; }
+    li span { color: var(--muted); }
+    form { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--accent); border-radius: 12px; }
+    .line { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 14px; color: var(--muted); }
+    input[type=time], select { height: 36px; }
+  `];
+  get channel() { return defaultChannel(this.state); }
+  async save(patch, done) {
+    this.busy = true;
+    const ok = await saveChannel(this, this.state, patch);
+    this.busy = false;
+    if (ok && done) toast(this, done);
+    return ok;
+  }
+  setAmbient(a) { return this.save({ ambient: { ...this.channel.ambient, ...a } }); }
+  whatOf(s) {
+    if (s.brightness === 0) return t("Display off");
+    if (s.list) return s.list;
+    if (s.view?.mode) return RULE_KINDS().find(([k]) => k === s.view.mode)?.[1] ?? modeName(s.view.mode);
+    return s.sprite || t("Only the clock");
+  }
+  async add(e) {
     e.preventDefault();
-    const name = (this.name ?? "").trim();
-    if (!name) return;
-    this.busy = true;
-    this.error = "";
-    try {
-      const st = await api("POST", "channels", { name, sources: ["*"] });
-      saved(this, st);
-      this.name = "";
-      this.open = name;
-    } catch (err) { this.error = errorLines(err).join(" "); }
-    this.busy = false;
+    const d = this.draft;
+    const scene = { name: `${d.what.replace(/^list:/, "")} ${d.from}`, days: d.days, from: d.from, to: d.to };
+    if (d.what.startsWith("list:")) scene.list = d.what.slice(5);
+    else if (d.what === "off") Object.assign(scene, { view: { mode: "clock" }, brightness: 0 });
+    else scene.view = d.what === "light" ? { mode: "light", color: "#ffb547" } : { mode: d.what };
+    if (await this.save({ scenes: [...this.channel.scenes, scene] }, t("Exception added"))) this.draft = null;
   }
-
-  noDelete(c) {
-    const st = this.state;
-    if (st.channels.length <= 1) return t("It is the only channel.");
-    if (c.name === st.default_channel) return t("{name} is the default channel. Pick another default in Settings first.", { name: c.name });
-    return "";
-  }
-
-  render() {
-    const st = this.state;
-    if (!st) return nothing;
-    return html`<section class="card" aria-labelledby="ch-h">
-      <div class="head"><h2 id="ch-h">${t("Channels")}</h2></div>
-      <form class="create" @submit=${(e) => this.create(e)}>
-        <input aria-label=${t("New channel name")} placeholder=${t("New channel name")} maxlength="32" autocapitalize="none" spellcheck="false" class=${this.error ? "bad" : ""} .value=${this.name ?? ""} @input=${(e) => { this.name = e.target.value; this.error = ""; }}>
-        <button class="btn" type="submit" ?disabled=${this.busy || !(this.name ?? "").trim()}>${icons.plus}${t("Create channel")}</button>
-      </form>
-      ${this.error ? html`<p class="err">${this.error}</p>` : html`<p class="hint">${t("1 to 32 lowercase letters, digits, - or _.")}</p>`}
-      <ul class="list">${repeat(st.channels, (c) => c.name, (c) => {
-        const open = this.open === c.name;
-        const why = this.noDelete(c);
-        const sources = c.sources?.length ? (c.sources.includes("*") ? t("All") : c.sources.join(", ")) : t("None");
-        return html`<li class="item ${open ? "open" : ""}">
-          <div class="row">
-            <button class="toggle" aria-expanded=${String(open)} @click=${() => { this.open = open ? null : c.name; }}>
-              <span class="title"><b>${c.name}</b>${this.status?.channel === c.name ? html`<span class="tag on">${t("Showing")}</span>` : st.default_channel === c.name ? html`<span class="tag">${t("Default")}</span>` : nothing}
-                <span class="facts"><span>${t("Sources")}<b>${sources}</b></span><span>${t("Ambient")}<b>${ambientSummary(c.ambient)}</b></span><span>${t("Scenes")}<b>${(c.scenes ?? []).length}</b></span></span></span>
-              ${icons.chevron}</button>
-            <button class="icon trash" aria-disabled=${String(!!why)} title=${why || t("Delete {name}", { name: c.name })} aria-label=${t("Delete {name}", { name: c.name })}
-              @click=${() => (why ? toast(this, why) : send(this, "remove-channel", c.name))}>${icons.trash}</button>
-          </div>
-          ${open ? html`<div class="body"><ph-channel-editor .channel=${c} .sprites=${this.sprites} @renamed=${(e) => { this.open = e.detail; }}></ph-channel-editor></div>` : nothing}
-        </li>`;
-      })}</ul>
-    </section>`;
-  }
-}
-customElements.define("ph-channels", Channels);
-
-class WeekView extends LitElement {
-  static properties = { slots: { attribute: false }, names: { attribute: false }, fallback: {} };
-  static styles = [base, css`
-    .week { display: grid; grid-template-columns: 34px 1fr; gap: 5px 8px; align-items: center; }
-    .axis { grid-column: 2; display: flex; justify-content: space-between; font-family: var(--font-data); font-size: 10px; color: var(--muted); }
-    .day { font-size: 12px; color: var(--muted); text-transform: capitalize; }
-    .day.today { color: var(--ink); font-weight: 600; }
-    .track { position: relative; height: 22px; border-radius: 5px; overflow: hidden; background: var(--chip); }
-    .band { position: absolute; top: 0; bottom: 0; color: #fff; font-size: 10px; line-height: 22px; padding: 0 5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; border-right: 1px solid color-mix(in srgb, var(--surface) 70%, transparent); background: none; border-radius: 0; gap: 0; }
-    .now { position: absolute; top: -1px; bottom: -1px; width: 2px; background: var(--ink); }
-    .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 12px; font-size: 12px; }
-    .legend span { display: inline-flex; align-items: center; gap: 6px; }
-    .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
-  `];
-  segments(slots, day) {
-    const out = [];
-    for (let m = 0; m < 1440; m++) {
-      const i = matchingSlot(slots, day, m);
-      const channel = i < 0 ? this.fallback : slots[i].channel;
-      const last = out.at(-1);
-      if (last && last.channel === channel && last.slot === i) last.to = m + 1;
-      else out.push({ channel, slot: i, from: m, to: m + 1 });
-    }
-    return out;
+  form() {
+    const d = this.draft, lists = this.lists ?? [];
+    return html`<form @submit=${(e) => this.add(e)}>
+      <div class="line"><ph-days .value=${d.days} @change=${(e) => { this.draft = { ...d, days: e.detail }; }}></ph-days></div>
+      <div class="line">${t("from")} <input type="time" aria-label=${t("from")} .value=${d.from} @change=${(e) => { this.draft = { ...d, from: e.target.value }; }}>
+        ${t("to")} <input type="time" aria-label=${t("to")} .value=${d.to} @change=${(e) => { this.draft = { ...d, to: e.target.value }; }}>
+        ${t("show")} <select aria-label=${t("What to show")} @change=${(e) => { this.draft = { ...d, what: e.target.value }; }}>
+          ${lists.map((l) => html`<option value=${`list:${l.name}`} ?selected=${d.what === `list:${l.name}`}>${l.name}</option>`)}
+          ${RULE_KINDS().map(([k, label]) => html`<option value=${k} ?selected=${d.what === k}>${label}</option>`)}</select></div>
+      <div class="line"><button class="btn primary" type="submit" ?disabled=${this.busy || d.from === d.to}>${t("Save")}</button>
+        <button class="btn" type="button" @click=${() => { this.draft = null; }}>${t("Cancel")}</button></div>
+    </form>`;
   }
   render() {
-    const slots = withSets(this.slots ?? []);
-    const now = new Date();
-    const today = dayOf(now);
-    const fmt = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-    const used = [...new Set([this.fallback, ...(this.slots ?? []).map((s) => s.channel)])];
-    return html`<div class="week" role="img" aria-label=${t("Which channel is active at each hour of the week")}>
-      <span></span><div class="axis"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
-      ${DAY_KEYS.map((_, d) => html`<span class="day ${d === today ? "today" : ""}">${dayLabel(d)}</span>
-        <div class="track">${this.segments(slots, d).map((s) => html`<span class="band" style="left:${(s.from / 1440) * 100}%;width:${((s.to - s.from) / 1440) * 100}%;background:${channelColor(this.names, s.channel)}"
-          title="${s.channel} ${fmt(s.from)} - ${fmt(s.to)}">${s.to - s.from > 150 ? s.channel : ""}</span>`)}
-          ${d === today ? html`<span class="now" style="left:${(minuteOf(now) / 1440) * 100}%"></span>` : nothing}</div>`)}
-    </div>
-    <div class="legend">${used.map((n) => html`<span><i style="background:${channelColor(this.names, n)}"></i>${n}${n === this.fallback ? html`<span class="muted">${t("default")}</span>` : nothing}</span>`)}</div>`;
-  }
-}
-customElements.define("ph-week", WeekView);
-
-const slotDraft = (s) => ({ channel: s.channel, days: s.days, from: s.from, to: s.to });
-
-class Schedule extends LitElement {
-  static properties = { base: { attribute: false }, draft: { state: true }, errors: { state: true }, busy: { state: true } };
-  static styles = [base, css`
-    ol { list-style: none; margin: 0; padding: 0; counter-reset: slot; }
-    li { border-top: 1px solid var(--line); padding: 12px 0; display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-end; }
-    li .n { font-family: var(--font-data); font-size: 12px; color: var(--muted); width: 20px; align-self: center; }
-    li .chan { flex: 1; min-width: 120px; max-width: 140px; }
-    li .chan select { width: 100%; }
-    li .actions { margin-left: auto; display: flex; align-self: center; }
-    li { position: relative; }
-    @media (min-width: 700px) { li { padding-right: 104px; } li .actions { position: absolute; right: 0; top: 50%; transform: translateY(-50%); margin: 0; } }
-    li .errs { flex-basis: 100%; }
-    .foot { display: flex; gap: 8px; margin-top: 14px; align-items: center; flex-wrap: wrap; }
-    .week-wrap { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
-    .empty { margin: 0 0 4px; font-size: 13px; color: var(--muted); }
-  `];
-  willUpdate(c) {
-    if (c.has("base") && this.base && (!this.draft || same(this.draft, c.get("base") ? c.get("base").schedule.map(slotDraft) : null))) this.draft = this.base.schedule.map(slotDraft);
-  }
-  get dirty() { return this.draft && this.base && !same(this.draft, this.base.schedule.map(slotDraft)); }
-  setSlot(i, change) { this.draft = this.draft.map((s, j) => (j === i ? { ...s, ...change } : s)); }
-  move(i, by) {
-    const list = [...this.draft];
-    [list[i], list[i + by]] = [list[i + by], list[i]];
-    this.draft = list;
-  }
-  add() { this.draft = [...this.draft, { channel: this.base.default_channel, days: "daily", from: "09:00", to: "18:00" }]; }
-  remove(i) {
-    const slot = this.draft[i];
-    this.draft = this.draft.filter((_, j) => j !== i);
-    toast(this, t("Slot {n} removed", { n: i + 1 }), {
-      action: { label: t("Undo"), run: () => { const list = [...this.draft]; list.splice(i, 0, slot); this.draft = list; } },
-    });
-  }
-  async save() {
-    this.busy = true;
-    this.errors = [];
-    try {
-      const st = await api("PUT", "schedule", this.draft);
-      saved(this, st);
-      toast(this, t("Schedule saved"));
-    } catch (e) {
-      this.errors = errorLines(e);
-      toast(this, this.errors[0]);
-    }
-    this.busy = false;
-  }
-  render() {
-    if (!this.draft) return nothing;
-    const names = this.base.channels.map((c) => c.name);
-    const mine = {};
-    const rest = [];
-    for (const line of this.errors ?? []) {
-      const i = /schedule\[(\d+)\]/.exec(line)?.[1];
-      if (i !== undefined) (mine[i] ??= []).push(line.replace(/^schedule\[\d+\]:\s*/, ""));
-      else rest.push(line);
-    }
-    return html`<section class="card" aria-labelledby="sc-h">
-      <div class="head"><h2 id="sc-h">${t("Schedule")}</h2><button class="btn small" @click=${() => this.add()}>${icons.plus}${t("Add slot")}</button></div>
-      <p class="hint" style="margin:0 0 8px">${t("The first slot that matches wins. When none match, the default channel shows.")}</p>
-      ${this.draft.length ? nothing : html`<p class="empty">${t("No slots: the default channel always shows.")}</p>`}
-      <ol>${this.draft.map((s, i) => html`<li>
-        <span class="n">${i + 1}</span>
-        <div class="chan"><span class="label">${t("Channel")}</span>
-          <select aria-label=${t("Channel")} class=${mine[i] ? "bad" : ""} .value=${s.channel} @change=${(e) => this.setSlot(i, { channel: e.target.value })}>
-            ${(names.includes(s.channel) ? names : [s.channel, ...names]).map((n) => html`<option value=${n} ?selected=${n === s.channel}>${n}</option>`)}</select></div>
-        <div class="actions">
-          <button class="icon" aria-label=${t("Move up")} title=${t("Move up")} ?disabled=${i === 0} @click=${() => this.move(i, -1)}>${icons.up}</button>
-          <button class="icon" aria-label=${t("Move down")} title=${t("Move down")} ?disabled=${i === this.draft.length - 1} @click=${() => this.move(i, 1)}>${icons.down}</button>
-          <button class="icon trash" aria-label=${t("Remove slot {n}", { n: i + 1 })} title=${t("Remove")} @click=${() => this.remove(i)}>${icons.trash}</button>
+    const ch = this.channel;
+    if (!ch) return nothing;
+    const a = ch.ambient, lists = this.lists ?? [];
+    const playing = a.list && seconds(a.pictures) > 0 ? a.list.toLowerCase() : "";
+    const list = lists.find((l) => l.name.toLowerCase() === playing);
+    return html`<section class="card" aria-labelledby="au-h">
+      <div class="head"><h2 id="au-h">${t("In automatic")}</h2></div>
+      <div class="block">
+        <h3>${t("Usually it shows")}</h3>
+        <div class="opts" role="group">
+          <button class="opt" aria-pressed=${String(!playing)} ?disabled=${this.busy} @click=${() => this.setAmbient({ pictures: "0s", list: "", clock: seconds(a.clock) ? a.clock : "1m" })}>${t("Only the clock")}</button>
+          ${lists.map((l) => html`<button class="opt" aria-pressed=${String(l.name.toLowerCase() === playing)} ?disabled=${this.busy}
+            @click=${() => this.setAmbient({ list: l.name, pictures: seconds(a.pictures) ? a.pictures : "1m" })}>${l.name}<small>${l.items.length}</small></button>`)}
         </div>
-        <div><span class="label">${t("Days")}</span><ph-days .value=${s.days} @change=${(e) => this.setSlot(i, { days: e.detail })}></ph-days></div>
-        <div><span class="label">${t("From")}</span>${timeField(s.from, t("From"), (v) => this.setSlot(i, { from: v }), mine[i])}</div>
-        <div><span class="label">${t("To")}</span>${timeField(s.to, t("To"), (v) => this.setSlot(i, { to: v }), mine[i])}</div>
-        <div class="errs">${fieldErr(mine[i])}</div>
-      </li>`)}</ol>
-      ${rest.length ? html`<ul class="errors">${rest.map((l) => html`<li class="err">${l}</li>`)}</ul>` : nothing}
-      <div class="foot"><button class="btn primary" ?disabled=${!this.dirty || this.busy} @click=${() => this.save()}>${t("Save schedule")}</button>
-        <button class="btn" ?disabled=${!this.dirty || this.busy} @click=${() => { this.draft = this.base.schedule.map(slotDraft); this.errors = []; }}>${t("Revert")}</button></div>
-      <div class="week-wrap"><ph-week .slots=${this.draft} .names=${names} fallback=${this.base.default_channel}></ph-week></div>
+        ${!lists.length ? html`<p class="small muted hint">${t("Your lists from the Gallery show up here.")}</p>` : nothing}
+        ${playing ? html`
+          ${list && !list.items.length ? html`<p class="small muted hint">${t("The list {name} is empty, so only the clock shows.", { name: list.name })}</p>` : nothing}
+          <div class="rows">
+            <div class="row"><span>${t("Each drawing")}</span><ph-duration .options=${STEPS} .value=${a.pictures} max="86400" @change=${(e) => this.setAmbient({ pictures: e.detail })}></ph-duration></div>
+            <div class="row"><span>${t("Clock between")}</span><ph-duration .options=${[["0s", t("No")], ...STEPS]} .value=${a.clock} max="86400" @change=${(e) => this.setAmbient({ clock: e.detail })}></ph-duration></div>
+          </div>` : nothing}
+      </div>
+      <div class="block">
+        <h3>${t("Except")}</h3>
+        ${ch.scenes.length ? html`<ul>${ch.scenes.map((s, i) => html`<li>
+            <div><span>${daysText(s.days)}, ${s.from}–${s.to}:</span> ${this.whatOf(s)}</div>
+            <button class="icon trash" aria-label=${t("Remove")} ?disabled=${this.busy} @click=${() => this.save({ scenes: ch.scenes.filter((_, k) => k !== i) })}>${icons.trash}</button>
+          </li>`)}</ul>` : html`<p class="small muted" style="margin:0 0 12px">${t("No exceptions: it shows the same all day.")}</p>`}
+        ${this.draft ? this.form() : html`<button class="btn" @click=${() => { this.draft = { what: lists[0] ? `list:${lists[0].name}` : "clock", days: "mon-fri", from: "14:00", to: "15:00" }; }}>${icons.plus}${t("Add an exception")}</button>`}
+      </div>
     </section>`;
   }
 }
-customElements.define("ph-schedule", Schedule);
+customElements.define("ph-automatic", Automatic);
+
+
+class DisplayTab extends LitElement {
+  static properties = { status: { attribute: false }, state: { attribute: false }, sprites: { attribute: false }, styles: { attribute: false }, offline: { type: Boolean }, level: { state: true }, busy: { state: true }, now: { state: true }, lists: { state: true } };
+  connectedCallback() {
+    super.connectedCallback(); this.now = new Date(); this.tick = setInterval(() => { this.now = new Date(); }, 15000);
+    api("GET", "lists").then((r) => { this.lists = r.lists; }).catch(() => {});
+  }
+  disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.tick); }
+
+  // The display draws its own modes; the preview redraws them as pixelhub sent them.
+  preview(s) {
+    const clock = { color: "#ff1e28", ...this.state?.clock };
+    const mode = s.layer === "mode" ? this.state?.mode : null;
+    if (mode?.mode === "clock") return clockFace(mode.style ?? 0, this.now, mode.color ?? clock.color);
+    if (mode?.mode === "light") return lightFace(mode.color);
+    if (s.showing === "clock") return clockFace(clock.style ?? 0, this.now, clock.color);
+    return `api/preview.png?v=${s.preview_version}`;
+  }
+  static styles = [base, css`
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
+    @media (min-width: 900px) { .layout { grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); align-items: start; gap: 32px; } .hero { position: sticky; top: 88px; } }
+    .hero { display: grid; gap: 14px; justify-items: center; }
+    ph-led { width: min(100%, 360px); }
+    @media (max-width: 599px) { ph-led { width: min(64%, 240px); } }
+    .now { text-align: center; display: grid; gap: 4px; }
+    .now b { font-family: var(--font-pixel); font-weight: 400; font-size: 22px; letter-spacing: .02em; }
+    .now span { font-size: 13px; color: var(--muted); }
+    .level { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; width: min(100%, 360px); }
+    .level svg { color: var(--muted); }
+    .level output { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); min-width: 28px; text-align: right; }
+    input[type=range] { width: 100%; }
+    section > h2 { margin: 0 0 10px; font-size: 13px; }
+    .banner { padding: 10px 12px; border-radius: 12px; font-size: 13px; background: color-mix(in srgb, var(--warn) 16%, transparent); display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; width: 100%; }
+    .banner.bad { background: color-mix(in srgb, var(--bad) 16%, transparent); }
+    .stack { display: grid; gap: 22px; min-width: 0; }
+  `];
+
+  what(s) {
+    if (s.layer === "alert") return t("For a moment");
+    if (s.layer === "mode") return t("Chosen by you");
+    if (s.layer === "music") return t("Playing on Spotify");
+    if (s.layer === "scene") return t("Scheduled");
+    return t("Automatic");
+  }
+  shownName(s) {
+    if (s.layer === "mode" && this.state?.mode) return modeName(this.state.mode.mode);
+    const own = { clock: t("Clock"), weather: t("Weather"), temperature: t("Temperature") }[s.showing];
+    return own ?? s.showing.replace(/^gallery /, "");
+  }
+
+  async setLevel(value) {
+    const phase = phaseNow(this.status, this.state);
+    if (!phase) return;
+    this.busy = true;
+    try { saved(this, await api("PUT", "settings", { brightness: { ...this.state.brightness, [phase]: value } })); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+    this.level = undefined;
+  }
+
+  async claim() {
+    try { await api("POST", "claim"); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+  }
+
+  render() {
+    const s = this.status;
+    const released = !!s?.released_until;
+    const phase = phaseNow(s, this.state);
+    const level = this.level ?? s?.brightness ?? 0;
+    return html`<div class="layout">
+      <div class="hero">
+        ${this.offline ? html`<p class="banner bad" role="alert">${t("No answer from pixelhub. Showing the last status.")}</p>` : nothing}
+        ${released ? html`<p class="banner">${t("The phone app has the display until {time}.", { time: until(s.released_until) })}<button class="btn small" @click=${() => this.claim()}>${t("Take back")}</button></p>` : nothing}
+        <ph-led .src=${s ? this.preview(s) : ""} ?dim=${released || (s && !s.connected)} .label=${s ? t("What the display should show: {name}", { name: s.showing }) : ""}></ph-led>
+        ${s ? html`<div class="now" aria-live="polite"><b>${this.shownName(s)}</b><span>${this.what(s)}</span></div>` : nothing}
+        ${phase ? html`<label class="level" title=${t("Brightness for the {phase}", { phase: t(phase) })}>
+          ${icon(svg`<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>`)}
+          <input type="range" min="0" max="100" .value=${String(level)} aria-label=${t("Brightness")} ?disabled=${this.busy}
+            @input=${(e) => { this.level = Number(e.target.value); }} @change=${(e) => this.setLevel(Number(e.target.value))}>
+          <output>${level}</output></label>
+        <span class="small muted">${t("Brightness for the {phase}, as in Settings", { phase: t(phase) })}</span>` : nothing}
+      </div>
+      <div class="stack">
+        <section><h2 class="muted">${t("What the display shows")}</h2>
+          <ph-modes .current=${this.state?.mode} .clock=${this.state?.clock} .styles=${this.styles}></ph-modes></section>
+        <ph-automatic .state=${this.state} .lists=${this.lists}></ph-automatic>
+      </div>
+    </div>`;
+  }
+}
+customElements.define("ph-display", DisplayTab);
+
+// The Divoom community gallery: browse by category, show a picture now or keep it in a profile.
+const CATEGORIES = ["recommended", "top", "new", "animal", "food", "character", "emoji", "nature", "plant", "person", "festival", "pattern", "symbol", "creative", "daily"];
+const categoryName = (c) => ({ recommended: t("Recommended"), top: t("Top"), new: t("New"), animal: t("Animals"), food: t("Food"), character: t("Characters"),
+  emoji: t("Emoji"), nature: t("Nature"), plant: t("Plants"), person: t("People"), festival: t("Festivals"), pattern: t("Patterns"), symbol: t("Symbols"),
+  creative: t("Creative"), daily: t("Everyday") })[c] ?? c;
+const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
+
+class GalleryTab extends LitElement {
+  static properties = { state: { attribute: false }, width: { state: true }, category: { state: true }, sort: { state: true }, items: { state: true }, page: { state: true },
+    more: { state: true }, pages: { state: true }, loading: { state: true }, picked: { state: true }, busy: { state: true }, problem: { state: true },
+    query: { state: true }, searched: { state: true }, indexing: { state: true }, lists: { state: true }, open: { state: true },
+    saving: { state: true }, newList: { state: true }, renaming: { state: true } };
+  static styles = [base, css`
+    .bar { display: grid; gap: 10px; margin-bottom: 14px; }
+    .cats { display: flex; gap: 6px; flex-wrap: wrap; }
+    @media (max-width: 599px) {
+      .cats { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px; scroll-padding: 16px; }
+      .cats::-webkit-scrollbar { display: none; }
+    }
+    .find { display: flex; gap: 8px; }
+    .find input { flex: 1; min-width: 0; height: 40px; border-radius: 12px; padding: 0 14px; }
+    .cat { flex: none; border: 1px solid var(--line); background: none; border-radius: 999px; height: 34px; padding: 0 14px; font-size: 13px; color: var(--muted); cursor: pointer; }
+    .cat[aria-pressed=true] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+    .cat.mine { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+    .grid { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); gap: 8px; }
+    .item { position: relative; aspect-ratio: 1; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: #000; overflow: hidden; cursor: pointer; }
+    .item img { width: 100%; height: 100%; display: block; }
+    .item[aria-pressed=true] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+    .kept { position: absolute; right: 4px; top: 4px; width: 16px; height: 16px; color: var(--accent); filter: drop-shadow(0 0 3px #000); }
+    .kept svg { width: 16px; height: 16px; }
+    .more { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 18px; flex-wrap: wrap; }
+    .pg { min-width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--line); background: none; color: var(--muted); font: inherit; font-variant-numeric: tabular-nums; cursor: pointer; }
+    .pg[aria-current=page] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+    .pg:disabled { opacity: .35; cursor: default; }
+    .gap { color: var(--muted); padding: 0 2px; }
+    .about { margin: 6px 0 0; font-size: 13px; color: var(--muted); white-space: pre-line; max-height: 4.5em; overflow: auto; }
+    .sheet { position: sticky; top: 64px; z-index: 3; margin-bottom: 14px; background: var(--surface); border: 1px solid var(--accent); border-radius: 18px; padding: 14px;
+      display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px; align-items: start; box-shadow: 0 14px 40px -12px rgba(0, 0, 0, .6); }
+    .sheet img { width: 96px; height: 96px; border-radius: 10px; background: #000; }
+    .sheet h3 { margin: 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sheet .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+    .sheet select { max-width: 150px; }
+    .meta { display: flex; gap: 12px; flex-wrap: wrap; }
+    .save[aria-expanded=true] { border-color: var(--accent); color: var(--accent); }
+    .saveto { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 12px; display: grid; gap: 8px; }
+    .saveto label { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
+    .saveto input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
+    .make { display: flex; gap: 8px; }
+    .make input { flex: 1; min-width: 0; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+    .card-list { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); padding: 10px; cursor: pointer; text-align: left; display: grid; gap: 8px; color: inherit; }
+    .card-list:hover { border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); }
+    .thumbs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px; aspect-ratio: 1; background: #000; border-radius: 10px; overflow: hidden; }
+    .thumbs img { width: 100%; height: 100%; display: block; }
+    .card-list b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .head-list { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .head-list h2 { margin: 0; font-size: 18px; flex: 1; min-width: 0; color: var(--ink); }
+    .empty { padding: 30px 0; text-align: center; }
+  `];
+  constructor() { super(); this.category = "recommended"; this.sort = "likes"; this.items = []; this.page = 1; this.lists = []; this.buffer = []; }
+  connectedCallback() { super.connectedCallback(); this.loadLists(); if (!this.items.length) this.load(true); }
+
+  async loadLists() { try { this.lists = (await api("GET", "lists")).lists; } catch { /* the status poll shows outages */ } }
+  listsWith(file) { return this.lists.filter((l) => l.items.some((i) => i.file === file)).map((l) => l.name); }
+  get current() { return this.lists.find((l) => l.name === this.open); }
+
+  async listCall(method, path, body) {
+    this.busy = true;
+    try { this.lists = (await api(method, path, body)).lists; return true; } catch (e) { toast(this, e.message); return false; } finally { this.busy = false; }
+  }
+  async keep(list, item, on) {
+    const path = `lists/${encodeURIComponent(list)}/items`;
+    await (on ? this.listCall("POST", path, { file: item.file, name: item.name, author: item.author, likes: item.likes })
+      : this.listCall("DELETE", `${path}?file=${encodeURIComponent(item.file)}`));
+    if (this.open === list && !on) this.picked = null;
+  }
+  async makeList(item) {
+    const name = (this.newList ?? "").trim();
+    if (!name || !(await this.listCall("POST", "lists", { name }))) return;
+    this.newList = "";
+    if (item) await this.keep(this.lists.at(-1).name, item, true);
+  }
+  onEvo(l) {
+    const a = defaultChannel(this.state)?.ambient;
+    return !!a && seconds(a.pictures) > 0 && a.list?.toLowerCase() === l.name.toLowerCase();
+  }
+  async play(l) {
+    const a = defaultChannel(this.state).ambient;
+    this.busy = true;
+    if (await saveChannel(this, this.state, { ambient: { ...a, list: l.name, pictures: seconds(a.pictures) ? a.pictures : "1m" } })) toast(this, t("{name} plays on the Evo in automatic", { name: l.name }));
+    this.busy = false;
+  }
+  async upload(l, input) {
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    const form = new FormData();
+    form.append("file", file);
+    this.busy = true;
+    try {
+      const res = await fetch(`api/lists/${encodeURIComponent(l.name)}/upload`, { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      this.lists = data.lists;
+      toast(this, t("Added to {name}", { name: l.name }));
+    } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+  async renameList() {
+    const name = (this.renaming ?? "").trim();
+    if (name && (await this.listCall("PUT", `lists/${encodeURIComponent(this.open)}`, { name }))) { this.open = this.lists.find((l) => l.name.toLowerCase() === name.toLowerCase())?.name; this.renaming = null; }
+  }
+  async deleteList() {
+    if (!confirm(t("Delete the list {name}? Its drawings stay in the gallery.", { name: this.open }))) return;
+    if (await this.listCall("DELETE", `lists/${encodeURIComponent(this.open)}`)) { this.open = null; this.picked = null; }
+  }
+
+  // Upstream pages come in uneven sizes, so pictures pile up in one buffer and pages are cut from it
+  // in whole rows of the grid; the page after the one shown is always fetched ahead.
+  get cols() { return Math.max(1, Math.floor(((this.width ?? 900) + 8) / (86 + 8))); }
+  get perPage() { const c = this.cols; return c * Math.max(2, Math.round(60 / c)); }
+
+  async fill(want) {
+    const run = this.run;
+    while (this.buffer.length < want && !this.exhausted) {
+      if (!this.fetching) {
+        const next = this.fetched + 1;
+        this.fetching = (this.searched
+          ? api("GET", `gallery/search?q=${encodeURIComponent(this.searched)}&page=${next}`)
+          : api("GET", `gallery?category=${this.category}&sort=${this.sort}&page=${next}`)
+        ).then((r) => {
+          if (run !== this.run) return;
+          const seen = new Set(this.buffer.map((i) => i.file));
+          this.buffer.push(...r.items.filter((i) => !seen.has(i.file)));
+          this.fetched = next;
+          this.exhausted = !r.more || !r.items.length;
+          this.indexing = r.of && r.indexed < r.of ? r : null;
+        }).finally(() => { if (run === this.run) this.fetching = null; });
+      }
+      await this.fetching;
+      if (run !== this.run) return;
+    }
+  }
+
+  async load(fresh, page = 1) {
+    if (this.category === "lists") return;
+    if (fresh) Object.assign(this, { run: (this.run ?? 0) + 1, buffer: [], fetched: 0, exhausted: false, fetching: null });
+    else { this.picked = null; this.scrollIntoView({ block: "start" }); }
+    const run = this.run;
+    this.loading = true;
+    this.problem = "";
+    try {
+      await this.fill(page * this.perPage);
+      if (run !== this.run) return;
+      this.page = page;
+      this.cut();
+      this.fill((page + 1) * this.perPage).then(() => {
+        this.cut();
+        this.buffer.slice(page * this.perPage, (page + 1) * this.perPage).forEach((i) => { new Image().src = gifURL(i.file); });
+      }).catch(() => {});
+    } catch (e) { this.problem = e.message; }
+    if (run === this.run) this.loading = false;
+  }
+
+  cut() {
+    const n = this.perPage, from = (this.page - 1) * n;
+    if (from && from >= this.buffer.length) this.page = Math.max(1, Math.ceil(this.buffer.length / n));
+    const start = (this.page - 1) * n;
+    const items = this.buffer.slice(start, start + n);
+    // A short last page only when the gallery has nothing more to give.
+    const whole = this.exhausted ? items : items.slice(0, Math.max(this.cols, items.length - (items.length % this.cols)));
+    if (whole.length !== this.items.length || whole.some((i, k) => i.file !== this.items[k]?.file)) this.items = whole;
+    this.more = !this.exhausted || this.buffer.length > start + n;
+    this.pages = this.exhausted ? Math.max(1, Math.ceil(this.buffer.length / n)) : undefined;
+  }
+
+  firstUpdated() {
+    new ResizeObserver(([e]) => {
+      const before = this.perPage, first = (this.page - 1) * before;
+      this.width = e.contentRect.width;
+      if (this.perPage !== before && this.buffer?.length) { this.page = Math.floor(first / this.perPage) + 1; this.load(false, this.page); }
+    }).observe(this);
+  }
+
+  // The gallery's own page count is unknown until it runs out, so the pager shows one page ahead.
+  pager() {
+    const p = this.page, last = this.pages ?? (this.more ? p + 1 : p);
+    if (last <= 1) return nothing;
+    const shown = [...new Set([1, p - 2, p - 1, p, p + 1, p + 2, ...(this.pages ? [last] : [])])].filter((n) => n >= 1 && n <= last).sort((a, b) => a - b);
+    const btn = (n, label, aria) => html`<button class="pg" aria-label=${aria ?? t("Page {n}", { n })} aria-current=${n === p ? "page" : "false"}
+      ?disabled=${this.loading || n < 1 || n > last} @click=${() => n !== p && this.load(false, n)}>${label ?? n}</button>`;
+    return html`${btn(p - 1, "‹", t("Previous page"))}
+      ${shown.map((n, i) => html`${i && n - shown[i - 1] > 1 ? html`<span class="gap">…</span>` : nothing}${btn(n)}`)}
+      ${!this.pages && this.more ? html`<span class="gap">…</span>` : nothing}
+      ${btn(p + 1, "›", t("Next page"))}`;
+  }
+  pick(field, value) {
+    this[field] = value;
+    Object.assign(this, { picked: null, searched: "", query: "", open: null, saving: false, renaming: null });
+    this.load(true);
+  }
+  search(e) {
+    e.preventDefault();
+    this.searched = (this.query ?? "").trim();
+    if (this.category === "lists") this.category = "recommended";
+    Object.assign(this, { picked: null, open: null });
+    this.load(true);
+  }
+
+  async show() {
+    this.busy = true;
+    try { await api("POST", "gallery/show", { file: this.picked.file, name: this.picked.name, for: "30s" }); send(this, "refresh"); toast(this, t("Showing {name} for 30 s", { name: this.picked.name })); }
+    catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+
+  sheet(p) {
+    const inLists = this.listsWith(p.file);
+    return html`<div class="sheet" role="dialog" aria-label=${p.name}>
+      <img class="pix" src=${gifURL(p.file)} alt="">
+      <div><h3>${p.name}</h3><span class="small muted meta"><span>${p.author}</span><span>${p.likes} ♥</span>
+          ${p.category && CATEGORIES.includes(p.category) ? html`<button class="cat" style="height:24px;padding:0 10px" @click=${() => this.pick("category", p.category)}>${categoryName(p.category)}</button>` : nothing}</span>
+        ${p.about ? html`<p class="about">${p.about}</p>` : nothing}
+        <div class="acts">
+          <button class="btn small save" aria-expanded=${String(!!this.saving)} @click=${() => { this.saving = !this.saving; }}>
+            ${icons.bookmark}${inLists.length ? t("Saved in {n}", { n: inLists.length }) : t("Save")}</button>
+          <button class="btn primary small" ?disabled=${this.busy} @click=${() => this.show()}>${t("Show for 30 s")}</button>
+          <button class="icon" aria-label=${t("Close")} @click=${() => { this.picked = null; this.saving = false; }}>${icons.close}</button>
+        </div></div>
+      ${this.saving ? html`<div class="saveto">
+        ${this.lists.map((l) => html`<label><input type="checkbox" .checked=${inLists.includes(l.name)} ?disabled=${this.busy}
+          @change=${(e) => this.keep(l.name, p, e.target.checked)}>${l.name}<span class="small muted">${l.items.length}</span></label>`)}
+        <form class="make" @submit=${(e) => { e.preventDefault(); this.makeList(p); }}>
+          <input placeholder=${t("New list")} aria-label=${t("New list")} maxlength="40" .value=${this.newList ?? ""} @input=${(e) => { this.newList = e.target.value; }}>
+          <button class="btn small" type="submit" ?disabled=${this.busy || !(this.newList ?? "").trim()}>${t("Create and save")}</button>
+        </form></div>` : nothing}
+    </div>`;
+  }
+
+  grid(items) {
+    const p = this.picked;
+    const kept = new Set(this.lists.flatMap((l) => l.items.map((i) => i.file)));
+    return html`<div class="grid" style="--cols:${this.cols}">${repeat(items, (i) => i.file, (i) => html`<button class="item" aria-pressed=${String(p?.file === i.file)} title=${i.name} aria-label=${i.name}
+      @click=${() => { this.picked = i; this.saving = false; }}><img class="pix" src=${gifURL(i.file)} alt="" loading="lazy" @error=${(e) => { e.target.parentElement.hidden = true; }}>${kept.has(i.file) ? html`<span class="kept" aria-label=${t("Saved")}>${icons.bookmark}</span>` : nothing}</button>`)}</div>`;
+  }
+
+  myLists() {
+    const l = this.current;
+    if (l) {
+      return html`<div class="head-list">
+          <button class="icon" aria-label=${t("All my lists")} @click=${() => { this.open = null; this.picked = null; }}>${icons.back}</button>
+          ${this.renaming !== null && this.renaming !== undefined
+            ? html`<form class="make" style="flex:1" @submit=${(e) => { e.preventDefault(); this.renameList(); }}>
+                <input aria-label=${t("List name")} maxlength="40" .value=${this.renaming} @input=${(e) => { this.renaming = e.target.value; }}>
+                <button class="btn small" type="submit">${t("Rename")}</button><button class="btn small" type="button" @click=${() => { this.renaming = null; }}>${t("Cancel")}</button></form>`
+            : html`<h2>${l.name}</h2><span class="small muted">${t("{n} drawings", { n: l.items.length })}</span>
+                ${this.onEvo(l) ? html`<span class="tag on">${t("On the Evo")}</span>`
+                  : html`<button class="btn small primary" ?disabled=${this.busy || !l.items.length} @click=${() => this.play(l)}>${t("Show on the Evo")}</button>`}
+                <label class="btn small">${icons.plus ?? ""}${t("Upload a drawing")}<input type="file" accept="image/gif,image/png" hidden @change=${(e) => this.upload(l, e.target)}></label>
+                <button class="btn small" @click=${() => { this.renaming = l.name; }}>${t("Rename")}</button>
+                <button class="icon trash" aria-label=${t("Delete list")} @click=${() => this.deleteList()}>${icons.trash}</button>`}
+        </div>
+        ${this.picked ? this.sheet(this.picked) : nothing}
+        ${l.items.length ? this.grid(l.items) : html`<p class="empty muted">${t("This list is empty. Open a drawing in the gallery and tap Save.")}</p>`}`;
+    }
+    return html`
+      <form class="make" style="margin-bottom:14px" @submit=${(e) => { e.preventDefault(); this.makeList(); }}>
+        <input placeholder=${t("New list")} aria-label=${t("New list")} maxlength="40" .value=${this.newList ?? ""} @input=${(e) => { this.newList = e.target.value; }}>
+        <button class="btn" type="submit" ?disabled=${this.busy || !(this.newList ?? "").trim()}>${t("Create list")}</button>
+      </form>
+      ${this.lists.length ? html`<div class="cards">${this.lists.map((x) => html`<button class="card-list" @click=${() => { this.open = x.name; this.picked = null; }}>
+          <div class="thumbs">${[0, 1, 2, 3].map((k) => x.items[k] ? html`<img class="pix" src=${gifURL(x.items[k].file)} alt="" loading="lazy">` : html`<span></span>`)}</div>
+          <b>${x.name}</b><span class="small muted">${t("{n} drawings", { n: x.items.length })}</span></button>`)}</div>`
+        : html`<p class="empty muted">${t("No lists yet. Create one here, or open a drawing and tap Save.")}</p>`}`;
+  }
+
+  render() {
+    const mine = this.category === "lists" && !this.searched;
+    return html`
+      <div class="bar">
+        <form class="find" role="search" @submit=${(e) => this.search(e)}>
+          <input type="search" placeholder=${t("Search: cat, heart, pumpkin…")} aria-label=${t("Search the gallery")} .value=${this.query ?? ""} @input=${(e) => { this.query = e.target.value; }}>
+          <button class="btn primary" type="submit">${t("Search")}</button>
+        </form>
+        <div class="cats" role="group" aria-label=${t("Categories")}>
+          <button class="cat mine" aria-pressed=${String(mine)} @click=${() => this.pick("category", "lists")}>${t("My lists")}</button>
+          ${CATEGORIES.map((c) => html`<button class="cat" aria-pressed=${String(!this.searched && c === this.category)} @click=${() => this.pick("category", c)}>${categoryName(c)}</button>`)}</div>
+        ${this.searched
+          ? html`<p class="small muted">${t("Results for “{q}” among the most liked of every category.", { q: this.searched })}
+              ${this.indexing ? html`<br>${t("Still gathering the gallery ({n} of {of} pages); search again in a minute for more.", { n: this.indexing.indexed, of: this.indexing.of })}` : nothing}</p>`
+          : mine ? nothing
+          : html`<div>${segmented([["likes", t("Most liked")], ["new", t("Newest")]], this.sort, (v) => this.pick("sort", v))}</div>`}
+      </div>
+      ${mine ? this.myLists() : html`
+        ${this.picked ? this.sheet(this.picked) : nothing}
+        ${this.problem ? html`<p class="err">${this.problem}</p>` : nothing}
+        ${!this.items.length && !this.loading && !this.problem ? html`<p class="empty muted">${this.searched ? t("Nothing found. Try another word, in English it finds more.") : t("Nothing in this category right now.")}</p>` : nothing}
+        ${this.grid(this.items)}
+        <nav class="more" aria-label=${t("Pages")}>${this.pager()}${this.loading ? html`<span class="muted small">${t("Loading")}</span>` : nothing}</nav>`}`;
+  }
+}
+customElements.define("ph-gallery", GalleryTab);
+
+// Links a Spotify account; what it plays can then show on the display, over scenes and pictures.
+class SpotifyCard extends LitElement {
+  static properties = { state: { attribute: false }, info: { state: true }, draft: { state: true }, busy: { state: true } };
+  static styles = [base, css`
+    .grid { display: grid; gap: 14px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .row input { flex: 1 1 260px; font-family: var(--font-data); }
+    ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; }
+    code { font-family: var(--font-data); font-size: 12px; background: var(--chip); padding: 2px 6px; border-radius: 6px; overflow-wrap: anywhere; }
+    a { color: var(--accent); }
+    .now { display: grid; gap: 2px; padding: 12px; border-radius: 12px; background: var(--chip); }
+    .now b { font-weight: 600; }
+    .toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+    .devices { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 4px 0 6px; }
+    input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
+  `];
+  connectedCallback() { super.connectedCallback(); this.load(); this.timer = setInterval(() => { if (!document.hidden) this.load(); }, 5000); }
+  disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.timer); }
+  async load() { try { this.info = await api("GET", "spotify"); } catch { /* the status poll shows outages */ } }
+  async call(method, body) {
+    this.busy = true;
+    try { this.info = await api(method, "spotify", body); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+  async music(patch) {
+    const next = { ...(this.state?.music ?? { enabled: false }), ...patch };
+    if (!next.view) delete next.view;
+    if (!next.devices?.length) delete next.devices;
+    try { saved(this, await api("PUT", "settings", { music: next })); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+  }
+  callback() {
+    const host = location.hostname === "localhost" ? "127.0.0.1" : location.hostname;
+    return `${location.protocol}//${host}${location.port ? `:${location.port}` : ""}/api/spotify/callback`;
+  }
+
+  render() {
+    const i = this.info;
+    if (!i) return nothing;
+    const m = this.state?.music ?? {};
+    const show = m.view?.mode ?? "cover";
+    return html`<section class="card" aria-labelledby="sp-h">
+      <div class="head"><h2 id="sp-h">Spotify</h2>${i.connected ? html`<span class="tag on">${t("Connected")}</span>` : nothing}</div>
+      <div class="grid">
+        ${!i.configured ? html`
+          <ol>
+            <li>${t("Create an app at")} <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">developer.spotify.com/dashboard</a> ${t("with the Web API.")}</li>
+            <li>${t("Add this redirect URI to it:")} <code>${this.callback()}</code></li>
+            <li>${t("Paste its client ID here.")}</li>
+          </ol>
+          <div class="row"><input placeholder=${t("Client ID")} aria-label=${t("Client ID")} .value=${this.draft ?? ""} @input=${(e) => { this.draft = e.target.value; }}>
+            <button class="btn primary" ?disabled=${this.busy || !this.draft} @click=${() => this.call("PUT", { client_id: this.draft })}>${t("Save")}</button></div>`
+        : !i.connected ? html`
+          <p class="small muted">${t("The Spotify app must list this redirect URI:")} <code>${this.callback()}</code></p>
+          <div class="row"><a class="btn primary" href="api/spotify/login">${t("Connect Spotify")}</a></div>`
+        : html`
+          <p class="small muted">${t("Signed in as {user}.", { user: i.user ?? "?" })}</p>
+          <label class="toggle"><input type="checkbox" .checked=${!!m.enabled} @change=${(e) => this.music({ enabled: e.target.checked })}>${t("Show on the display while it plays")}</label>
+          <div><span class="label">${t("What to show")}</span>${segmented([["cover", t("Album cover")], ["visualizer", t("Visualiser")], ["animations", t("My animations")]], show,
+            (v) => this.music({ view: v === "cover" ? undefined : { mode: v } }))}</div>
+          ${i.devices?.length ? html`<div><span class="label">${t("Only when it plays on")}</span>
+            <div class="devices">${i.devices.map((d) => html`<label class="toggle"><input type="checkbox" .checked=${(m.devices ?? []).includes(d)}
+              @change=${(e) => this.music({ devices: e.target.checked ? [...(m.devices ?? []), d] : (m.devices ?? []).filter((x) => x !== d) })}>${d}</label>`)}</div>
+            <p class="small muted">${(m.devices ?? []).length ? t("Music on any other device is left alone.") : t("None ticked: music on any device shows, also away from home.")}</p></div>` : nothing}
+          ${i.error ? html`<p class="err">${i.error}</p>` : nothing}
+          <div class="row"><button class="btn small" ?disabled=${this.busy} @click=${() => this.call("DELETE")}>${t("Disconnect")}</button></div>`}
+      </div>
+    </section>`;
+  }
+}
+customElements.define("ph-spotify", SpotifyCard);
+
+// Everything about music in one place: what plays, how it shows, the account, the display's own visualiser.
+class MusicTab extends LitElement {
+  static properties = { state: { attribute: false }, status: { attribute: false }, styles: { attribute: false }, info: { state: true }, busy: { state: true } };
+  static styles = [base, css`
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+    @media (min-width: 900px) { .layout { grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); align-items: start; } .side { position: sticky; top: 88px; } }
+    .side, .main { display: grid; gap: 18px; min-width: 0; }
+    .playing { display: grid; gap: 12px; justify-items: center; text-align: center; }
+    ph-led { width: min(100%, 300px); }
+    .playing.idle { padding-block: 14px; gap: 4px; }
+    .playing.idle p { margin: 0; }
+    .playing.idle .head { margin-bottom: 0; }
+    @media (max-width: 599px) { ph-led { width: min(60%, 220px); } }
+    .playing b { font-size: 17px; font-weight: 600; }
+    .playing .who { color: var(--muted); font-size: 14px; }
+    .state { font-size: 13px; padding: 6px 12px; border-radius: 999px; background: var(--chip); }
+    .state.on { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+    .choices { display: flex; flex-wrap: wrap; gap: 6px; }
+    .choice { border: 1px solid var(--line); background: none; border-radius: 999px; height: 36px; width: 44px; font-size: 14px; color: var(--muted); cursor: pointer; }
+    .choice[aria-pressed=true] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  `];
+  connectedCallback() { super.connectedCallback(); this.load(); this.timer = setInterval(() => { if (!document.hidden) this.load(); }, 5000); }
+  disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.timer); }
+  async load() { try { this.info = await api("GET", "spotify"); } catch { /* the status poll shows outages */ } }
+
+  // Why the music shows on the display or not, in the user's terms.
+  why() {
+    const i = this.info, m = this.state?.music ?? {}, s = this.status;
+    if (s?.layer === "music") return [true, t("On the display now")];
+    if (!i?.now?.playing) return [false, t("Paused")];
+    if (!m.enabled) return [false, t("Not shown: showing music on the display is off")];
+    if (m.devices?.length && !m.devices.includes(i.now.device)) return [false, t("Not shown: {device} is not one of the picked devices", { device: i.now.device })];
+    if (s?.layer === "alert" || s?.layer === "mode") return [false, t("Not shown: an alert or a mode picked by hand is on top")];
+    return [false, t("Not shown yet")];
+  }
+
+  async visualizer(style) {
+    this.busy = true;
+    try { saved(this, await api("PUT", "mode", { mode: "visualizer", ...(style ? { style } : {}) })); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+  async automatic() {
+    this.busy = true;
+    try { saved(this, await api("DELETE", "mode")); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+
+  render() {
+    const now = this.info?.now;
+    const mode = this.state?.mode;
+    const vis = mode?.mode === "visualizer" ? (mode.style ?? 0) : -1;
+    const [on, why] = this.why();
+    return html`<div class="layout">
+      <div class="side">
+        <section class="card playing ${now ? "" : "idle"}" aria-labelledby="np-h">
+          <div class="head" style="width:100%"><h2 id="np-h">${t("Now playing")}</h2></div>
+          ${now ? html`
+            <ph-led .src=${`api/spotify/cover.png?t=${encodeURIComponent(now.track)}`} .label=${now.track}></ph-led>
+            <div><b>${now.track}</b><div class="who">${now.artists}</div><div class="small muted">${now.device}</div></div>
+            <span class="state ${on ? "on" : ""}">${why}</span>`
+          : html`<p class="muted">${this.info?.connected ? t("Nothing is playing.") : t("Connect Spotify below to see what plays.")}</p>`}
+        </section>
+      </div>
+      <div class="main">
+        <ph-spotify .state=${this.state}></ph-spotify>
+        <section class="card" aria-labelledby="vz-h">
+          <div class="head"><h2 id="vz-h">${t("The Evo's visualiser")}</h2></div>
+          <div class="choices" role="group" aria-label=${t("Visualiser")}>${Array.from({ length: this.styles?.visualizer ?? 12 }, (_, k) =>
+            html`<button class="choice" aria-pressed=${String(vis === k)} ?disabled=${this.busy} @click=${() => this.visualizer(k)}>${k + 1}</button>`)}</div>
+          <p class="small muted">${t("It follows what the Evo plays as a speaker, not the room's sound.")}</p>
+          ${vis >= 0 ? html`<div class="row"><button class="btn small" ?disabled=${this.busy} @click=${() => this.automatic()}>${t("Back to automatic")}</button></div>` : nothing}
+        </section>
+      </div>
+    </div>`;
+  }
+}
+customElements.define("ph-music", MusicTab);
+
+const SKIES = () => ({ 1: t("Clear"), 3: t("Cloudy"), 5: t("Storm"), 6: t("Rain"), 8: t("Snow"), 9: t("Fog") });
+const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+const APPS = ["weather", "countdown", "stopwatch", "noise", "scoreboard"];
+const appIcons = {
+  weather: icon(svg`<path d="M7 18a4 4 0 1 1 .9-7.9A5.5 5.5 0 0 1 18.5 12 3 3 0 0 1 18 18Z"/>`),
+  countdown: icon(svg`<path d="M6 2h12M6 22h12M7 2c0 6 10 6 10 10S7 16 7 22M17 2c0 6-10 6-10 10s10 4 10 10"/>`),
+  stopwatch: icon(svg`<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M10 2h4M12 2v3"/>`),
+  noise: icon(svg`<path d="M3 15v4M7 11v8M11 7v12M15 11v8M19 4v15"/>`),
+  scoreboard: icon(svg`<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M12 6v12"/>`),
+};
+const appName = (a) => ({ weather: t("Weather"), countdown: t("Countdown"), stopwatch: t("Stopwatch"), noise: t("Noise meter"), scoreboard: t("Scoreboard") })[a];
+
+// The display's built-in apps, and the weather its clock can show; one app's controls at a time.
+class AppsTab extends LitElement {
+  static properties = { state: { attribute: false }, weather: { state: true }, busy: { state: true }, picked: { state: true }, minutes: { state: true }, seconds: { state: true }, now: { state: true } };
+  static styles = [base, css`
+    .apps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    @media (max-width: 559px) {
+      .apps { display: flex; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 2px 16px; }
+      .apps::-webkit-scrollbar { display: none; }
+      .app { flex: 0 0 96px; }
+    }
+    @media (min-width: 560px) { .apps { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+    .app { border: 1px solid var(--line); background: var(--surface); border-radius: 16px; padding: 12px 6px 10px; display: grid; justify-items: center; gap: 4px; cursor: pointer; color: var(--muted); min-width: 0; }
+    .app svg { width: 24px; height: 24px; margin-bottom: 2px; }
+    .app b { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+    .app small { font-size: 12px; font-variant-numeric: tabular-nums; min-height: 15px; display: inline-flex; align-items: center; gap: 5px; }
+    .app small.live { color: var(--ok); }
+    .app small.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .app:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); }
+    .app[aria-pressed=true] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+    .app[aria-pressed=true] svg { color: var(--accent); }
+    .panel { margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 18px; display: grid; gap: 18px; }
+    @media (min-width: 760px) { .panel { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); align-items: center; gap: 28px; padding: 24px; } }
+    .lcd { background: var(--case); border: 1px solid var(--line); border-radius: 16px; min-height: 150px; display: grid; place-items: center; align-content: center; gap: 6px; padding: 18px; text-align: center; }
+    .lcd output { font-family: var(--font-data); font-weight: 500; letter-spacing: -.02em; font-size: 60px; line-height: 1; color: var(--accent); text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 45%, transparent); font-variant-numeric: tabular-nums; }
+    .lcd output.idle { color: var(--muted); text-shadow: none; }
+    .lcd span { font-size: 13px; color: var(--muted); }
+    .side { display: grid; gap: 16px; min-width: 0; }
+    .side h3 { margin: 0; font-size: 17px; font-weight: 600; }
+    .side p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .actions .btn { height: 42px; padding: 0 18px; font-size: 15px; }
+    @media (max-width: 559px) { .actions .btn { flex: 1 1 0; justify-content: center; } }
+    .label { font-size: 12px; color: var(--muted); margin-bottom: 6px; display: block; }
+    .presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .choice { border: 1px solid var(--line); background: none; border-radius: 10px; height: 36px; padding: 0 14px; font-size: 14px; color: var(--muted); cursor: pointer; font-variant-numeric: tabular-nums; }
+    .choice:hover { color: var(--ink); }
+    .choice[aria-pressed=true] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+    .time { display: inline-flex; align-items: center; gap: 4px; font-size: 18px; color: var(--muted); margin-left: 6px; }
+    .time input { width: 64px; height: 36px; text-align: center; font-variant-numeric: tabular-nums; }
+    .note { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; }
+    .link { border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; padding: 0; }
+    .score { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .team { border-radius: 14px; padding: 14px 10px; display: grid; justify-items: center; gap: 10px; background: color-mix(in srgb, var(--team) 14%, var(--case)); border: 1px solid color-mix(in srgb, var(--team) 40%, transparent); }
+    .team span { font-size: 13px; color: var(--muted); }
+    .team output { font-family: var(--font-data); font-weight: 500; font-size: 46px; line-height: 1; color: var(--team); font-variant-numeric: tabular-nums; }
+    .team .pm { display: flex; gap: 8px; }
+    .team button { width: 46px; height: 40px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--team) 40%, transparent); background: var(--surface); color: var(--ink); font-size: 20px; cursor: pointer; }
+  `];
+  constructor() { super(); this.minutes = 5; this.seconds = 0; }
+  connectedCallback() {
+    super.connectedCallback(); this.load(); this.now = Date.now();
+    this.timer = setInterval(() => { if (!document.hidden) this.load(); }, 60000);
+    this.tick = setInterval(() => { if (this.mode.running) this.now = Date.now(); }, 1000);
+  }
+  disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.timer); clearInterval(this.tick); }
+  async load() { try { this.weather = await api("GET", "weather"); } catch { /* the status poll shows outages */ } }
+
+  get mode() { return this.state?.mode ?? {}; }
+  get showing() { return APPS.includes(this.mode.mode) ? this.mode.mode : null; }
+  // Seconds since a running tool started, from the time pixelhub sent it.
+  elapsed() { return this.mode.since ? Math.max(0, Math.floor(this.now / 1000) - this.mode.since) : 0; }
+  counted() { const m = this.mode; return (m.seconds ?? 0) + (m.running ? this.elapsed() : 0); }
+  left() { const m = this.mode; return m.running ? Math.max(0, (m.seconds ?? 0) - this.elapsed()) : (m.seconds ?? 0); }
+  get total() { return Math.min(5999, Math.max(1, (Number(this.minutes) || 0) * 60 + (Number(this.seconds) || 0))); }
+
+  async call(method, path, body, done) {
+    this.busy = true;
+    try { const r = await api(method, path, body); if (path !== "weather/show" && r) saved(this, r); send(this, "refresh"); if (done) toast(this, done); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+  run(view) { return this.call("PUT", "mode", view); }
+  automatic() { return this.call("DELETE", "mode"); }
+
+  status(a) {
+    const m = this.mode, on = this.showing === a;
+    if (a === "weather") return this.weather?.known ? html`<small>${this.weather.celsius}°</small>` : html`<small></small>`;
+    if (!on) return html`<small></small>`;
+    if (a === "countdown") return html`<small class=${m.running ? "live" : ""}>${mmss(this.left())}</small>`;
+    if (a === "stopwatch") return html`<small class=${m.running ? "live" : ""}>${mmss(this.counted())}</small>`;
+    if (a === "scoreboard") return html`<small class="live">${m.red ?? 0} : ${m.blue ?? 0}</small>`;
+    return html`<small class=${m.running ? "live" : ""}>${m.running ? t("On") : t("Off")}</small>`;
+  }
+
+  back() {
+    return this.showing === this.current ? html`<div class="note"><span>${t("Showing on the Evo now.")}</span>
+      <button class="btn" ?disabled=${this.busy} @click=${() => this.automatic()}>${t("Back to automatic")}</button></div>` : nothing;
+  }
+
+  weatherPanel() {
+    const w = this.weather, loc = this.state?.location;
+    const greenwich = loc && Math.abs(loc.latitude - 51.4769) < 0.001 && Math.abs(loc.longitude + 0.0005) < 0.001;
+    return html`
+      <div class="lcd">${w?.known
+        ? html`<output>${w.celsius}°</output><span>${SKIES()[w.sky] ?? ""}</span>`
+        : html`<output class="idle">--°</output><span>${w?.error ? t("Could not read the weather") : t("Reading the weather…")}</span>`}</div>
+      <div class="side">
+        <div><h3>${t("Weather")}</h3><p>${t("Shows on the Evo for a few seconds, then it goes back to what it was showing.")}</p></div>
+        <div class="actions">
+          <button class="btn" ?disabled=${this.busy || !w?.known} @click=${() => this.call("POST", "weather/show?what=weather", null, t("Showing the weather on the Evo"))}>${appIcons.weather}${t("Show the weather")}</button>
+          <button class="btn" ?disabled=${this.busy || !w?.known} @click=${() => this.call("POST", "weather/show?what=temperature", null, t("Showing the temperature on the Evo"))}>${icon(svg`<path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0Z"/><path d="M12 9v7"/>`)}${t("Show the temperature")}</button>
+        </div>
+        <div class="note">
+          <span>${greenwich ? t("The location is still the default, Greenwich.") : w?.at ? t("Updated at {time}, every 15 minutes.", { time: new Date(w.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }) : ""}</span>
+          <button class="link" @click=${() => { location.hash = "#settings"; }}>${greenwich ? t("Set your location") : t("Change location")}</button>
+        </div>
+      </div>`;
+  }
+
+  countdownPanel() {
+    const m = this.mode, on = this.showing === "countdown", total = this.total;
+    return html`
+      <div class="lcd"><output class=${on && m.running ? "" : "idle"}>${mmss(on ? this.left() : total)}</output>
+        <span>${on ? (m.running ? (this.left() ? t("Counting down") : t("Done, back to automatic in a minute")) : t("Paused")) : t("Ready")}</span></div>
+      <div class="side">
+        <div>
+          <span class="label">${t("Length")}</span>
+          <div class="presets">${[1, 5, 10, 25].map((n) => html`<button class="choice" aria-pressed=${String(total === n * 60)} @click=${() => { this.minutes = n; this.seconds = 0; }}>${n} min</button>`)}
+            <span class="time" title=${t("Other length")}><input type="number" min="0" max="99" aria-label=${t("Minutes")} .value=${String(this.minutes)} @input=${(e) => { this.minutes = e.target.value; }}>:<input type="number" min="0" max="59" aria-label=${t("Seconds")} .value=${String(this.seconds).padStart(2, "0")} @input=${(e) => { this.seconds = e.target.value; }}></span></div>
+        </div>
+        <div class="actions">
+          ${on && m.running ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "countdown", seconds: Math.max(1, this.left()) })}>${t("Pause")}</button>`
+            : html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "countdown", seconds: on && m.seconds ? m.seconds : total, running: true })}>${on && m.seconds ? t("Resume") : t("Start")}</button>`}
+          <button class="btn" ?disabled=${this.busy || !on} @click=${() => this.run({ mode: "countdown", seconds: total })}>${t("Reset")}</button>
+        </div>
+        ${this.back()}
+      </div>`;
+  }
+
+  stopwatchPanel() {
+    const m = this.mode, shown = this.showing === "stopwatch", on = shown && m.running, paused = shown && !m.running && m.seconds > 0;
+    return html`
+      <div class="lcd"><output class=${on ? "" : "idle"}>${mmss(shown ? this.counted() : 0)}</output>
+        <span>${on ? t("Running") : paused ? t("Paused") : shown ? t("At zero, back to automatic in a minute") : t("Ready")}</span></div>
+      <div class="side">
+        <div><h3>${t("Stopwatch")}</h3><p>${t("Counts up on the Evo from zero.")}</p></div>
+        <div class="actions">
+          ${on ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", seconds: this.counted() })}>${t("Pause")}</button>`
+            : html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", seconds: paused ? m.seconds : undefined, running: true })}>${paused ? t("Resume") : t("Start")}</button>`}
+          <button class="btn" ?disabled=${this.busy || !(on || paused)} @click=${() => this.run({ mode: "stopwatch" })}>${t("Reset")}</button>
+        </div>
+        ${this.back()}
+      </div>`;
+  }
+
+  noisePanel() {
+    const shown = this.showing === "noise", on = shown && this.mode.running;
+    return html`
+      <div class="lcd"><output class=${on ? "" : "idle"}>${on ? t("On") : t("Off")}</output><span>${shown && !on ? t("Back to automatic in a minute") : t("Microphone")}</span></div>
+      <div class="side">
+        <div><h3>${t("Noise meter")}</h3><p>${t("Shows how loud the room is, with the Evo's microphone.")}</p></div>
+        <div class="actions">${on
+          ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "noise" })}>${t("Stop")}</button>`
+          : html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "noise", running: true })}>${t("Start")}</button>`}</div>
+        ${this.back()}
+      </div>`;
+  }
+
+  scoreboardPanel() {
+    const on = this.showing === "scoreboard", v = on ? this.mode : {};
+    const set = (patch) => this.run({ mode: "scoreboard", red: v.red, blue: v.blue, ...patch });
+    const team = (key, label, colour) => html`<div class="team" style="--team:${colour}">
+      <span>${label}</span><output>${v[key] ?? 0}</output>
+      <div class="pm"><button aria-label=${t("{team} minus one", { team: label })} ?disabled=${this.busy} @click=${() => set({ [key]: Math.max(0, (v[key] ?? 0) - 1) || undefined })}>−</button>
+        <button aria-label=${t("{team} plus one", { team: label })} ?disabled=${this.busy} @click=${() => set({ [key]: Math.min(999, (v[key] ?? 0) + 1) })}>+</button></div></div>`;
+    return html`
+      <div class="score">${team("red", t("Red"), "#ff453a")}${team("blue", t("Blue"), "#0a84ff")}</div>
+      <div class="side">
+        <div><h3>${t("Scoreboard")}</h3><p>${t("Each point shows on the Evo as you add it.")}</p></div>
+        <div class="actions">${on
+          ? html`<button class="btn" ?disabled=${this.busy} @click=${() => set({ red: undefined, blue: undefined })}>${t("Reset")}</button>`
+          : html`<button class="btn primary" ?disabled=${this.busy} @click=${() => set({})}>${t("Show")}</button>`}</div>
+        ${this.back()}
+      </div>`;
+  }
+
+  get current() { return this.picked ?? this.showing ?? "weather"; }
+
+  render() {
+    const cur = this.current;
+    return html`
+      <div class="apps" role="group" aria-label=${t("Apps")}>${APPS.map((a) => html`
+        <button class="app" aria-pressed=${String(cur === a)} @click=${() => { this.picked = a; }}>${appIcons[a]}<b>${appName(a)}</b>${this.status(a)}</button>`)}</div>
+      <section class="panel" aria-label=${appName(cur)}>${this[`${cur}Panel`]()}</section>`;
+  }
+}
+customElements.define("ph-apps", AppsTab);
+
+class ConnectionCard extends LitElement {
+  static properties = { status: { attribute: false }, state: { attribute: false }, busy: { state: true } };
+  static styles = [base, css`
+    dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; }
+    dt, dd { margin: 0; padding: 8px 0; border-top: 1px solid var(--line); min-width: 0; }
+    dt { color: var(--muted); font-size: 13px; padding-right: 16px; }
+    dd { font-size: 14px; display: flex; align-items: center; gap: 8px; justify-content: flex-end; text-align: right; overflow-wrap: anywhere; }
+    .actions { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  `];
+  async call(path) {
+    this.busy = true;
+    try { await api("POST", path); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+  async setFor(v) {
+    this.busy = true;
+    try { saved(this, await api("PUT", "settings", { release_for: v })); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+  render() {
+    const s = this.status;
+    if (!s) return nothing;
+    const [tone, linkText] = linkState(s);
+    const released = !!s.released_until;
+    return html`<section class="card" aria-labelledby="co-h">
+      <div class="head"><h2 id="co-h">${t("Connection")}</h2></div>
+      <dl>
+        <dt>${t("Display")}</dt><dd><span class="dot ${tone}"></span>${linkText}</dd>
+        <dt>${t("Last answer")}</dt><dd>${ago(s.last_ack)}</dd>
+        <dt>${t("Battery")}</dt><dd>${s.battery === undefined ? html`<span class="muted small">${t("This bridge cannot read it")}</span>`
+          : html`${Math.min(100, (s.battery + 1) * 10)} %<span class="muted small">${ago(s.battery_at)}</span>`}</dd>
+        ${s.light !== undefined ? html`<dt>${t("Room light")}</dt><dd>${Math.round(s.light / 2.55)} %<span class="muted small">${ago(s.light_at)}</span></dd>` : nothing}
+        <dt>${t("Bridge")}</dt><dd class="mono small">${s.address}</dd>
+      </dl>
+      <div class="actions">
+        ${released
+          ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.call("claim")}>${t("Take back")}</button><span class="small muted">${t("Released until {time}", { time: until(s.released_until) })}</span>`
+          : html`<button class="btn" ?disabled=${this.busy} @click=${() => this.call("release")}>${t("Lend to the phone")}</button>
+            <span class="small muted">${t("for")}</span>
+            <ph-duration .options=${[["30m", "30 min"], ["1h", "1 h"], ["3h", "3 h"], ["8h", "8 h"]]} .value=${this.state?.release_for} max="604800" @change=${(e) => this.setFor(e.detail)}></ph-duration>
+            <p class="small muted" style="flex-basis:100%;margin:0">${t("Lets the Divoom app use the display for a while; then pixelhub takes it back.")}</p>`}
+      </div>
+    </section>`;
+  }
+}
+customElements.define("ph-connection", ConnectionCard);
 
 // A toast hides by itself, but not while the pointer or focus is on it, so its action stays reachable.
 // `expire` is the work an Undo cancels: it runs when the toast goes away any other way.
@@ -980,31 +1478,48 @@ class Toasts {
   }
 }
 
+const TABS = [
+  ["display", "Display", icon(svg`<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 8.5h.01M12 8.5h.01M15.5 8.5h.01M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 15.5h.01M12 15.5h.01M15.5 15.5h.01" stroke-width="2.6"/>`)],
+  ["gallery", "Gallery", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="m14 20 2.5-3.5 2 2.5 1.5-2"/>`)],
+  ["music", "Music", icon(svg`<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>`)],
+  ["apps", "Apps", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M17 13.5v7M13.5 17h7"/>`)],
+  ["settings", "Settings", icon(svg`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>`)],
+];
+
 class PixelhubApp extends LitElement {
-  static properties = { st: { state: true }, status: { state: true }, sprites: { state: true }, version: { state: true }, offline: { state: true }, gone: { state: true } };
+  static properties = { st: { state: true }, status: { state: true }, sprites: { state: true }, modes: { state: true }, version: { state: true }, offline: { state: true }, gone: { state: true }, tab: { state: true } };
   static styles = [base, css`
-    header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
-    .bar { max-width: 1180px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 16px; }
-    .brand { font-family: var(--font-display); font-weight: 700; font-size: 16px; letter-spacing: -.01em; display: flex; align-items: center; gap: 10px; }
+    header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: blur(12px); }
+    .bar { max-width: 1120px; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; gap: 16px; }
+    .brand { font-family: var(--font-pixel); font-size: 20px; display: flex; align-items: center; gap: 10px; letter-spacing: .02em; }
     .brand img { width: 24px; height: 24px; }
-    nav { display: flex; gap: 2px; margin-left: auto; overflow-x: auto; min-width: 0; scrollbar-width: none; }
-    nav button { border: 0; background: none; padding: 6px 10px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer; white-space: nowrap; }
-    nav button:hover { color: var(--ink); background: var(--chip); }
-    .link { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); white-space: nowrap; }
-    @media (max-width: 559px) { .link .word { display: none; } .brand span { display: none; } }
-    main { max-width: 1180px; margin: 0 auto; padding: 16px 16px 48px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
-    main > * { scroll-margin-top: 64px; min-width: 0; }
-    .col { display: contents; }
-    .a-now { order: 1; } .a-switch { order: 2; } .a-channels { order: 3; } .a-schedule { order: 4; } .a-settings { order: 5; } .a-notify { order: 6; }
-    @media (min-width: 980px) {
-      main { grid-template-columns: 400px minmax(0, 1fr); gap: 18px; }
-      .col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
-      .col > * { order: 0; }
+    .link { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); white-space: nowrap; margin-left: auto; }
+    nav { display: flex; gap: 4px; }
+    nav button { border: 0; background: none; border-radius: 12px; color: var(--muted); cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; padding: 8px 12px; }
+    nav button svg { width: 20px; height: 20px; }
+    nav button:hover { color: var(--ink); }
+    nav button[aria-current=page] { color: var(--ink); background: var(--chip); }
+    nav button[aria-current=page] svg { color: var(--accent); }
+    .top { margin-left: 8px; }
+    .bottom { display: none; }
+    @media (max-width: 759px) {
+      .top { display: none; }
+      .bottom { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
+        padding: 6px 8px max(8px, env(safe-area-inset-bottom, 0px)); background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--line); }
+      .bottom button { flex-direction: column; gap: 3px; font-size: 11px; padding: 6px 2px; }
+      .bottom button[aria-current=page] { background: none; }
+      main { padding-bottom: 96px !important; }
     }
-    footer { max-width: 1180px; margin: 0 auto; padding: 0 16px 32px; font-size: 12px; color: var(--muted); }
+    main { max-width: 1120px; margin: 0 auto; padding: 8px 16px 48px; }
+    .tab { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; min-width: 0; }
+    .tab.two { grid-template-columns: minmax(0, 1fr); }
+    @media (min-width: 900px) { .tab.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
+    footer { max-width: 1120px; margin: 0 auto; padding: 0 16px 32px; font-size: 12px; color: var(--muted); }
+    @media (max-width: 759px) { footer { padding-bottom: 96px; } }
     .toast { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); bottom: max(16px, env(safe-area-inset-bottom, 0px)); z-index: 10; max-width: min(440px, calc(100vw - 32px));
       display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 14px; font-size: 13px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 12px;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, .3); animation: rise .18s ease-out; }
+      box-shadow: 0 12px 40px rgba(0, 0, 0, .35); animation: rise .18s ease-out; }
+    @media (max-width: 759px) { .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); } }
     @keyframes rise { from { transform: translateY(8px); opacity: 0; } }
     .toast span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
     .toast button { border: 0; background: none; cursor: pointer; flex: none; }
@@ -1018,6 +1533,7 @@ class PixelhubApp extends LitElement {
   constructor() {
     super();
     this.gone = new Set();
+    this.tab = TABS.some(([id]) => id === location.hash.slice(1)) ? location.hash.slice(1) : "display";
     this.toasts = new Toasts(this);
     this.addEventListener("toast", (e) => this.toasts.show(e.detail));
     this.addEventListener("state", (e) => { this.st = e.detail; });
@@ -1029,19 +1545,28 @@ class PixelhubApp extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    const problem = new URLSearchParams(location.search).get("spotify_error");
+    if (problem) {
+      this.toasts.show({ text: t("Spotify did not connect: {reason}", { reason: problem }) });
+      history.replaceState(null, "", location.pathname + location.hash);
+    }
     this.pollStatus();
     this.loadState();
     api("GET", "sprites").then((r) => { this.sprites = r.sprites; }).catch(() => {});
+    api("GET", "modes").then((r) => { this.modes = r.styles; }).catch(() => {});
     fetch("healthz").then((r) => r.json()).then((r) => { this.version = r.version; }).catch(() => {});
     this.timers = [setInterval(() => { if (!document.hidden) this.pollStatus(); }, STATUS_MS), setInterval(() => { if (!document.hidden) this.loadState(); }, STATE_MS)];
     document.addEventListener("visibilitychange", this.visible);
     addEventListener("pagehide", this.leave);
+    this.hash = () => { const id = location.hash.slice(1); if (TABS.some(([t]) => t === id)) this.tab = id; };
+    addEventListener("hashchange", this.hash);
   }
   disconnectedCallback() {
     super.disconnectedCallback();
     this.timers.forEach(clearInterval);
     document.removeEventListener("visibilitychange", this.visible);
     removeEventListener("pagehide", this.leave);
+    removeEventListener("hashchange", this.hash);
   }
 
   async pollStatus() {
@@ -1055,7 +1580,7 @@ class PixelhubApp extends LitElement {
     const drop = (set) => { const h = new Set(set); h.delete(name); return h; };
     this.gone = new Set(this.gone).add(name);
     this.toasts.show({
-      text: t("Channel {name} deleted", { name }),
+      text: t("Profile {name} deleted", { name }),
       action: { label: t("Undo"), run: () => { this.gone = drop(this.gone); } },
       expire: async () => {
         try { this.st = await api("DELETE", `channels/${encodeURIComponent(name)}`, undefined, { keepalive: true }); }
@@ -1071,30 +1596,41 @@ class PixelhubApp extends LitElement {
     return { ...st, channels: st.channels.filter((c) => !this.gone.has(c.name)), schedule: st.schedule.filter((s) => !this.gone.has(s.channel)) };
   }
 
-  go(id) { this.renderRoot.querySelector(`#${id}`)?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }); }
+  go(id) {
+    this.tab = id;
+    history.replaceState(null, "", `#${id}`);
+    scrollTo({ top: 0 });
+  }
+
+  nav(cls) {
+    return html`<nav class=${cls} aria-label=${t("Sections")}>${TABS.map(([id, label, glyph]) =>
+      html`<button aria-current=${this.tab === id ? "page" : "false"} @click=${() => this.go(id)}>${glyph}<span>${t(label)}</span></button>`)}</nav>`;
+  }
+
+  // The gallery stays mounted, hidden, so its first page is ready before it is opened.
+  page(view) {
+    const gallery = html`<ph-gallery .state=${view} ?hidden=${this.tab !== "gallery"}></ph-gallery>`;
+    switch (this.tab) {
+      case "gallery": return gallery;
+      case "apps": return html`<ph-apps .state=${view}></ph-apps>${gallery}`;
+      case "music": return html`<ph-music .state=${view} .status=${this.status} .styles=${this.modes}></ph-music>${gallery}`;
+      case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<ph-connection .status=${this.status} .state=${view}></ph-connection></div>${gallery}`;
+      default: return html`<ph-display .status=${this.status} .state=${view} .sprites=${this.sprites} .styles=${this.modes} ?offline=${this.offline}></ph-display>${gallery}`;
+    }
+  }
 
   render() {
     const view = this.view;
     const [tone, linkText] = this.status ? linkState(this.status) : ["", t("Loading")];
     return html`
       <header><div class="bar">
-        <div class="brand"><img src="favicon.svg" alt=""><span>pixelhub</span></div>
-        <nav aria-label=${t("Sections")}>${[["now", t("Now")], ["channels", t("Channels")], ["schedule", t("Schedule")], ["settings", t("Settings")]].map(([id, l]) => html`<button @click=${() => this.go(id)}>${l}</button>`)}</nav>
-        <div class="link" title=${linkText}><span class="dot ${this.offline ? "bad" : tone}"></span><span class="word">${this.offline ? t("No answer") : linkText}</span></div>
+        <div class="brand"><img src="favicon.svg" alt="">pixelhub</div>
+        ${this.nav("top")}
+        <div class="link" title=${linkText}><span class="dot ${this.offline ? "bad" : tone}"></span><span>${this.offline ? t("No answer") : linkText}</span></div>
       </div></header>
-      <main>
-        <div class="col">
-          <div class="a-now" id="now"><ph-now .status=${this.status} .state=${view} ?offline=${this.offline}></ph-now></div>
-          <div class="a-switch"><ph-switch .state=${view} .status=${this.status}></ph-switch></div>
-          <div class="a-notify"><ph-notify .sprites=${this.sprites}></ph-notify></div>
-          <div class="a-settings" id="settings">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}</div>
-        </div>
-        <div class="col">
-          <div class="a-channels" id="channels"><ph-channels .state=${view} .status=${this.status} .sprites=${this.sprites}></ph-channels></div>
-          <div class="a-schedule" id="schedule">${view ? html`<ph-schedule .base=${view}></ph-schedule>` : nothing}</div>
-        </div>
-      </main>
+      <main>${this.page(view)}</main>
       <footer>pixelhub ${this.version ?? ""}</footer>
+      ${this.nav("bottom")}
       ${this.toasts.view()}`;
   }
 }
