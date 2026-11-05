@@ -16,7 +16,7 @@ const (
 	opConnect = 0x69
 	opRelease = 0x96
 	linkDown  = 0x96
-	busyTries = 5
+	busyTries = 12
 )
 
 // greeting is what the display answers to a design command; pixelhub waits for it before it paints,
@@ -169,7 +169,8 @@ func (b *Bridge) connect(mac [6]byte, channel byte) {
 			return
 		}
 		b.Log.Warn("connect failed", "err", err)
-		// The kernel is still closing the last link; that fails at once, so it costs no try.
+		// The kernel takes about 20 s to close the last link; busy fails at once, so it costs no try.
+		// 12 tries 2 s apart still leave a link up inside pixelhub's 30 s greeting wait.
 		if errors.Is(err, syscall.EBUSY) && busy < busyTries {
 			busy++
 			try--
