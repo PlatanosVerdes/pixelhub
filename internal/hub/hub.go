@@ -27,6 +27,8 @@ const (
 	ReasonSchedule = "schedule"
 
 	tick = time.Second
+	// A tool left at zero this long gives the screen back.
+	idleTool = time.Minute
 	// showPriority puts something picked by hand over routine alerts but under urgent ones.
 	showPriority = 5
 )
@@ -112,6 +114,10 @@ type Hub struct {
 	// write serialises every change to the state and the picture folders, so the disk work runs
 	// outside mu and never holds up alerts or the display tick.
 	write sync.Mutex
+
+	// idle is when the picked tool was first seen at zero, and which tool that was.
+	idle     time.Time
+	idleView display.View
 
 	mu             sync.Mutex
 	st             state.State
@@ -471,6 +477,12 @@ func (h *Hub) activeChannel(now time.Time) (name, reason string) {
 
 func (h *Hub) update() {
 	now := h.now()
+	if h.toolDone(now) {
+		if _, err := h.Update(func(s *state.State) error { s.Mode = display.View{}; return nil }); err != nil {
+			h.log.Warn("idle tool not cleared", "err", err)
+		}
+		h.log.Info("tool left at zero, back to automatic")
+	}
 	h.mu.Lock()
 	claim := !h.releasedUntil.IsZero() && !now.Before(h.releasedUntil)
 	if claim {
@@ -562,4 +574,30 @@ func (h *Hub) sunLevel(now time.Time) int {
 	default:
 		return h.st.Brightness.Night
 	}
+}
+
+// toolDone reports a picked tool that has sat at zero for idleTool: a stopped stopwatch or noise
+// meter, or a countdown that ran out. A paused countdown still has time on it and stays.
+func (h *Hub) toolDone(now time.Time) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	m := h.st.Mode
+	var since time.Time
+	switch {
+	case !m.Mode.Tool():
+	case m.Mode == display.ModeCountdown && m.Running && m.Since != 0:
+		since = time.Unix(m.Since+int64(m.Seconds), 0)
+	case m.Mode != display.ModeCountdown && !m.Running:
+		if h.idle.IsZero() || h.idleView != m {
+			h.idle, h.idleView = now, m
+		}
+		since = h.idle
+	}
+	if since.IsZero() || now.Before(since) {
+		if since.IsZero() {
+			h.idle = time.Time{}
+		}
+		return false
+	}
+	return now.Sub(since) >= idleTool
 }

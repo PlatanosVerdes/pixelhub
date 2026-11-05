@@ -664,3 +664,45 @@ func TestClockLooksAsSet(t *testing.T) {
 type fakeWeather struct{ w display.Weather }
 
 func (f fakeWeather) Current() display.Weather { return f.w }
+
+func TestIdleToolGivesTheScreenBack(t *testing.T) {
+	t.Parallel()
+	h, _, now := newHub(t, oneChannel("0s", "1m"), nil)
+	*now = friday(10, 0)
+	set := func(v display.View) {
+		if _, err := h.Update(func(s *state.State) error { s.Mode = v; return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set(display.View{Mode: display.ModeStopwatch})
+	h.update()
+	*now = now.Add(59 * time.Second)
+	h.update()
+	if h.State().Mode.IsZero() {
+		t.Fatal("cleared before a minute at zero")
+	}
+	*now = now.Add(2 * time.Second)
+	h.update()
+	if !h.State().Mode.IsZero() {
+		t.Error("a stopped stopwatch should give the screen back after a minute")
+	}
+
+	set(display.View{Mode: display.ModeCountdown, Seconds: 60})
+	*now = now.Add(time.Hour)
+	h.update()
+	if h.State().Mode.IsZero() {
+		t.Error("a paused countdown has time left and stays")
+	}
+
+	set(display.View{Mode: display.ModeCountdown, Seconds: 60, Running: true, Since: now.Unix()})
+	*now = now.Add(90 * time.Second)
+	h.update()
+	if h.State().Mode.IsZero() {
+		t.Error("30 s after the countdown ended is too soon")
+	}
+	*now = now.Add(31 * time.Second)
+	h.update()
+	if !h.State().Mode.IsZero() {
+		t.Error("a countdown a minute past its end should give the screen back")
+	}
+}

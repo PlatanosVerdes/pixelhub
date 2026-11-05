@@ -1744,7 +1744,7 @@ class AppsTab extends LitElement {
     const m = this.mode, on = this.showing === "countdown", total = this.total;
     return html`
       <div class="lcd"><output class=${on && m.running ? "" : "idle"}>${mmss(on ? this.left() : total)}</output>
-        <span>${on ? (m.running ? t("Counting down") : t("Paused")) : t("Ready")}</span></div>
+        <span>${on ? (m.running ? (this.left() ? t("Counting down") : t("Done, back to automatic in a minute")) : t("Paused")) : t("Ready")}</span></div>
       <div class="side">
         <div>
           <span class="label">${t("Length")}</span>
@@ -1761,23 +1761,23 @@ class AppsTab extends LitElement {
   }
 
   stopwatchPanel() {
-    const on = this.showing === "stopwatch" && this.mode.running;
+    const shown = this.showing === "stopwatch", on = shown && this.mode.running;
     return html`
-      <div class="lcd"><output class=${on ? "" : "idle"}>${mmss(on ? this.elapsed() : 0)}</output><span>${on ? t("Running") : t("Ready")}</span></div>
+      <div class="lcd"><output class=${on ? "" : "idle"}>${mmss(on ? this.elapsed() : 0)}</output>
+        <span>${on ? t("Running") : shown ? t("Stopped, back to automatic in a minute") : t("Ready")}</span></div>
       <div class="side">
-        <div><h3>${t("Stopwatch")}</h3><p>${t("Counts up on the Evo from zero.")}</p></div>
-        <div class="actions">
-          <button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", running: true })}>${on ? t("Restart") : t("Start")}</button>
-          ${on ? html`<button class="btn" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch" })}>${t("Stop and reset")}</button>` : nothing}
-        </div>
+        <div><h3>${t("Stopwatch")}</h3><p>${t("Counts up on the Evo from zero. Stopping puts it back to zero.")}</p></div>
+        <div class="actions">${on
+          ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch" })}>${t("Stop")}</button>`
+          : html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", running: true })}>${t("Start")}</button>`}</div>
         ${this.back()}
       </div>`;
   }
 
   noisePanel() {
-    const on = this.showing === "noise" && this.mode.running;
+    const shown = this.showing === "noise", on = shown && this.mode.running;
     return html`
-      <div class="lcd"><output class=${on ? "" : "idle"}>${on ? t("On") : t("Off")}</output><span>${t("Microphone")}</span></div>
+      <div class="lcd"><output class=${on ? "" : "idle"}>${on ? t("On") : t("Off")}</output><span>${shown && !on ? t("Back to automatic in a minute") : t("Microphone")}</span></div>
       <div class="side">
         <div><h3>${t("Noise meter")}</h3><p>${t("Shows how loud the room is, with the Evo's microphone.")}</p></div>
         <div class="actions">${on
