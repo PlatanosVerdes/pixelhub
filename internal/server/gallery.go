@@ -4,15 +4,20 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
+	"image/draw"
 	"image/gif"
+	"io"
 	"log/slog"
 	"maps"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -24,6 +29,8 @@ import (
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
 	"github.com/PlatanosVerdes/pixelhub/internal/gallery"
 	"github.com/PlatanosVerdes/pixelhub/internal/lists"
+	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
+	"github.com/PlatanosVerdes/pixelhub/internal/state"
 )
 
 const (
@@ -485,13 +492,35 @@ func (s *Server) listRoutes(mux *http.ServeMux) {
 		var req struct {
 			Name string `json:"name"`
 		}
-		if decode(w, r, &req, smallBody) {
-			s.replyLists(w, http.StatusOK, s.Lists.Rename(r.PathValue("name"), req.Name))
+		if !decode(w, r, &req, smallBody) {
+			return
 		}
+		from := r.PathValue("name")
+		err := s.Lists.Rename(from, req.Name)
+		if err == nil {
+			err = s.followLists(func(list string) string {
+				if strings.EqualFold(list, from) {
+					return strings.Join(strings.Fields(req.Name), " ")
+				}
+				return list
+			})
+		}
+		s.replyLists(w, http.StatusOK, err)
 	})
 	mux.HandleFunc("DELETE /api/lists/{name}", func(w http.ResponseWriter, r *http.Request) {
-		s.replyLists(w, http.StatusOK, s.Lists.Delete(r.PathValue("name")))
+		name := r.PathValue("name")
+		err := s.Lists.Delete(name)
+		if err == nil {
+			err = s.followLists(func(list string) string {
+				if strings.EqualFold(list, name) {
+					return ""
+				}
+				return list
+			})
+		}
+		s.replyLists(w, http.StatusOK, err)
 	})
+	mux.HandleFunc("POST /api/lists/{name}/upload", s.uploadToList)
 	mux.HandleFunc("POST /api/lists/{name}/items", func(w http.ResponseWriter, r *http.Request) {
 		var req galleryItem
 		if !decode(w, r, &req, smallBody) {
@@ -522,5 +551,89 @@ func (s *Server) replyLists(w http.ResponseWriter, code int, err error) {
 		writeError(w, http.StatusInternalServerError, err)
 	default:
 		writeJSON(w, code, map[string]any{"lists": s.Lists.Lists()})
+	}
+}
+
+// followLists keeps the lists named in the state in step with a renamed or deleted list; a scene
+// left without its list is dropped.
+func (s *Server) followLists(rename func(string) string) error {
+	_, err := s.Hub.Update(func(st *state.State) error {
+		for i := range st.Channels {
+			c := &st.Channels[i]
+			if c.Ambient.List != "" {
+				c.Ambient.List = rename(c.Ambient.List)
+			}
+			c.Scenes = slices.DeleteFunc(c.Scenes, func(sc state.Scene) bool {
+				if sc.List == "" {
+					return false
+				}
+				sc.List = rename(sc.List)
+				return sc.List == ""
+			})
+			for j := range c.Scenes {
+				if c.Scenes[j].List != "" {
+					c.Scenes[j].List = rename(c.Scenes[j].List)
+				}
+			}
+		}
+		return nil
+	})
+	return err
+}
+
+// uploadToList keeps a GIF or PNG of the user's own in a list, as a GIF like the gallery ones.
+func (s *Server) uploadToList(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, sprite.MaxPictureBytes+uploadOverhead)
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("want a multipart form with the picture in the field \"file\": %w", err))
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("read upload: %w", err))
+		return
+	}
+	frames, err := sprite.DecodeBytes(data, s.Size)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("not a picture the display can show: %w", err))
+		return
+	}
+	rgba := make([]*image.RGBA, 0, len(frames))
+	for _, f := range frames {
+		img := image.NewRGBA(f.Image.Bounds())
+		draw.Draw(img, img.Rect, f.Image, f.Image.Bounds().Min, draw.Src)
+		rgba = append(rgba, img)
+	}
+	b, err := gallery.GIF(rgba, frames[0].Delay)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	sum := sha256.Sum256(data)
+	name := strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
+	p := lists.Picture{File: "upload/" + hex.EncodeToString(sum[:8]), Name: name}
+	s.replyLists(w, http.StatusCreated, s.Lists.Add(r.PathValue("name"), p, b))
+}
+
+// WarmGallery fetches the first page the gallery tab opens on, pictures included, so it shows at once.
+func (s *Server) WarmGallery(ctx context.Context) {
+	if s.Gallery == nil {
+		return
+	}
+	for up := 1; up <= 2; up++ {
+		items, err := s.listPage(ctx, gallery.Categories["recommended"], gallery.MostLiked, up)
+		if err != nil {
+			slog.Warn("gallery not warmed", "err", err)
+			return
+		}
+		for _, it := range items {
+			if ctx.Err() != nil {
+				return
+			}
+			_, _ = s.gifOf(ctx, it.FileID)
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
 }

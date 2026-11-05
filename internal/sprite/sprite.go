@@ -96,6 +96,9 @@ func Decode(path string, size int) ([]display.Frame, error) {
 	return frames, nil
 }
 
+// DecodeBytes reads a GIF or PNG held in memory.
+func DecodeBytes(data []byte, size int) ([]display.Frame, error) { return decode(data, size) }
+
 // decode trusts the bytes, not the file name, to tell GIF from PNG.
 func decode(data []byte, size int) ([]display.Frame, error) {
 	var frames []display.Frame

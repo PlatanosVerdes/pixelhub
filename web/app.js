@@ -1965,12 +1965,15 @@ class PixelhubApp extends LitElement {
     this.timers = [setInterval(() => { if (!document.hidden) this.pollStatus(); }, STATUS_MS), setInterval(() => { if (!document.hidden) this.loadState(); }, STATE_MS)];
     document.addEventListener("visibilitychange", this.visible);
     addEventListener("pagehide", this.leave);
+    this.hash = () => { const id = location.hash.slice(1); if (TABS.some(([t]) => t === id)) this.tab = id; };
+    addEventListener("hashchange", this.hash);
   }
   disconnectedCallback() {
     super.disconnectedCallback();
     this.timers.forEach(clearInterval);
     document.removeEventListener("visibilitychange", this.visible);
     removeEventListener("pagehide", this.leave);
+    removeEventListener("hashchange", this.hash);
   }
 
   async pollStatus() {

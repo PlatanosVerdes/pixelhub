@@ -17,6 +17,7 @@ import (
 	"github.com/PlatanosVerdes/pixelhub/internal/bridge"
 	"github.com/PlatanosVerdes/pixelhub/internal/config"
 	"github.com/PlatanosVerdes/pixelhub/internal/demo"
+	"github.com/PlatanosVerdes/pixelhub/internal/display"
 	"github.com/PlatanosVerdes/pixelhub/internal/divoom"
 	"github.com/PlatanosVerdes/pixelhub/internal/gallery"
 	"github.com/PlatanosVerdes/pixelhub/internal/hub"
@@ -99,14 +100,17 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 	if err != nil {
 		return err
 	}
+	h.Lists = hub.ListFunc(func(list string, turn int) (display.Content, bool, error) { return kept.Pick(list, turn, divoom.Size) })
 	go session.Run(ctx)
 	go h.Run(ctx)
 	go music.Run(ctx)
 	go station.Run(ctx)
 
+	api := &server.Server{Hub: h, Sprites: sprites, Spotify: music, Weather: station, Gallery: gallery.NewClient(), Lists: kept, IndexPath: filepath.Join(cfg.DataDir, "gallery-index.json"), Size: divoom.Size, Version: buildVersion}
+	go api.WarmGallery(ctx)
 	srv := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),
-		Handler:           (&server.Server{Hub: h, Sprites: sprites, Spotify: music, Weather: station, Gallery: gallery.NewClient(), Lists: kept, IndexPath: filepath.Join(cfg.DataDir, "gallery-index.json"), Size: divoom.Size, Version: buildVersion}).Handler(),
+		Handler:           api.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,

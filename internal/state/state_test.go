@@ -267,7 +267,8 @@ func TestValidateRejects(t *testing.T) {
 		{"clock without colour", func(s *State) { s.Clock = display.View{Mode: display.ModeClock, Style: 2} }, "clock:"},
 		{"scene with sprite and view", func(s *State) {
 			s.Channels[1].Scenes[0].View = display.View{Mode: display.ModeAnimations}
-		}, "not both"},
+		}, "not more than one"},
+		{"scene with sprite and list", func(s *State) { s.Channels[1].Scenes[0].List = "Halloween" }, "not more than one"},
 		{"bad scene view", func(s *State) {
 			s.Channels[1].Scenes[0].Sprite = ""
 			s.Channels[1].Scenes[0].View = display.View{Mode: display.ModeClock, Style: 9}

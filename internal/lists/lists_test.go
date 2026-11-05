@@ -1,7 +1,11 @@
 package lists
 
 import (
+	"bytes"
 	"errors"
+	"image"
+	"image/color"
+	"image/gif"
 	"os"
 	"testing"
 )
@@ -77,5 +81,28 @@ func TestListsReject(t *testing.T) {
 	}
 	if err := s.Remove("a", "missing"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("remove a missing picture: %v", err)
+	}
+}
+
+func TestPick(t *testing.T) {
+	t.Parallel()
+	s, _ := Open(t.TempDir())
+	if _, ok, err := s.Pick("none", 0, 16); ok || err != nil {
+		t.Errorf("a missing list picks nothing: %v %v", ok, err)
+	}
+	_ = s.Create("Night")
+	for _, name := range []string{"moon", "owl"} {
+		var b bytes.Buffer
+		img := image.NewPaletted(image.Rect(0, 0, 16, 16), color.Palette{color.Black, color.White})
+		_ = gif.Encode(&b, img, nil)
+		if err := s.Add("Night", Picture{File: "f/" + name, Name: name}, b.Bytes()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for turn, want := range []string{"owl", "moon", "owl"} {
+		c, ok, err := s.Pick("night", turn, 16)
+		if err != nil || !ok || c.Name != want || c.Key != "f/"+want || len(c.Frames) != 1 {
+			t.Errorf("turn %d: %q %v %v, want %s", turn, c.Name, ok, err, want)
+		}
 	}
 }

@@ -110,6 +110,8 @@ type Hub struct {
 	Music Music
 	// Weather, when set before Run, feeds the clock's weather and temperature.
 	Weather Weather
+	// Lists, when set before Run, lets ambient rules and scenes show a list of pictures.
+	Lists ListPicker
 
 	// write serialises every change to the state and the picture folders, so the disk work runs
 	// outside mu and never holds up alerts or the display tick.
@@ -491,7 +493,7 @@ func (h *Hub) update() {
 	name, _ := h.activeChannel(now)
 	ch := h.channels[name]
 	level := h.sunLevel(now)
-	layer, content, found := h.aboveAmbient(now, ch, level)
+	layer, content, found, listScene := h.aboveAmbient(now, ch, level)
 	stale := h.ambientStale && !found
 	if stale {
 		h.ambientStale = false
@@ -499,7 +501,19 @@ func (h *Hub) update() {
 	h.mu.Unlock()
 
 	if !found {
-		layer, content = LayerAmbient, h.ambient.at(now, name, ch.Ambient, stale).WithBrightness(level)
+		rule := ch.Ambient
+		layer = LayerAmbient
+		if listScene != nil {
+			// A scene with a list plays it like ambient does, with the channel's timing.
+			rule.List, layer = listScene.List, LayerScene
+			if rule.Pictures == 0 {
+				rule.Pictures = state.Duration(time.Minute)
+			}
+			if listScene.Brightness != nil {
+				level = int(*listScene.Brightness)
+			}
+		}
+		content = h.ambient.at(now, name, rule, stale, h.Lists).WithBrightness(level)
 	}
 
 	var weather display.Weather
@@ -537,14 +551,15 @@ func (h *Hub) update() {
 	}
 }
 
-// aboveAmbient returns the alert, mode, music or scene to show, if any; the ambient layer is left to the caller
+// aboveAmbient returns the alert, mode, music or scene to show, if any, or the scene whose list ambient should play;
+// the ambient layer is left to the caller
 // so pictures are only read from disk when they will be seen, and never under h.mu.
-func (h *Hub) aboveAmbient(now time.Time, ch channel, level int) (string, display.Content, bool) {
+func (h *Hub) aboveAmbient(now time.Time, ch channel, level int) (string, display.Content, bool, *state.Scene) {
 	if a, ok := h.alerts.head(now); ok {
-		return LayerAlert, a.Content.WithBrightness(level), true
+		return LayerAlert, a.Content.WithBrightness(level), true, nil
 	}
 	if !h.st.Mode.IsZero() {
-		return LayerMode, h.st.Mode.Content().WithBrightness(level), true
+		return LayerMode, h.st.Mode.Content().WithBrightness(level), true, nil
 	}
 	if h.st.Music.Enabled && h.Music != nil {
 		c, device, ok := h.Music.Content()
@@ -552,18 +567,21 @@ func (h *Hub) aboveAmbient(now time.Time, ch channel, level int) (string, displa
 			if !h.st.Music.View.IsZero() {
 				c = h.st.Music.View.Content()
 			}
-			return LayerMusic, c.WithBrightness(level), true
+			return LayerMusic, c.WithBrightness(level), true, nil
 		}
 	}
 	for _, s := range ch.scenes {
 		if s.ActiveAt(now) {
+			if s.List != "" {
+				return "", display.Content{}, false, &s.Scene
+			}
 			if s.Brightness != nil {
 				level = int(*s.Brightness)
 			}
-			return LayerScene, s.content.WithBrightness(level), true
+			return LayerScene, s.content.WithBrightness(level), true, nil
 		}
 	}
-	return "", display.Content{}, false
+	return "", display.Content{}, false, nil
 }
 
 func (h *Hub) sunLevel(now time.Time) int {

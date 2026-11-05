@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -561,5 +562,57 @@ func TestGallery(t *testing.T) {
 		if rec.Code != tt.code || !strings.Contains(rec.Body.String(), tt.contains) {
 			t.Errorf("%s: code %d body %s, want %d with %s", tt.path, rec.Code, rec.Body, tt.code, tt.contains)
 		}
+	}
+}
+
+func TestListUploadAndReferences(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	kept, _ := lists.Open(t.TempDir())
+	srv := (&Server{Hub: f.hub, Gallery: fakeGallery{}, Lists: kept, Size: 16}).Handler()
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
+		return rec
+	}
+	do("POST", "/api/lists", `{"name":"Mine"}`)
+
+	var form bytes.Buffer
+	mw := multipart.NewWriter(&form)
+	part, _ := mw.CreateFormFile("file", "dot.png")
+	_ = png.Encode(part, image.NewRGBA(image.Rect(0, 0, 16, 16)))
+	mw.Close()
+	req := httptest.NewRequest("POST", "/api/lists/Mine/upload", &form)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"name":"dot"`) {
+		t.Fatalf("upload: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do("POST", "/api/lists/Mine/upload", ""); rec.Code != http.StatusBadRequest {
+		t.Errorf("an upload without a file: %d", rec.Code)
+	}
+
+	name := f.hub.State().DefaultChannel
+	if _, err := f.hub.Update(func(st *state.State) error {
+		for i := range st.Channels {
+			if st.Channels[i].Name == name {
+				st.Channels[i].Ambient.List = "Mine"
+				st.Channels[i].Scenes = append(st.Channels[i].Scenes, state.Scene{Name: "late", Window: state.Window{From: 60, To: 120}, List: "mine"})
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	do("PUT", "/api/lists/Mine", `{"name":"Ours"}`)
+	c, _ := f.hub.State().Channel(name)
+	if c.Ambient.List != "Ours" || c.Scenes[len(c.Scenes)-1].List != "Ours" {
+		t.Errorf("a renamed list is followed: %+v", c)
+	}
+	do("DELETE", "/api/lists/Ours", "")
+	c, _ = f.hub.State().Channel(name)
+	if c.Ambient.List != "" || slices.ContainsFunc(c.Scenes, func(s state.Scene) bool { return s.Name == "late" }) {
+		t.Errorf("a deleted list leaves nothing behind: %+v", c)
 	}
 }

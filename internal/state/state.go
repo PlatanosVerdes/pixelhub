@@ -78,6 +78,8 @@ type Channel struct {
 type Ambient struct {
 	Pictures Duration `json:"pictures"`
 	Clock    Duration `json:"clock"`
+	// List, when set, is the list of pictures to show instead of the channel's own folder.
+	List string `json:"list,omitempty"`
 }
 
 // Window is a time range on a set of weekdays.
@@ -90,9 +92,11 @@ type Window struct {
 type Scene struct {
 	Name string `json:"name"`
 	Window
-	Sprite     string       `json:"sprite,omitempty"`
-	View       display.View `json:"view,omitzero"`
-	Brightness *Level       `json:"brightness,omitempty"`
+	Sprite string       `json:"sprite,omitempty"`
+	View   display.View `json:"view,omitzero"`
+	// List shows the pictures of a list in turn, with the channel's own timing, during the window.
+	List       string `json:"list,omitempty"`
+	Brightness *Level `json:"brightness,omitempty"`
 }
 
 type Slot struct {
@@ -297,10 +301,10 @@ func (c Channel) validate() []error {
 		if sc.From == sc.To {
 			errs = append(errs, fmt.Errorf("channel %s: scene %q: from and to are the same", c.Name, sc.Name))
 		}
+		if n := btoi(sc.Sprite != "") + btoi(!sc.View.IsZero()) + btoi(sc.List != ""); n > 1 {
+			errs = append(errs, fmt.Errorf("channel %s: scene %q: give a sprite, a view or a list, not more than one", c.Name, sc.Name))
+		}
 		if !sc.View.IsZero() {
-			if sc.Sprite != "" {
-				errs = append(errs, fmt.Errorf("channel %s: scene %q: give a sprite or a view, not both", c.Name, sc.Name))
-			}
 			if err := sc.View.Validate(); err != nil {
 				errs = append(errs, fmt.Errorf("channel %s: scene %q: %w", c.Name, sc.Name, err))
 			}
@@ -334,4 +338,11 @@ func (w Window) ActiveAt(t time.Time) bool {
 		return w.Days.Has(t.Weekday())
 	}
 	return now < w.To && w.Days.Has(t.AddDate(0, 0, -1).Weekday())
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

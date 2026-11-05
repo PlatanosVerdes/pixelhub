@@ -25,8 +25,10 @@ type Frame struct {
 // Content is what a display should show. Picture uses Frames (one is a still image), Color uses Fill,
 // Native uses View.
 type Content struct {
-	Kind       Kind
-	Name       string
+	Kind Kind
+	Name string
+	// Key tells apart pictures that share a name.
+	Key        string
 	Frames     []Frame
 	Fill       color.RGBA
 	View       View
@@ -60,7 +62,7 @@ func (c Content) WithBrightness(level int) Content {
 
 // SamePicture reports whether two contents show the same thing, perhaps at different brightness.
 func (c Content) SamePicture(o Content) bool {
-	return c.Kind == o.Kind && c.Name == o.Name && c.Fill == o.Fill && c.View == o.View && c.Weather == o.Weather
+	return c.Kind == o.Kind && c.Name == o.Name && c.Key == o.Key && c.Fill == o.Fill && c.View == o.View && c.Weather == o.Weather
 }
 
 func ClockContent() Content { return Content{Kind: Clock, Name: "clock"} }

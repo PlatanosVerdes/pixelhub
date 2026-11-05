@@ -17,6 +17,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/PlatanosVerdes/pixelhub/internal/atomicfile"
+	"github.com/PlatanosVerdes/pixelhub/internal/display"
+	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
 )
 
 var (
@@ -236,4 +238,28 @@ func clone(lists []List) []List {
 		out[i] = List{Name: l.Name, Items: append([]Picture{}, l.Items...)}
 	}
 	return out
+}
+
+// Pick is picture turn of list, in its order, decoded to size; ok is false for an empty or missing list.
+func (s *Store) Pick(list string, turn, size int) (display.Content, bool, error) {
+	s.mu.Lock()
+	i := s.find(list)
+	var p Picture
+	if i >= 0 && len(s.lists[i].Items) > 0 {
+		items := s.lists[i].Items
+		p = items[turn%len(items)]
+	}
+	s.mu.Unlock()
+	if p.File == "" {
+		return display.Content{}, false, nil
+	}
+	data, err := os.ReadFile(s.gifPath(p.File))
+	if err != nil {
+		return display.Content{}, false, fmt.Errorf("list %s: %w", list, err)
+	}
+	frames, err := sprite.DecodeBytes(data, size)
+	if err != nil {
+		return display.Content{}, false, fmt.Errorf("list %s: %s: %w", list, p.Name, err)
+	}
+	return display.Content{Kind: display.Picture, Name: p.Name, Key: p.File, Frames: frames}, true, nil
 }

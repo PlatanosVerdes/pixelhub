@@ -2,6 +2,7 @@ package hub
 
 import (
 	"errors"
+	"fmt"
 	"image"
 	"io"
 	"log/slog"
@@ -704,5 +705,36 @@ func TestIdleToolGivesTheScreenBack(t *testing.T) {
 	h.update()
 	if !h.State().Mode.IsZero() {
 		t.Error("a countdown a minute past its end should give the screen back")
+	}
+}
+
+func TestListsPlay(t *testing.T) {
+	t.Parallel()
+	h, _, now := newHub(t, oneChannel("1m", "1m"), nil)
+	h.Lists = ListFunc(func(list string, turn int) (display.Content, bool, error) {
+		return display.Content{Kind: display.Picture, Name: fmt.Sprintf("%s %d", list, turn), Key: fmt.Sprint(turn)}, list != "Empty", nil
+	})
+	*now = friday(10, 0)
+	if _, err := h.Update(func(s *state.State) error {
+		s.Channels[0].Ambient.List = "Cats"
+		s.Channels[0].Ambient.Clock = 0
+		s.Channels[0].Scenes = []state.Scene{{Name: "lunch", Window: state.Window{From: 14 * 60, To: 15 * 60}, List: "Food"}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.update()
+	if st := h.Status(); st.Layer != LayerAmbient || st.Showing != "Cats 0" {
+		t.Errorf("ambient with a list: %s %s", st.Layer, st.Showing)
+	}
+	*now = now.Add(61 * time.Second)
+	h.update()
+	if st := h.Status(); st.Showing != "Cats 1" {
+		t.Errorf("the next picture of the list: %s", st.Showing)
+	}
+	*now = friday(14, 30)
+	h.update()
+	if st := h.Status(); st.Layer != LayerScene || st.Showing != "Food 2" {
+		t.Errorf("a scene with a list plays it: %s %s", st.Layer, st.Showing)
 	}
 }
