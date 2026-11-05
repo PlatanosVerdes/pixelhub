@@ -43,7 +43,9 @@ type Bridge struct {
 }
 
 func New(dial Dialer, log *slog.Logger) *Bridge {
-	return &Bridge{Dial: dial, Log: log, Pace: 15 * time.Millisecond, GreetAfter: 2 * time.Second, Tries: 3, Retry: 2 * time.Second}
+	// One try: a failed RFCOMM connect takes about 30 s, already as long as pixelhub waits for the
+	// greeting, and pixelhub retries with its own backoff; piled-up tries switched the display off.
+	return &Bridge{Dial: dial, Log: log, Pace: 15 * time.Millisecond, GreetAfter: 2 * time.Second, Tries: 1, Retry: 2 * time.Second}
 }
 
 // Serve takes one client at a time from ln, a new one replacing the last, until ln closes.
