@@ -1730,8 +1730,8 @@ class AppsTab extends LitElement {
       <div class="side">
         <div><h3>${t("Weather")}</h3><p>${t("Shows on the Evo for a few seconds, then it goes back to what it was showing.")}</p></div>
         <div class="actions">
-          <button class="btn primary" ?disabled=${this.busy || !w?.known} @click=${() => this.call("POST", "weather/show?what=weather", null, t("Showing the weather on the Evo"))}>${t("Show the weather")}</button>
-          <button class="btn" ?disabled=${this.busy || !w?.known} @click=${() => this.call("POST", "weather/show?what=temperature", null, t("Showing the temperature on the Evo"))}>${t("Show the temperature")}</button>
+          <button class="btn" ?disabled=${this.busy || !w?.known} @click=${() => this.call("POST", "weather/show?what=weather", null, t("Showing the weather on the Evo"))}>${appIcons.weather}${t("Show the weather")}</button>
+          <button class="btn" ?disabled=${this.busy || !w?.known} @click=${() => this.call("POST", "weather/show?what=temperature", null, t("Showing the temperature on the Evo"))}>${icon(svg`<path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0Z"/><path d="M12 9v7"/>`)}${t("Show the temperature")}</button>
         </div>
         <div class="note">
           <span>${greenwich ? t("The location is still the default, Greenwich.") : w?.at ? t("Updated at {time}, every 15 minutes.", { time: new Date(w.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }) : ""}</span>
