@@ -566,7 +566,7 @@ const daysText = (days) => {
 };
 const STEPS = [["30s", "30 s"], ["1m", "1 min"], ["2m", "2 min"], ["5m", "5 min"]];
 
-const RULE_KINDS = () => [["clock", t("Only the clock")], ["light", t("Light")], ["animations", t("My animations")]];
+const RULE_KINDS = () => [["off", t("Display off")], ["clock", t("Only the clock")], ["light", t("Light")], ["animations", t("My animations")]];
 
 // What automatic shows: one usual choice, and exceptions at set times. Read as a sentence.
 class Automatic extends LitElement {
@@ -600,6 +600,7 @@ class Automatic extends LitElement {
   }
   setAmbient(a) { return this.save({ ambient: { ...this.channel.ambient, ...a } }); }
   whatOf(s) {
+    if (s.brightness === 0) return t("Display off");
     if (s.list) return s.list;
     if (s.view?.mode) return RULE_KINDS().find(([k]) => k === s.view.mode)?.[1] ?? modeName(s.view.mode);
     return s.sprite || t("Only the clock");
@@ -609,6 +610,7 @@ class Automatic extends LitElement {
     const d = this.draft;
     const scene = { name: `${d.what.replace(/^list:/, "")} ${d.from}`, days: d.days, from: d.from, to: d.to };
     if (d.what.startsWith("list:")) scene.list = d.what.slice(5);
+    else if (d.what === "off") Object.assign(scene, { view: { mode: "clock" }, brightness: 0 });
     else scene.view = d.what === "light" ? { mode: "light", color: "#ffb547" } : { mode: d.what };
     if (await this.save({ scenes: [...this.channel.scenes, scene] }, t("Exception added"))) this.draft = null;
   }

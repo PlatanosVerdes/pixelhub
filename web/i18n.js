@@ -373,6 +373,7 @@ const es = {
   "seconds": "segundos",
   "Battery": "Batería",
   "This bridge cannot read it": "Este puente no puede leerla",
+  "Display off": "Pantalla apagada",
   "Page {n}": "Página {n}",
   "Previous page": "Página anterior",
   "Next page": "Página siguiente",
