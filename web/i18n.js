@@ -262,6 +262,7 @@ const es = {
   "Showing {name} for 30 s": "Mostrando {name} 30 s",
   "Saved in {channel}": "Guardado en {channel}",
   "Nothing in this category right now.": "Ahora no hay nada en esta categoría.",
+  "Automatic shows alerts, scenes and pictures by the schedule, and this clock between them.": "En automático salen los avisos, las escenas y los dibujos según el horario, y este reloj entre ellos.",
   "Page {n}": "Página {n}",
   "Previous page": "Página anterior",
   "Next page": "Página siguiente",

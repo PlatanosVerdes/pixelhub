@@ -33,6 +33,18 @@ type State struct {
 	Mode display.View `json:"mode,omitzero"`
 	// Music shows what a linked music account plays, when it plays: its cover, or View instead.
 	Music Music `json:"music,omitzero"`
+	// Clock is how the clock looks wherever pixelhub shows it, so the display's stored look never leaks in.
+	Clock display.View `json:"clock,omitzero"`
+}
+
+var defaultClock = display.View{Mode: display.ModeClock, Color: "#ff1e28"}
+
+// ClockView is the clock to show: Clock, or a plain red one until it is set.
+func (s State) ClockView() display.View {
+	if s.Clock.IsZero() {
+		return defaultClock
+	}
+	return s.Clock
 }
 
 type Music struct {
@@ -187,7 +199,8 @@ func (s *State) ApplySettings(data []byte) error {
 		ReleaseFor     *Duration `json:"release_for"`
 		DefaultChannel *string   `json:"default_channel"`
 		// Music is replaced whole: leaving out its view means the cover.
-		Music *Music `json:"music"`
+		Music *Music        `json:"music"`
+		Clock *display.View `json:"clock"`
 	}{Location: &s.Location, Brightness: &s.Brightness, ReleaseFor: &s.ReleaseFor, DefaultChannel: &s.DefaultChannel}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -196,6 +209,9 @@ func (s *State) ApplySettings(data []byte) error {
 	}
 	if settings.Music != nil {
 		s.Music = *settings.Music
+	}
+	if settings.Clock != nil {
+		s.Clock = *settings.Clock
 	}
 	return nil
 }
@@ -233,6 +249,13 @@ func (s State) Validate() error {
 	if !s.Mode.IsZero() {
 		if err := s.Mode.Validate(); err != nil {
 			errs = append(errs, fmt.Errorf("mode: %w", err))
+		}
+	}
+	if !s.Clock.IsZero() {
+		if err := s.Clock.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("clock: %w", err))
+		} else if s.Clock.Mode != display.ModeClock || s.Clock.Color == "" {
+			errs = append(errs, errors.New("clock: must be the clock mode with a colour"))
 		}
 	}
 	if !s.Music.View.IsZero() {

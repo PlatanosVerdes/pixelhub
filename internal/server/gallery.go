@@ -27,10 +27,10 @@ import (
 )
 
 const (
-	searchPages   = 16
-	crawlPace     = 3 * time.Second
-	reindexEvery  = 6 * time.Hour
-	listFresh     = 15 * time.Minute
+	searchPages  = 16
+	crawlPace    = 3 * time.Second
+	reindexEvery = 6 * time.Hour
+	listFresh    = 15 * time.Minute
 	// The gallery answers at most about 30 pictures a request, so a page here is two of its pages.
 	upstreamPage  = 30
 	galleryPage   = 2 * upstreamPage

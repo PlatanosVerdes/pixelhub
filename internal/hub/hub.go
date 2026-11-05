@@ -485,6 +485,14 @@ func (h *Hub) update() {
 	}
 
 	h.mu.Lock()
+	if content.Kind == display.Clock {
+		clock := h.st.ClockView().Content().WithBrightness(content.Brightness)
+		clock.Name = content.Name
+		content = clock
+	}
+	if content.Kind == display.Native && content.View.Mode == display.ModeClock && content.View.Color == "" {
+		content.View.Color = h.st.ClockView().Color
+	}
 	changed := !content.SamePicture(h.shown) || content.Brightness != h.shown.Brightness
 	h.layer, h.shown = layer, content
 	if changed {

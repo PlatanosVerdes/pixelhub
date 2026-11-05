@@ -639,3 +639,22 @@ func TestPicturesNeedTheirChannel(t *testing.T) {
 		t.Errorf("list a missing channel: %v", err)
 	}
 }
+
+func TestClockLooksAsSet(t *testing.T) {
+	t.Parallel()
+	h, d, now := newHub(t, oneChannel("0s", "1m"), nil)
+	*now = friday(10, 0)
+	h.update()
+	last := func() display.Content { d.mu.Lock(); defer d.mu.Unlock(); return d.shown[len(d.shown)-1] }
+	if c := last(); c.Kind != display.Native || c.View.Color == "" || h.Status().Showing != "clock" {
+		t.Fatalf("the clock must carry its colour, not leave the display's own: %+v", c)
+	}
+	purple := display.View{Mode: display.ModeClock, Style: 3, Color: "#bf5af2"}
+	if _, err := h.Update(func(s *state.State) error { s.Clock = purple; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	h.update()
+	if c := last(); c.View != purple {
+		t.Errorf("after changing the clock: %+v", c.View)
+	}
+}

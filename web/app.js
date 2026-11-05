@@ -965,7 +965,7 @@ const CLOCK_STYLES = () => [t("Full screen"), t("Rainbow"), t("Boxed"), t("Analo
 const LIGHT_TYPES = () => [t("Plain"), t("Love"), t("Plants"), t("No mosquitoes"), t("Sleep")];
 
 class Modes extends LitElement {
-  static properties = { current: { attribute: false }, styles: { attribute: false }, draft: { state: true }, busy: { state: true }, now: { state: true } };
+  static properties = { current: { attribute: false }, clock: { attribute: false }, styles: { attribute: false }, draft: { state: true }, busy: { state: true }, now: { state: true } };
   connectedCallback() { super.connectedCallback(); this.now = new Date(); this.tick = setInterval(() => { this.now = new Date(); }, 15000); }
   disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.tick); }
   static styles = [base, css`
@@ -1032,34 +1032,41 @@ class Modes extends LitElement {
 
   change(patch) { this.apply({ ...this.viewFor(this.current.mode), ...patch }); }
 
-  colour(v, withNone) {
+  // The clock pixelhub shows by itself, between pictures and in Automatic; a setting, not a mode.
+  async setClock(patch) {
+    const next = { mode: "clock", color: "#ff1e28", ...this.clock, ...patch };
+    for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k];
+    this.busy = true;
+    try { saved(this, await api("PUT", "settings", { clock: next })); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+
+  colour(v, change = (p) => this.change(p)) {
     const presets = ["#ffffff", "#ff3b30", "#ff9f0a", "#ffd60a", "#30d158", "#40c8e0", "#0a84ff", "#bf5af2", "#ff375f"];
     return html`<div class="colour">
       <div class="swatches" role="group" aria-label=${t("Colour")}>
-        ${withNone ? html`<button class="choice" aria-pressed=${String(!v.color)} @click=${() => this.change({ color: undefined })}>${t("Default")}</button>` : nothing}
-        ${presets.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c} aria-pressed=${String(v.color?.toLowerCase() === c)} @click=${() => this.change({ color: c })}></button>`)}
+        ${presets.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c} aria-pressed=${String(v.color?.toLowerCase() === c)} @click=${() => change({ color: c })}></button>`)}
       </div>
-      <input type="color" aria-label=${t("Other colour")} .value=${v.color ?? "#ffffff"} @change=${(e) => this.change({ color: e.target.value })}>
+      <input type="color" aria-label=${t("Other colour")} .value=${v.color ?? "#ffffff"} @change=${(e) => change({ color: e.target.value })}>
     </div>`;
   }
 
-  options(mode) {
-    const v = this.viewFor(mode);
+  options(mode, v = this.viewFor(mode), change = (p) => change(p)) {
     const choices = (names, key = "style") => html`<div class="choices" role="group">${names.map((n, i) =>
-      html`<button class="choice ${typeof n === "number" ? "num" : ""}" aria-pressed=${String((v[key] ?? 0) === i)} @click=${() => this.change({ [key]: i })}>${n}</button>`)}</div>`;
+      html`<button class="choice ${typeof n === "number" ? "num" : ""}" aria-pressed=${String((v[key] ?? 0) === i)} @click=${() => change({ [key]: i })}>${n}</button>`)}</div>`;
     switch (mode) {
       case "clock": return html`
         <h3>${t("Clock style")}</h3>
-        <div class="faces" role="group">${CLOCK_STYLES().map((name, i) => html`<button class="face" aria-pressed=${String((v.style ?? 0) === i)} @click=${() => this.change({ style: i || undefined })}>
+        <div class="faces" role="group">${CLOCK_STYLES().map((name, i) => html`<button class="face" aria-pressed=${String((v.style ?? 0) === i)} @click=${() => change({ style: i || undefined })}>
           <img class="pix" src=${clockFace(i, this.now, v.color)} alt=""><span>${name}</span></button>`)}</div>
         <div class="toggles">
           ${[["weather", t("Weather")], ["temperature", t("Temperature")], ["calendar", t("Date")]].map(([k, l]) =>
-            html`<label><input type="checkbox" .checked=${!!v[k]} @change=${(e) => this.change({ [k]: e.target.checked || undefined })}>${l}</label>`)}
+            html`<label><input type="checkbox" .checked=${!!v[k]} @change=${(e) => change({ [k]: e.target.checked || undefined })}>${l}</label>`)}
         </div>
-        <div><h3>${t("Colour")}</h3></div>${this.colour(v, true)}`;
+        <div><h3>${t("Colour")}</h3></div>${this.colour(v, change)}`;
       case "light": return html`
         <h3>${t("Effect")}</h3>${choices(LIGHT_TYPES())}
-        <h3>${t("Colour")}</h3>${this.colour(v, false)}`;
+        <h3>${t("Colour")}</h3>${this.colour(v)}`;
       case "visualizer": return html`
         <h3>${t("Visualiser")}</h3>${choices(Array.from({ length: this.styles?.visualizer ?? 12 }, (_, i) => i + 1))}
         <p class="small muted">${t("It follows what the Evo plays as a speaker, not the room's sound.")}</p>`;
@@ -1086,7 +1093,9 @@ class Modes extends LitElement {
           ${icon(svg`<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/>`)}<span>${t("Automatic")}</span></button>
         ${MODES.map((m) => html`<button class="mode" aria-pressed=${String(active === m)} ?disabled=${this.busy} @click=${() => this.pick(m)}>${modeIcons[m]}<span>${modeName(m)}</span></button>`)}
       </div>
-      ${active ? html`<div class="panel">${this.options(active)}</div>` : nothing}`;
+      ${active ? html`<div class="panel">${this.options(active)}</div>`
+        : html`<div class="panel"><p class="small muted">${t("Automatic shows alerts, scenes and pictures by the schedule, and this clock between them.")}</p>
+          ${this.options("clock", { mode: "clock", color: "#ff1e28", ...this.clock }, (p) => this.setClock(p))}</div>`}`;
   }
 }
 customElements.define("ph-modes", Modes);
@@ -1103,14 +1112,13 @@ class DisplayTab extends LitElement {
   connectedCallback() { super.connectedCallback(); this.now = new Date(); this.tick = setInterval(() => { this.now = new Date(); }, 15000); }
   disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.tick); }
 
-  // The display draws its own modes; the preview redraws them from what it reports, colour included.
+  // The display draws its own modes; the preview redraws them as pixelhub sent them.
   preview(s) {
-    const own = s.showing === "clock" || (s.layer === "mode" && this.state?.mode);
-    const d = s.device;
-    if (own && d?.mode === "clock") return clockFace(d.style, this.now, d.color);
-    if (own && d?.mode === "light") return lightFace(d.color);
-    if (s.layer === "mode" && this.state?.mode?.mode === "clock") return clockFace(this.state.mode.style ?? 0, this.now, this.state.mode.color);
-    if (s.showing === "clock") return clockFace(0, this.now);
+    const clock = { color: "#ff1e28", ...this.state?.clock };
+    const mode = s.layer === "mode" ? this.state?.mode : null;
+    if (mode?.mode === "clock") return clockFace(mode.style ?? 0, this.now, mode.color ?? clock.color);
+    if (mode?.mode === "light") return lightFace(mode.color);
+    if (s.showing === "clock") return clockFace(clock.style ?? 0, this.now, clock.color);
     return `api/preview.png?v=${s.preview_version}`;
   }
   static styles = [base, css`
@@ -1175,7 +1183,7 @@ class DisplayTab extends LitElement {
       </div>
       <div class="stack">
         <section><h2 class="muted">${t("What the display shows")}</h2>
-          <ph-modes .current=${this.state?.mode} .styles=${this.styles}></ph-modes></section>
+          <ph-modes .current=${this.state?.mode} .clock=${this.state?.clock} .styles=${this.styles}></ph-modes></section>
         <ph-notify .sprites=${this.sprites}></ph-notify>
       </div>
     </div>`;
@@ -1193,7 +1201,7 @@ const categoryName = (c) => ({ recommended: t("Recommended"), top: t("Top"), new
 const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
 
 class GalleryTab extends LitElement {
-  static properties = { state: { attribute: false }, category: { state: true }, sort: { state: true }, items: { state: true }, page: { state: true },
+  static properties = { state: { attribute: false }, width: { state: true }, category: { state: true }, sort: { state: true }, items: { state: true }, page: { state: true },
     more: { state: true }, pages: { state: true }, loading: { state: true }, picked: { state: true }, target: { state: true }, busy: { state: true }, problem: { state: true },
     query: { state: true }, searched: { state: true }, indexing: { state: true }, lists: { state: true }, open: { state: true },
     saving: { state: true }, newList: { state: true }, renaming: { state: true } };
@@ -1205,7 +1213,7 @@ class GalleryTab extends LitElement {
     .cat { flex: none; border: 1px solid var(--line); background: none; border-radius: 999px; height: 34px; padding: 0 14px; font-size: 13px; color: var(--muted); cursor: pointer; }
     .cat[aria-pressed=true] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 600; }
     .cat.mine { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; }
+    .grid { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); gap: 8px; }
     .item { position: relative; aspect-ratio: 1; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: #000; overflow: hidden; cursor: pointer; }
     .item img { width: 100%; height: 100%; display: block; }
     .item[aria-pressed=true] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
@@ -1240,7 +1248,7 @@ class GalleryTab extends LitElement {
     .head-list h2 { margin: 0; font-size: 18px; flex: 1; min-width: 0; color: var(--ink); }
     .empty { padding: 30px 0; text-align: center; }
   `];
-  constructor() { super(); this.category = "recommended"; this.sort = "likes"; this.items = []; this.page = 1; this.lists = []; }
+  constructor() { super(); this.category = "recommended"; this.sort = "likes"; this.items = []; this.page = 1; this.lists = []; this.buffer = []; }
   connectedCallback() { super.connectedCallback(); this.loadLists(); if (!this.items.length) this.load(true); }
 
   async loadLists() { try { this.lists = (await api("GET", "lists")).lists; } catch { /* the status poll shows outages */ } }
@@ -1272,25 +1280,74 @@ class GalleryTab extends LitElement {
     if (await this.listCall("DELETE", `lists/${encodeURIComponent(this.open)}`)) { this.open = null; this.picked = null; }
   }
 
-  async load(fresh, page = 1) {
-    if (this.category === "lists") return;
-    this.loading = true;
-    this.problem = "";
-    if (!fresh) { this.picked = null; this.scrollIntoView({ block: "start" }); }
-    try {
-      const r = this.searched
-        ? await api("GET", `gallery/search?q=${encodeURIComponent(this.searched)}&page=${page}`)
-        : await api("GET", `gallery?category=${this.category}&sort=${this.sort}&page=${page}`);
-      this.items = r.items;
-      this.page = page;
-      this.more = r.more;
-      this.pages = r.pages;
-      this.indexing = r.of && r.indexed < r.of ? r : null;
-    } catch (e) { this.problem = e.message; }
-    this.loading = false;
+  // Upstream pages come in uneven sizes, so pictures pile up in one buffer and pages are cut from it
+  // in whole rows of the grid; the page after the one shown is always fetched ahead.
+  get cols() { return Math.max(1, Math.floor(((this.width ?? 900) + 8) / (86 + 8))); }
+  get perPage() { const c = this.cols; return c * Math.max(2, Math.round(60 / c)); }
+
+  async fill(want) {
+    const run = this.run;
+    while (this.buffer.length < want && !this.exhausted) {
+      if (!this.fetching) {
+        const next = this.fetched + 1;
+        this.fetching = (this.searched
+          ? api("GET", `gallery/search?q=${encodeURIComponent(this.searched)}&page=${next}`)
+          : api("GET", `gallery?category=${this.category}&sort=${this.sort}&page=${next}`)
+        ).then((r) => {
+          if (run !== this.run) return;
+          const seen = new Set(this.buffer.map((i) => i.file));
+          this.buffer.push(...r.items.filter((i) => !seen.has(i.file)));
+          this.fetched = next;
+          this.exhausted = !r.more || !r.items.length;
+          this.indexing = r.of && r.indexed < r.of ? r : null;
+        }).finally(() => { if (run === this.run) this.fetching = null; });
+      }
+      await this.fetching;
+      if (run !== this.run) return;
+    }
   }
 
-  // Search knows how many pages it has; a category only knows whether there is a next one.
+  async load(fresh, page = 1) {
+    if (this.category === "lists") return;
+    if (fresh) Object.assign(this, { run: (this.run ?? 0) + 1, buffer: [], fetched: 0, exhausted: false, fetching: null });
+    else { this.picked = null; this.scrollIntoView({ block: "start" }); }
+    const run = this.run;
+    this.loading = true;
+    this.problem = "";
+    try {
+      await this.fill(page * this.perPage);
+      if (run !== this.run) return;
+      this.page = page;
+      this.cut();
+      this.fill((page + 1) * this.perPage).then(() => {
+        this.cut();
+        this.buffer.slice(page * this.perPage, (page + 1) * this.perPage).forEach((i) => { new Image().src = gifURL(i.file); });
+      }).catch(() => {});
+    } catch (e) { this.problem = e.message; }
+    if (run === this.run) this.loading = false;
+  }
+
+  cut() {
+    const n = this.perPage, from = (this.page - 1) * n;
+    if (from && from >= this.buffer.length) this.page = Math.max(1, Math.ceil(this.buffer.length / n));
+    const start = (this.page - 1) * n;
+    const items = this.buffer.slice(start, start + n);
+    // A short last page only when the gallery has nothing more to give.
+    const whole = this.exhausted ? items : items.slice(0, Math.max(this.cols, items.length - (items.length % this.cols)));
+    if (whole.length !== this.items.length || whole.some((i, k) => i.file !== this.items[k]?.file)) this.items = whole;
+    this.more = !this.exhausted || this.buffer.length > start + n;
+    this.pages = this.exhausted ? Math.max(1, Math.ceil(this.buffer.length / n)) : undefined;
+  }
+
+  firstUpdated() {
+    new ResizeObserver(([e]) => {
+      const before = this.perPage, first = (this.page - 1) * before;
+      this.width = e.contentRect.width;
+      if (this.perPage !== before && this.buffer?.length) { this.page = Math.floor(first / this.perPage) + 1; this.load(false, this.page); }
+    }).observe(this);
+  }
+
+  // The gallery's own page count is unknown until it runs out, so the pager shows one page ahead.
   pager() {
     const p = this.page, last = this.pages ?? (this.more ? p + 1 : p);
     if (last <= 1) return nothing;
@@ -1359,7 +1416,7 @@ class GalleryTab extends LitElement {
   grid(items) {
     const p = this.picked;
     const kept = new Set(this.lists.flatMap((l) => l.items.map((i) => i.file)));
-    return html`<div class="grid">${repeat(items, (i) => i.file, (i) => html`<button class="item" aria-pressed=${String(p?.file === i.file)} title=${i.name} aria-label=${i.name}
+    return html`<div class="grid" style="--cols:${this.cols}">${repeat(items, (i) => i.file, (i) => html`<button class="item" aria-pressed=${String(p?.file === i.file)} title=${i.name} aria-label=${i.name}
       @click=${() => { this.picked = i; this.saving = false; }}><img class="pix" src=${gifURL(i.file)} alt="" loading="lazy" @error=${(e) => { e.target.parentElement.hidden = true; }}>${kept.has(i.file) ? html`<span class="kept" aria-label=${t("Saved")}>${icons.bookmark}</span>` : nothing}</button>`)}</div>`;
   }
 
