@@ -120,7 +120,11 @@ func tool(v display.View) []byte {
 		// The noise meter takes 1 to start and 2 to stop.
 		return Message(cmdTool, []byte{toolNoise, 2 - flag(v.Running)})
 	}
-	return Message(cmdTool, []byte{toolCountdown, flag(v.Running), byte(v.Seconds / 60), byte(v.Seconds % 60)})
+	left := v.Seconds
+	if v.Running && v.Since != 0 {
+		left = max(0, v.Seconds-int(now().Unix()-v.Since))
+	}
+	return Message(cmdTool, []byte{toolCountdown, flag(v.Running), byte(left / 60), byte(left % 60)})
 }
 
 // Leave stops a running tool that next no longer shows, so it does not keep going out of sight.

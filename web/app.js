@@ -1631,7 +1631,7 @@ const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
 // The display's built-in apps, and the weather that its clock shows.
 class AppsTab extends LitElement {
-  static properties = { state: { attribute: false }, weather: { state: true }, busy: { state: true }, minutes: { state: true }, seconds: { state: true } };
+  static properties = { state: { attribute: false }, weather: { state: true }, busy: { state: true }, minutes: { state: true }, seconds: { state: true }, now: { state: true } };
   static styles = [base, css`
     .grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
     @media (min-width: 760px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
@@ -1656,8 +1656,20 @@ class AppsTab extends LitElement {
     .team button { width: 44px; height: 40px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--team) 45%, transparent); background: var(--surface); font-size: 20px; cursor: pointer; }
   `];
   constructor() { super(); this.minutes = 5; this.seconds = 0; }
-  connectedCallback() { super.connectedCallback(); this.load(); this.timer = setInterval(() => { if (!document.hidden) this.load(); }, 60000); }
-  disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.timer); }
+  connectedCallback() {
+    super.connectedCallback(); this.load(); this.now = Date.now();
+    this.timer = setInterval(() => { if (!document.hidden) this.load(); }, 60000);
+    this.tick = setInterval(() => { if (this.mode.running) this.now = Date.now(); }, 1000);
+  }
+  disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.timer); clearInterval(this.tick); }
+  // Seconds since a running tool started, from the time pixelhub sent it.
+  elapsed() { return this.mode.since ? Math.max(0, Math.floor(this.now / 1000) - this.mode.since) : 0; }
+  left() { const m = this.mode; return m.running ? Math.max(0, (m.seconds ?? 0) - this.elapsed()) : (m.seconds ?? 0); }
+  async showWeather() {
+    this.busy = true;
+    try { await api("POST", "weather/show"); send(this, "refresh"); toast(this, t("Showing the weather on the Evo")); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
   async load() { try { this.weather = await api("GET", "weather"); } catch { /* the status poll shows outages */ } }
 
   get mode() { return this.state?.mode ?? {}; }
@@ -1704,11 +1716,8 @@ class AppsTab extends LitElement {
           <p class="small muted">${t("Read at {time} from Open-Meteo, every 15 minutes.", { time: new Date(w.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })}</p>`
         : html`<p class="muted">${w?.error ? t("Could not read the weather: {error}", { error: w.error }) : t("Reading the weather…")}</p>`}
       ${greenwich ? html`<p class="banner">${t("The location is still the default, Greenwich. Set yours in Settings so the weather is yours.")}</p>` : nothing}
-      <p class="small muted">${t("The Evo's clock shows it when these are on:")}</p>
-      <div class="toggles">
-        <label><input type="checkbox" .checked=${!!c.weather} ?disabled=${this.busy} @change=${(e) => this.clockShows({ weather: e.target.checked })}>${t("Weather")}</label>
-        <label><input type="checkbox" .checked=${!!c.temperature} ?disabled=${this.busy} @change=${(e) => this.clockShows({ temperature: e.target.checked })}>${t("Temperature")}</label>
-      </div>
+      <div class="row"><button class="btn primary" ?disabled=${this.busy || !w?.known} @click=${() => this.showWeather()}>${t("Show on the Evo")}</button></div>
+      <p class="small muted">${t("The Evo shows it for a few seconds and goes back to the time. To have the clock show it now and then by itself, turn on Weather or Temperature in the clock style, under Display.")}</p>
     </section>`;
   }
 
@@ -1718,15 +1727,22 @@ class AppsTab extends LitElement {
     return html`<div class="grid">
       ${this.weatherCard()}
       ${this.card("stopwatch", t("Stopwatch"), icon(svg`<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M10 2h4M12 2v3"/>`), (on) => html`
-        <p class="muted">${t("Counts up on the display from zero.")}</p>${this.startStop("stopwatch", on)}`)}
+        ${on && m.running ? html`<div class="row"><span class="big">${mmss(this.elapsed())}</span></div>` : html`<p class="muted">${t("Counts up on the display from zero.")}</p>`}
+        <div class="row">
+          <button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", running: true })}>${on && m.running ? t("Start again") : t("Start")}</button>
+          ${on && m.running ? html`<button class="btn" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch" })}>${t("Stop and reset")}</button>` : nothing}
+        </div>`)}
       ${this.card("countdown", t("Countdown"), icon(svg`<path d="M6 2h12M6 22h12M7 2c0 6 10 6 10 10S7 16 7 22M17 2c0 6-10 6-10 10s10 4 10 10"/>`), (on) => html`
-        ${on ? html`<div class="row"><span class="big">${mmss(m.seconds ?? 0)}</span>${m.running ? nothing : html`<span class="muted">${t("Stopped")}</span>`}</div>` : nothing}
+        ${on ? html`<div class="row"><span class="big">${mmss(this.left())}</span>${m.running ? nothing : html`<span class="muted">${t("Paused")}</span>`}</div>
+          <div class="row">${m.running
+            ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "countdown", seconds: Math.max(1, this.left()) })}>${t("Pause")}</button>`
+            : html`<button class="btn primary" ?disabled=${this.busy || !m.seconds} @click=${() => this.run({ mode: "countdown", seconds: m.seconds, running: true })}>${t("Resume")}</button>`}</div>` : nothing}
         <div class="row presets">${[1, 5, 10, 25].map((n) => html`<button class="choice" @click=${() => { this.minutes = n; this.seconds = 0; }}>${n} min</button>`)}</div>
         <div class="row time">
           <input type="number" min="0" max="99" aria-label=${t("Minutes")} .value=${String(this.minutes)} @input=${(e) => { this.minutes = e.target.value; }}> :
           <input type="number" min="0" max="59" aria-label=${t("Seconds")} .value=${String(this.seconds).padStart(2, "0")} @input=${(e) => { this.seconds = e.target.value; }}>
         </div>
-        ${this.startStop("countdown", on, { seconds: total })}`)}
+        <div class="row"><button class="btn ${on ? "" : "primary"}" ?disabled=${this.busy} @click=${() => this.run({ mode: "countdown", seconds: total, running: true })}>${on ? t("Start again with {time}", { time: mmss(total) }) : t("Start")}</button></div>`)}
       ${this.card("noise", t("Noise meter"), icon(svg`<path d="M3 15v4M7 11v8M11 7v12M15 11v8M19 4v15"/>`), (on) => html`
         <p class="muted">${t("Shows how loud the room is, with the Evo's microphone.")}</p>${this.startStop("noise", on)}`)}
       ${this.card("scoreboard", t("Scoreboard"), icon(svg`<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M12 6v12"/>`), (on) => {

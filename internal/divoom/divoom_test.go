@@ -388,3 +388,17 @@ func mustHex(t *testing.T, s string) []byte {
 	}
 	return b
 }
+
+func TestCountdownResumes(t *testing.T) {
+	at := time.Unix(1_800_000_000, 0)
+	now = func() time.Time { return at }
+	defer func() { now = time.Now }()
+	v := display.View{Mode: display.ModeCountdown, Seconds: 300, Running: true, Since: at.Unix() - 70}
+	if got := View(v, 50)[0]; !bytes.Equal(got, Message(cmdTool, []byte{toolCountdown, 1, 3, 50})) {
+		t.Errorf("70 s into 5 minutes: %x, want 3:50 left", got)
+	}
+	v.Since = at.Unix() - 600
+	if got := View(v, 50)[0]; !bytes.Equal(got, Message(cmdTool, []byte{toolCountdown, 1, 0, 0})) {
+		t.Errorf("an ended countdown: %x", got)
+	}
+}

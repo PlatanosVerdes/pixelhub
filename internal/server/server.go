@@ -23,6 +23,7 @@ const (
 
 	defaultAlert = 10 * time.Second
 	maxAlert     = time.Hour
+	weatherFor   = 15 * time.Second
 	maxPriority  = 10
 )
 
@@ -81,6 +82,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("GET /api/weather", s.weather)
+	mux.HandleFunc("POST /api/weather/show", s.showWeather)
 	mux.HandleFunc("POST /api/notify", s.notify)
 	mux.HandleFunc("POST /api/channel", s.setChannel)
 	mux.HandleFunc("DELETE /api/channel", s.clearChannel)

@@ -47,6 +47,8 @@ type View struct {
 	// Seconds is the countdown's length.
 	Seconds int  `json:"seconds,omitempty"`
 	Running bool `json:"running,omitempty"`
+	// Since is when a running tool started, in Unix seconds: a countdown sent again resumes from it.
+	Since int64 `json:"since,omitempty"`
 }
 
 func (v View) IsZero() bool { return v == View{} }
@@ -74,6 +76,9 @@ func (v View) Validate() error {
 	}
 	if v.Red < 0 || v.Red > MaxScore || v.Blue < 0 || v.Blue > MaxScore {
 		errs = append(errs, fmt.Errorf("scores must be 0-%d", MaxScore))
+	}
+	if v.Since != 0 && !v.Running {
+		errs = append(errs, errors.New("since only goes with a running tool"))
 	}
 	if v.Running && !v.Mode.Tool() {
 		errs = append(errs, errors.New("running only goes with stopwatch, countdown and noise"))
