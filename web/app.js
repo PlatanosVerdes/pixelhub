@@ -1079,7 +1079,7 @@ class Modes extends LitElement {
           <div class="row"><button aria-label=${t("{team} minus one", { team: label })} @click=${() => this.change({ [key]: Math.max(0, (v[key] ?? 0) - 1) || undefined })}>−</button>
             <button aria-label=${t("{team} plus one", { team: label })} @click=${() => this.change({ [key]: Math.min(999, (v[key] ?? 0) + 1) })}>+</button></div></div>`;
         return html`<div class="score">${team("red", t("Red"), "#ff453a")}${team("blue", t("Blue"), "#0a84ff")}</div>
-          <div class="foot"><button class="btn small" @click=${() => this.change({ red: undefined, blue: undefined })}>${t("Reset to 0")}</button></div>`;
+          <div class="foot"><button class="btn small" @click=${() => this.change({ red: undefined, blue: undefined })}>${t("Reset")}</button></div>`;
       }
     }
     return nothing;
@@ -1771,7 +1771,7 @@ class AppsTab extends LitElement {
         <div class="actions">
           ${on ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", seconds: this.counted() })}>${t("Pause")}</button>`
             : html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", seconds: paused ? m.seconds : undefined, running: true })}>${paused ? t("Resume") : t("Start")}</button>`}
-          <button class="btn" ?disabled=${this.busy || !(on || paused)} @click=${() => this.run({ mode: "stopwatch" })}>${t("Reset to 0")}</button>
+          <button class="btn" ?disabled=${this.busy || !(on || paused)} @click=${() => this.run({ mode: "stopwatch" })}>${t("Reset")}</button>
         </div>
         ${this.back()}
       </div>`;
@@ -1802,7 +1802,7 @@ class AppsTab extends LitElement {
       <div class="side">
         <div><h3>${t("Scoreboard")}</h3><p>${t("Each point shows on the Evo as you add it.")}</p></div>
         <div class="actions">${on
-          ? html`<button class="btn" ?disabled=${this.busy} @click=${() => set({ red: undefined, blue: undefined })}>${t("Reset to 0")}</button>`
+          ? html`<button class="btn" ?disabled=${this.busy} @click=${() => set({ red: undefined, blue: undefined })}>${t("Reset")}</button>`
           : html`<button class="btn primary" ?disabled=${this.busy} @click=${() => set({})}>${t("Show")}</button>`}</div>
         ${this.back()}
       </div>`;
