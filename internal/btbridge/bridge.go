@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"syscall"
 	"time"
 )
 
@@ -15,6 +16,7 @@ const (
 	opConnect = 0x69
 	opRelease = 0x96
 	linkDown  = 0x96
+	busyTries = 5
 )
 
 // greeting is what the display answers to a design command; pixelhub waits for it before it paints,
@@ -158,6 +160,7 @@ func (b *Bridge) connect(mac [6]byte, channel byte) {
 	}
 	addr := fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5])
 	var err error
+	busy := 0
 	for try := 1; try <= b.Tries; try++ {
 		b.Log.Info("connecting", "device", addr, "channel", channel, "attempt", try)
 		var lk io.ReadWriteCloser
@@ -166,6 +169,11 @@ func (b *Bridge) connect(mac [6]byte, channel byte) {
 			return
 		}
 		b.Log.Warn("connect failed", "err", err)
+		// The kernel is still closing the last link; that fails at once, so it costs no try.
+		if errors.Is(err, syscall.EBUSY) && busy < busyTries {
+			busy++
+			try--
+		}
 		if try < b.Tries {
 			time.Sleep(b.Retry)
 		}
