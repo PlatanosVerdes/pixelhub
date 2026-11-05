@@ -108,6 +108,7 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `GET /api/gallery/gif?file=` | A gallery file as an animated GIF |
 | `POST /api/gallery/show` | `{"file", "name", "for"}`: show it now, like an alert that every profile accepts (30 s by default) |
 | `POST /api/gallery/save` | `{"file", "name", "channel"}`: keep it among a profile's ambient pictures |
+| `POST /api/lists/{name}/upload` | A GIF or PNG of your own into a list (multipart field `file`) |
 | `GET /api/lists`, `POST /api/lists` | Your lists of gallery pictures, and a new one (`{"name"}`); GIFs are kept in `/data/lists/`, so they stay if the gallery drops them |
 | `PUT /api/lists/{name}`, `DELETE /api/lists/{name}` | Rename (`{"name"}`), delete |
 | `POST /api/lists/{name}/items`, `DELETE /api/lists/{name}/items?file=` | Add a gallery picture (`{"file", "name", "author", "likes"}`), remove one |
@@ -137,7 +138,9 @@ curl -o now.png localhost:8000/api/preview.png
 Times are `HH:MM` (`24:00` ends a range at midnight); a range past midnight belongs to the day it
 starts on. Days are `mon-fri`, `sat,sun`, `daily`. Durations are Go durations like `90s` or `2m`. A
 scene's `brightness` is 0-100 or `"off"`; without it the sun decides, and a scene without a sprite
-shows the clock. An ambient `pictures` or `clock` of `0s` skips that part. An alert without a source
+shows the clock. An ambient `pictures` or `clock` of `0s` skips that part. An ambient or a scene
+with `"list"` shows the pictures of that list in turn instead (the web uses the default channel
+this way: its ambient list and its scenes are "In automatic" and "Schedule" on the Display tab). An alert without a source
 only shows on channels that accept `*`, and a channel with no sources is a quiet one; a dropped
 alert answers 200 with `"dropped": true`. A channel created without `ambient` alternates 2 minutes of
 pictures with 3 of the clock.

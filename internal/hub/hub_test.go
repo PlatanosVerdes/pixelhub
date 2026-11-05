@@ -738,3 +738,22 @@ func TestListsPlay(t *testing.T) {
 		t.Errorf("a scene with a list plays it: %s %s", st.Layer, st.Showing)
 	}
 }
+
+func TestShowReplacesTheLastShown(t *testing.T) {
+	t.Parallel()
+	h, _, now := newHub(t, oneChannel("0s", "1m"), nil)
+	*now = friday(10, 0)
+	h.Show(display.Content{Kind: display.Picture, Name: "first"}, 30*time.Second)
+	h.update()
+	*now = now.Add(5 * time.Second)
+	h.Show(display.Content{Kind: display.Picture, Name: "second"}, 30*time.Second)
+	h.update()
+	if st := h.Status(); st.Showing != "second" {
+		t.Fatalf("the second picture should show at once, showing %s", st.Showing)
+	}
+	*now = now.Add(31 * time.Second)
+	h.update()
+	if st := h.Status(); st.Layer == LayerAlert {
+		t.Errorf("the first picture came back after the second: %s", st.Showing)
+	}
+}

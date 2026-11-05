@@ -28,7 +28,8 @@ const (
 
 	tick = time.Second
 	// A tool left at zero this long gives the screen back.
-	idleTool = time.Minute
+	idleTool    = time.Minute
+	shownSource = "shown"
 	// showPriority puts something picked by hand over routine alerts but under urgent ones.
 	showPriority = 5
 )
@@ -387,7 +388,10 @@ func (h *Hub) Notify(a Alert) (string, bool) {
 // Show puts c on screen for d like an alert, whatever sources the active channel takes.
 func (h *Hub) Show(c display.Content, d time.Duration) {
 	h.mu.Lock()
-	h.alerts.push(Alert{Content: c, Priority: showPriority, Duration: d, Source: "ui"}, h.now())
+	// What was shown by hand gives way at once to the next thing shown, rather than queue behind it.
+	now := h.now()
+	h.alerts.drop(shownSource, now)
+	h.alerts.push(Alert{Content: c, Priority: showPriority, Duration: d, Source: shownSource}, now)
 	h.mu.Unlock()
 	h.poke()
 }

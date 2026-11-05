@@ -25,9 +25,7 @@ async function api(method, path, body, init = {}) {
   return data;
 }
 
-const clone = (x) => structuredClone(x);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-const errorLines = (e) => String(e.message ?? e).split("\n").map((s) => s.trim().replace(/^(invalid|conflict|not found): /, "")).filter(Boolean);
 
 // Times and durations.
 const known = (at) => { const d = at ? new Date(at) : null; return d && !isNaN(d) && d.getFullYear() > 2000 ? d : null; };
@@ -57,9 +55,6 @@ const span = (d) => {
   if (s >= 3600) return t("{n} h", { n: s / 3600 });
   return s >= 60 ? t("{n} min", { n: Math.round(s / 60) }) : t("{n} s", { n: Math.round(s) });
 };
-const minutesOf = (d) => Math.round((seconds(d) / 60) * 100) / 100;
-const durationOf = (minutes) => `${Math.round(Number(minutes) * 60)}s`;
-const minutesLeftToday = () => { const n = new Date(); return Math.max(1, Math.ceil((new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1) - n) / 60000)); };
 
 // Weekdays, Monday first, and a window's clock times in minutes after midnight.
 const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -93,25 +88,6 @@ const clock = (text) => {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(text ?? "").trim());
   return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
 };
-const tidyTime = (text) => {
-  const digits = String(text).trim();
-  if (/^\d{1,2}:\d{2}$/.test(digits)) return digits.padStart(5, "0");
-  const m = /^(\d{1,2})(\d{2})?$/.exec(digits);
-  return m ? `${m[1].padStart(2, "0")}:${m[2] ?? "00"}` : digits;
-};
-const windowActive = (w, day, minute) => {
-  const from = clock(w.from), to = clock(w.to);
-  if (isNaN(from) || isNaN(to)) return false;
-  if (from < to) return w.set.has(day) && minute >= from && minute < to;
-  if (minute >= from) return w.set.has(day);
-  return minute < to && w.set.has((day + 6) % 7);
-};
-// Which slot of the schedule holds this moment: its index, or -1 for the default channel.
-const matchingSlot = (slots, day, minute) => slots.findIndex((s) => windowActive(s, day, minute));
-const withSets = (slots) => slots.map((s) => ({ ...s, set: parseDays(s.days) }));
-const dayOf = (d) => (d.getDay() + 6) % 7;
-const minuteOf = (d) => d.getHours() * 60 + d.getMinutes();
-const channelColor = (names, name) => ["#4b4fd6", "#11a36a", "#e08a2c", "#d4477b", "#2f9bd6", "#8a63d2", "#b8a21f", "#5f7f8f"][Math.max(0, names.indexOf(name)) % 8];
 
 const icon = (d) => svg`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const icons = {
@@ -129,6 +105,7 @@ const icons = {
 
 const base = css`
   :host { display: block; }
+  :host([hidden]) { display: none; }
   * { box-sizing: border-box; }
   .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; min-width: 0; }
   .muted { color: var(--muted); }
@@ -197,41 +174,9 @@ const send = (el, name, detail) => el.dispatchEvent(new CustomEvent(name, { deta
 const toast = (el, text, opts = {}) => send(el, "toast", { text, ...opts });
 const saved = (el, st) => send(el, "state", st);
 
-// Messages the API wrote about a field: each goes to the first matcher it fits, the rest are returned.
-function route(lines, matchers) {
-  const by = {};
-  const rest = [];
-  for (const line of lines) {
-    const hit = Object.entries(matchers).find(([, re]) => re.test(line));
-    if (hit) (by[hit[0]] ??= []).push(line);
-    else rest.push(line);
-  }
-  return { by, rest };
-}
-const fieldErr = (lines) => lines?.length ? html`${lines.map((l) => html`<p class="err">${l}</p>`)}` : nothing;
-
 const segmented = (options, value, pick) => html`<div class="seg" role="group">${options.map(([v, label]) =>
   html`<button type="button" aria-pressed=${String(v === value)} @click=${() => pick(v)}>${label}</button>`)}</div>`;
 
-class SpriteGrid extends LitElement {
-  static properties = { sprites: { attribute: false }, value: {}, withClock: { type: Boolean } };
-  static styles = [base, css`
-    .grid { display: flex; flex-wrap: wrap; gap: 6px; }
-    button { width: 54px; height: 54px; padding: 3px; border-radius: 10px; border: 1px solid var(--line); background: #000; cursor: pointer; position: relative; display: flex; align-items: center; justify-content: center; }
-    button:hover { border-color: var(--muted); }
-    button[aria-pressed=true] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
-    img { width: 46px; height: 46px; display: block; }
-    .clock { color: #d8dcf0; font-family: var(--font-data); font-size: 11px; }
-  `];
-  pick(v) { this.dispatchEvent(new CustomEvent("pick", { detail: v })); }
-  render() {
-    return html`<div class="grid" role="group">
-      ${this.withClock ? html`<button type="button" class="clock" aria-pressed=${String(!this.value)} title=${t("Clock")} @click=${() => this.pick("")}>${t("Clock")}</button>` : nothing}
-      ${(this.sprites ?? []).map((n) => html`<button type="button" aria-pressed=${String(this.value === n)} title=${n} aria-label=${n} @click=${() => this.pick(n)}><img class="pix" src="api/sprites/${encodeURIComponent(n)}.png" alt="" loading="lazy"></button>`)}
-    </div>`;
-  }
-}
-customElements.define("ph-sprite-grid", SpriteGrid);
 
 class DaysPicker extends LitElement {
   static properties = { value: {} };
@@ -249,9 +194,6 @@ class DaysPicker extends LitElement {
 }
 customElements.define("ph-days", DaysPicker);
 
-const timeField = (value, label, onchange, bad) => html`<input class="time ${bad ? "bad" : ""}" type="text" inputmode="numeric" maxlength="5" placeholder="09:00" aria-label=${label}
-  .value=${value} @change=${(e) => { e.target.value = tidyTime(e.target.value); onchange(e.target.value); }}>`;
-
 const linkState = (s) => {
   if (s.released_until) return ["warn", t("Released to the phone app")];
   if (s.connected) return ["ok", t("Connected")];
@@ -259,112 +201,6 @@ const linkState = (s) => {
   if (ack && Date.now() - ack < 120000) return ["warn", t("Reconnecting")];
   return ["bad", t("Not connected")];
 };
-
-// The channel the schedule picks right now, and the slot that picked it (-1: the default channel).
-const scheduledNow = (st, at = new Date()) => {
-  const slots = withSets(st.schedule ?? []);
-  const i = matchingSlot(slots, dayOf(at), minuteOf(at));
-  return { index: i, channel: i < 0 ? st.default_channel : slots[i].channel };
-};
-
-
-class QuickSwitch extends LitElement {
-  static properties = { state: { attribute: false }, status: { attribute: false }, span: { state: true }, busy: { state: true } };
-  static styles = [base, css`
-    .row { margin-bottom: 12px; }
-    .row .label { margin-bottom: 6px; }
-    .row .seg { display: flex; }
-    .row .seg button { flex: 1 1 auto; padding: 0 8px; white-space: nowrap; }
-    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
-    .tile { text-align: left; height: auto; min-height: 56px; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-    .tile:hover { border-color: var(--muted); }
-    .tile[aria-pressed=true] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-    .tile b { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .tile span { font-size: 12px; color: var(--muted); }
-    .back { margin-top: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  `];
-  constructor() { super(); this.span = "schedule"; }
-
-  async pick(name) {
-    const body = { name };
-    if (this.span === "1h" || this.span === "4h") body.for = this.span;
-    if (this.span === "day") body.for = `${minutesLeftToday()}m`;
-    this.busy = true;
-    try { await api("POST", "channel", body); send(this, "refresh"); } catch (e) { toast(this, e.message); }
-    this.busy = false;
-  }
-  async back() {
-    this.busy = true;
-    try { await api("DELETE", "channel"); send(this, "refresh"); } catch (e) { toast(this, e.message); }
-    this.busy = false;
-  }
-
-  render() {
-    const st = this.state;
-    if (!st) return nothing;
-    const active = this.status?.channel;
-    const overridden = this.status?.channel_reason === "override";
-    const scheduled = scheduledNow(st).channel;
-    const spans = [["schedule", t("Next schedule change")], ["1h", span("1h")], ["4h", span("4h")], ["day", t("End of day")]];
-    return html`<section class="card" aria-labelledby="sw-h">
-      <div class="head"><h2 id="sw-h">${t("Quick switch")}</h2></div>
-      <div class="row"><span class="label">${t("For")}</span>${segmented(spans, this.span, (v) => { this.span = v; })}</div>
-      <div class="tiles">${st.channels.map((c) => html`<button type="button" class="tile" aria-pressed=${String(c.name === active)} ?disabled=${this.busy} @click=${() => this.pick(c.name)}>
-        <b>${c.name}</b><span>${c.name === active ? (overridden ? t("Override") : t("Showing")) : c.name === scheduled ? t("Scheduled now") : ""}&nbsp;</span></button>`)}</div>
-      <div class="back"><button class="btn small" ?disabled=${!overridden || this.busy} @click=${() => this.back()}>${t("Back to schedule")}</button>
-        <span class="small muted">${overridden ? t("The schedule says {name} now.", { name: scheduled }) : t("No override is active.")}</span></div>
-    </section>`;
-  }
-}
-customElements.define("ph-switch", QuickSwitch);
-
-class NotifyCard extends LitElement {
-  static properties = { sprites: { attribute: false }, mode: { state: true }, sprite: { state: true }, color: { state: true }, priority: { state: true }, duration: { state: true }, busy: { state: true } };
-  static styles = [base, css`
-    .form { display: grid; gap: 14px; }
-    .line { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; }
-    input[type=number] { width: 72px; }
-    .foot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  `];
-  constructor() { super(); this.mode = "sprite"; this.sprite = "heart"; this.color = "#ff3b30"; this.priority = 5; this.duration = "10s"; }
-
-  async send() {
-    const body = { priority: Number(this.priority), duration: this.duration, source: "ui" };
-    if (this.mode === "sprite") body.sprite = this.sprite;
-    else body.color = [1, 3, 5].map((i) => parseInt(this.color.slice(i, i + 2), 16));
-    this.busy = true;
-    try {
-      const r = await api("POST", "notify", body);
-      if (r.dropped) toast(this, t("Dropped: {channel} does not accept the source ui.", { channel: r.channel }));
-      else toast(this, t("Showing {name} on {channel} for {time}", { name: r.showing, channel: r.channel, time: span(r.duration) }));
-      send(this, "refresh");
-    } catch (e) { toast(this, e.message); }
-    this.busy = false;
-  }
-
-  render() {
-    const names = this.sprites ?? [];
-    return html`<section class="card" aria-labelledby="no-h">
-      <div class="head"><h2 id="no-h">${t("Test alert")}</h2></div>
-      <div class="form">
-        <div>${segmented([["sprite", t("Sprite")], ["color", t("Color")]], this.mode, (v) => { this.mode = v; })}</div>
-        ${this.mode === "sprite"
-          ? html`<ph-sprite-grid .sprites=${names} .value=${this.sprite} @pick=${(e) => { this.sprite = e.detail; }}></ph-sprite-grid>`
-          : html`<div class="line"><div><label class="label" for="col">${t("Color")}</label><input id="col" type="color" .value=${this.color} @input=${(e) => { this.color = e.target.value; }}></div></div>`}
-        <div class="line">
-          <div><label class="label" for="pr">${t("Priority")}</label><input id="pr" type="number" min="0" max="10" step="1" .value=${String(this.priority)} @input=${(e) => { this.priority = e.target.value; }}></div>
-          <div><label class="label" for="du">${t("Duration")}</label>
-            <select id="du" .value=${this.duration} @change=${(e) => { this.duration = e.target.value; }}>
-              ${["10s", "30s", "1m", "5m", "15m", "1h"].map((v) => html`<option value=${v} ?selected=${v === this.duration}>${span(v)}</option>`)}
-            </select></div>
-        </div>
-        <div class="foot"><button class="btn primary" ?disabled=${this.busy} @click=${() => this.send()}>${t("Send alert")}</button>
-          <span class="small muted">${t("Sent with the source ui; the active profile must accept it.")}</span></div>
-      </div>
-    </section>`;
-  }
-}
-customElements.define("ph-notify", NotifyCard);
 
 // Every change saves at once; there is nothing to save or undo by hand.
 class SettingsCard extends LitElement {
@@ -455,441 +291,6 @@ class SettingsCard extends LitElement {
 }
 customElements.define("ph-settings", SettingsCard);
 
-class Pictures extends LitElement {
-  static properties = { channel: {}, files: { state: true }, gone: { state: true }, busy: { state: true }, over: { state: true } };
-  static styles = [base, css`
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px; }
-    .pic { position: relative; min-width: 0; }
-    .pic .img { aspect-ratio: 1; background: #000; border-radius: 10px; border: 1px solid var(--line); overflow: hidden; display: block; }
-    .pic img { width: 100%; height: 100%; display: block; }
-    .pic .name { font-family: var(--font-data); font-size: 11px; color: var(--muted); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pic .icon { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; background: rgba(5, 6, 11, .72); color: #e9ebf5; }
-    .pic .icon:hover { background: rgba(5, 6, 11, .9); color: #ff9c9c; }
-    .pic .icon svg { width: 16px; height: 16px; }
-    .add { aspect-ratio: 1; border: 1.5px dashed var(--line); border-radius: 10px; background: none; color: var(--muted); cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px; padding: 4px; text-align: center; }
-    .add:hover, .grid.over .add { border-color: var(--accent); color: var(--accent); }
-    .grid.over { outline: 2px dashed var(--accent); outline-offset: 6px; border-radius: 6px; }
-    input[type=file] { display: none; }
-  `];
-  connectedCallback() { super.connectedCallback(); this.gone = new Set(); this.load(); }
-  async load() {
-    try { this.files = (await api("GET", `channels/${encodeURIComponent(this.channel)}/pictures`)).pictures ?? []; }
-    catch (e) { this.files = this.files ?? []; toast(this, e.message); }
-  }
-  async upload(list) {
-    this.busy = true;
-    for (const file of list) {
-      const form = new FormData();
-      form.append("file", file);
-      try { await api("POST", `channels/${encodeURIComponent(this.channel)}/pictures`, form); }
-      catch (e) { toast(this, `${file.name}: ${e.message}`); }
-    }
-    await this.load();
-    this.busy = false;
-  }
-  remove(file) {
-    this.gone = new Set(this.gone).add(file);
-    const unhide = () => { const h = new Set(this.gone); h.delete(file); this.gone = h; };
-    const path = `channels/${encodeURIComponent(this.channel)}/pictures/${encodeURIComponent(file)}`;
-    toast(this, t("{file} deleted", { file }), {
-      action: { label: t("Undo"), run: unhide },
-      expire: async () => {
-        try { await api("DELETE", path, undefined, { keepalive: true }); } catch (e) { toast(this, e.message); }
-        await this.load();
-        unhide();
-      },
-    });
-  }
-  render() {
-    if (!this.files) return html`<p class="muted small">${t("Loading")}</p>`;
-    const shown = this.files.filter((f) => !this.gone.has(f));
-    return html`
-      <div class="grid ${this.over ? "over" : ""}" @dragover=${(e) => { e.preventDefault(); this.over = true; }} @dragleave=${(e) => { if (!e.currentTarget.contains(e.relatedTarget)) this.over = false; }}
-        @drop=${(e) => { e.preventDefault(); this.over = false; this.upload([...e.dataTransfer.files]); }}>
-        ${repeat(shown, (f) => f, (f) => html`<div class="pic"><span class="img"><img class="pix" loading="lazy" alt=${f} src="api/channels/${encodeURIComponent(this.channel)}/pictures/${encodeURIComponent(f)}"></span>
-          <button class="icon trash" aria-label=${t("Delete {file}", { file: f })} title=${t("Delete")} @click=${() => this.remove(f)}>${icons.trash}</button>
-          <div class="name" title=${f}>${f}</div></div>`)}
-        <button class="add" ?disabled=${this.busy} @click=${(e) => e.currentTarget.nextElementSibling.click()}>${icons.upload}<span>${this.busy ? t("Uploading…") : t("Add GIF or PNG")}</span></button>
-        <input type="file" accept="image/gif,image/png" multiple @change=${(e) => { this.upload([...e.target.files]); e.target.value = ""; }}>
-      </div>
-      <p class="hint">${shown.length ? t("Drop files here or use the button. Up to 1 MB and 512 by 512 pixels.") : t("No pictures. The display uses the shared ones when there are any. Drop GIF or PNG files here or use the button.")}</p>`;
-  }
-}
-customElements.define("ph-pictures", Pictures);
-
-const brightnessMode = (b) => (b === undefined || b === null ? "auto" : b === 0 ? "off" : "set");
-const editorDraft = (c) => ({
-  name: c.name,
-  sources: [...(c.sources ?? [])],
-  ambient: { pictures: minutesOf(c.ambient.pictures), clock: minutesOf(c.ambient.clock) },
-  scenes: (c.scenes ?? []).map((s) => ({
-    name: s.name, days: s.days, from: s.from, to: s.to, sprite: s.sprite ?? "",
-    bmode: brightnessMode(s.brightness), bval: s.brightness > 0 ? s.brightness : 50,
-  })),
-});
-const editorBody = (d) => ({
-  name: d.name.trim(),
-  sources: d.sources,
-  ambient: { pictures: durationOf(d.ambient.pictures || 0), clock: durationOf(d.ambient.clock || 0) },
-  scenes: d.scenes.map((s) => {
-    const out = { name: s.name, days: s.days, from: s.from, to: s.to };
-    if (s.sprite) out.sprite = s.sprite;
-    if (s.bmode === "off") out.brightness = "off";
-    if (s.bmode === "set") out.brightness = Math.round(Number(s.bval));
-    return out;
-  }),
-});
-
-class ChannelEditor extends LitElement {
-  static properties = { channel: { attribute: false }, sprites: { attribute: false }, draft: { state: true }, errors: { state: true }, busy: { state: true }, source: { state: true } };
-  static styles = [base, css`
-    .sec { padding: 16px 0; border-top: 1px solid var(--line); }
-    .sec:first-child { border-top: 0; padding-top: 4px; }
-    h3 { font-size: 13px; margin: 0 0 10px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-    h3 .grow { flex: 1; }
-    .name { max-width: 280px; width: 100%; font-family: var(--font-data); }
-    .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-    .chips input { width: 150px; }
-    .ambient { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; }
-    .ambient input { width: 84px; }
-    .mix { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--chip); margin-top: 12px; max-width: 280px; }
-    .mix i { display: block; height: 100%; }
-    .scene { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; display: grid; gap: 12px; }
-    .scene .top { display: flex; gap: 8px; align-items: center; }
-    .scene .top input { flex: 1; }
-    .when { display: flex; gap: 12px 16px; flex-wrap: wrap; align-items: flex-end; }
-    .bright { display: flex; gap: 8px; align-items: center; }
-    .bright input[type=range] { width: 130px; }
-    .bright output { font-family: var(--font-data); font-size: 13px; min-width: 28px; }
-    .foot { display: flex; gap: 8px; padding-top: 16px; border-top: 1px solid var(--line); align-items: center; flex-wrap: wrap; }
-  `];
-
-  willUpdate(c) {
-    if (c.has("channel") && this.channel && (!this.draft || same(this.draft, c.get("profile") ? editorDraft(c.get("profile")) : null))) this.draft = editorDraft(this.channel);
-  }
-  get dirty() { return this.draft && !same(this.draft, editorDraft(this.channel)); }
-  patch(change) { this.draft = { ...this.draft, ...change }; }
-  setScene(i, change) { this.patch({ scenes: this.draft.scenes.map((s, j) => (j === i ? { ...s, ...change } : s)) }); }
-
-  addSource(text) {
-    const add = String(text ?? "").split(/[\s,]+/).filter(Boolean).filter((s) => !this.draft.sources.includes(s));
-    if (add.length) this.patch({ sources: [...this.draft.sources, ...add] });
-    this.source = "";
-  }
-  addScene() {
-    const n = this.draft.scenes.length + 1;
-    this.patch({ scenes: [...this.draft.scenes, { name: t("Scene {n}", { n }), days: "daily", from: "09:00", to: "18:00", sprite: "", bmode: "auto", bval: 50 }] });
-  }
-  removeScene(i) {
-    const scene = this.draft.scenes[i];
-    this.patch({ scenes: this.draft.scenes.filter((_, j) => j !== i) });
-    toast(this, t("Scene {name} removed", { name: scene.name }), {
-      action: { label: t("Undo"), run: () => { const list = [...this.draft.scenes]; list.splice(i, 0, scene); this.patch({ scenes: list }); } },
-    });
-  }
-
-  async save() {
-    this.busy = true;
-    this.errors = [];
-    try {
-      const st = await api("PUT", `channels/${encodeURIComponent(this.channel.name)}`, editorBody(this.draft));
-      const name = this.draft.name.trim();
-      if (name !== this.channel.name) send(this, "renamed", name);
-      saved(this, st);
-      toast(this, t("{name} saved", { name }));
-    } catch (e) {
-      this.errors = errorLines(e);
-      toast(this, this.errors[0]);
-    }
-    this.busy = false;
-  }
-
-  render() {
-    const d = this.draft;
-    if (!d) return nothing;
-    const mine = { name: [], ambient: [], scenes: {}, rest: [] };
-    const sceneOf = (line) => {
-      const m = /scenes\[(\d+)\]/.exec(line);
-      return m ? Number(m[1]) : d.scenes.findIndex((s) => line.includes(`scene "${s.name}"`));
-    };
-    for (const line of this.errors ?? []) {
-      const i = /scene/.test(line) ? sceneOf(line) : -1;
-      if (i >= 0) (mine.scenes[i] ??= []).push(line);
-      else if (/ambient/.test(line)) mine.ambient.push(line);
-      else if (/channel name|already exists/.test(line)) mine.name.push(line);
-      else mine.rest.push(line);
-    }
-    const total = (d.ambient.pictures || 0) + (d.ambient.clock || 0);
-    const quiet = d.sources.length === 0;
-    return html`
-      <div class="sec">
-        <label class="label" for="n-${this.channel.name}">${t("Name")}</label>
-        <input id="n-${this.channel.name}" class="name ${mine.name.length ? "bad" : ""}" maxlength="32" autocapitalize="none" spellcheck="false" .value=${d.name} @input=${(e) => this.patch({ name: e.target.value })}>
-        ${mine.name.length ? fieldErr(mine.name) : html`<p class="hint">${t("Renaming also renames its schedule slots, its pictures and an override on it.")}</p>`}
-      </div>
-      <div class="sec">
-        <h3>${t("Accepted alert sources")}</h3>
-        <div class="chips">
-          ${d.sources.map((s) => html`<span class="chip">${s === "*" ? t("* all sources") : s}<button aria-label=${t("Remove {name}", { name: s })} @click=${() => this.patch({ sources: d.sources.filter((x) => x !== s) })}>${icons.close}</button></span>`)}
-          <input type="text" placeholder=${t("Add a source")} aria-label=${t("Add a source")} autocapitalize="none" spellcheck="false" .value=${this.source ?? ""}
-            @input=${(e) => { this.source = e.target.value; }}
-            @keydown=${(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); this.addSource(e.target.value); } }} @blur=${(e) => this.addSource(e.target.value)}>
-          ${d.sources.includes("*") ? nothing : html`<button class="btn small" @click=${() => this.addSource("*")}>${t("Accept all")}</button>`}
-        </div>
-        <p class="hint">${quiet ? t("No sources: this profile is quiet and shows no alerts.") : t("An alert shows only when its source is listed here. * accepts every source, including alerts without one.")}</p>
-      </div>
-      <div class="sec">
-        <h3>${t("Ambient rotation")}</h3>
-        <div class="ambient">
-          <div><label class="label" for="ap-${d.name}">${t("Pictures, minutes")}</label><input id="ap-${d.name}" type="number" min="0" step="any" class=${mine.ambient.length ? "bad" : ""} .value=${String(d.ambient.pictures)} @input=${(e) => this.patch({ ambient: { ...d.ambient, pictures: e.target.value === "" ? "" : Number(e.target.value) } })}></div>
-          <div><label class="label" for="ac-${d.name}">${t("Clock, minutes")}</label><input id="ac-${d.name}" type="number" min="0" step="any" class=${mine.ambient.length ? "bad" : ""} .value=${String(d.ambient.clock)} @input=${(e) => this.patch({ ambient: { ...d.ambient, clock: e.target.value === "" ? "" : Number(e.target.value) } })}></div>
-        </div>
-        ${total > 0 ? html`<div class="mix" aria-hidden="true"><i style="width:${(100 * (d.ambient.pictures || 0)) / total}%;background:var(--accent)"></i></div>` : nothing}
-        <p class="hint">${t("Either can be 0 to skip it. Together they must add up to 10 seconds or more.")}</p>
-        ${fieldErr(mine.ambient)}
-      </div>
-      <div class="sec">
-        <h3><span class="grow">${t("Scenes")}</span><button class="btn small" @click=${() => this.addScene()}>${icons.plus}${t("Add scene")}</button></h3>
-        ${d.scenes.length ? nothing : html`<p class="hint" style="margin:0">${t("No scenes. Ambient plays all day.")}</p>`}
-        ${d.scenes.map((s, i) => html`<div class="scene">
-          <div class="top"><input aria-label=${t("Scene name")} .value=${s.name} @input=${(e) => this.setScene(i, { name: e.target.value })}>
-            <button class="icon trash" aria-label=${t("Remove scene {name}", { name: s.name })} title=${t("Remove")} @click=${() => this.removeScene(i)}>${icons.trash}</button></div>
-          <div class="when">
-            <div><span class="label">${t("Days")}</span><ph-days .value=${s.days} @change=${(e) => this.setScene(i, { days: e.detail })}></ph-days></div>
-            <div><span class="label">${t("From")}</span>${timeField(s.from, t("From"), (v) => this.setScene(i, { from: v }), mine.scenes[i])}</div>
-            <div><span class="label">${t("To")}</span>${timeField(s.to, t("To"), (v) => this.setScene(i, { to: v }), mine.scenes[i])}</div>
-          </div>
-          <div><span class="label">${t("Shows")}</span><ph-sprite-grid .withClock=${true} .sprites=${this.sprites} .value=${s.sprite} @pick=${(e) => this.setScene(i, { sprite: e.detail })}></ph-sprite-grid></div>
-          <div><span class="label">${t("Brightness")}</span><div class="bright">
-            <select aria-label=${t("Brightness")} .value=${s.bmode} @change=${(e) => this.setScene(i, { bmode: e.target.value })}>
-              <option value="auto" ?selected=${s.bmode === "auto"}>${t("By the sun")}</option><option value="set" ?selected=${s.bmode === "set"}>${t("Fixed")}</option><option value="off" ?selected=${s.bmode === "off"}>${t("Off")}</option></select>
-            ${s.bmode === "set" ? html`<input type="range" min="1" max="100" .value=${String(s.bval)} aria-label=${t("Brightness")} @input=${(e) => this.setScene(i, { bval: Number(e.target.value) })}><output>${s.bval}</output>` : nothing}
-          </div></div>
-          ${fieldErr(mine.scenes[i])}
-        </div>`)}
-      </div>
-      <div class="sec">
-        <h3>${t("Pictures")}</h3>
-        ${keyed(this.channel.name, html`<ph-pictures channel=${this.channel.name}></ph-pictures>`)}
-      </div>
-      ${mine.rest.length ? html`<ul class="errors">${mine.rest.map((l) => html`<li class="err">${l}</li>`)}</ul>` : nothing}
-      <div class="foot"><button class="btn primary" ?disabled=${!this.dirty || this.busy} @click=${() => this.save()}>${t("Save profile")}</button>
-        <button class="btn" ?disabled=${!this.dirty || this.busy} @click=${() => { this.draft = editorDraft(this.channel); this.errors = []; }}>${t("Revert")}</button>
-        <span class="small muted">${t("Pictures upload and delete at once; the rest waits for Save.")}</span></div>`;
-  }
-}
-customElements.define("ph-channel-editor", ChannelEditor);
-
-const ambientSummary = (a) => {
-  const p = minutesOf(a.pictures), c = minutesOf(a.clock);
-  if (p && c) return t("{p} min pictures, {c} min clock", { p, c });
-  if (p) return t("Pictures only");
-  return t("Clock only");
-};
-
-class Channels extends LitElement {
-  static properties = { state: { attribute: false }, status: { attribute: false }, sprites: { attribute: false }, open: { state: true }, name: { state: true }, error: { state: true }, busy: { state: true } };
-  static styles = [base, css`
-    .create { display: flex; gap: 8px; flex-wrap: wrap; }
-    .create input { flex: 1; min-width: 160px; max-width: 320px; font-family: var(--font-data); }
-    ul.list { list-style: none; margin: 14px 0 0; padding: 0; }
-    li.item { border-top: 1px solid var(--line); }
-    .row { display: flex; align-items: center; gap: 4px; }
-    .toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; text-align: left; background: none; border: 0; padding: 12px 0; cursor: pointer; }
-    .toggle svg { color: var(--muted); transition: transform .15s; flex: none; }
-    .item.open .toggle svg { transform: rotate(180deg); }
-    .title { min-width: 0; flex: 1; }
-    .title b { font-size: 15px; font-weight: 600; display: inline-block; margin-right: 8px; }
-    .facts { display: flex; flex-wrap: wrap; gap: 2px 18px; margin-top: 3px; font-size: 12px; color: var(--muted); }
-    .facts span b { font-weight: 500; color: var(--ink); margin-left: 4px; font-size: 12px; margin-right: 0; }
-    .body { padding: 4px 0 18px; }
-  `];
-
-  async create(e) {
-    e.preventDefault();
-    const name = (this.name ?? "").trim();
-    if (!name) return;
-    this.busy = true;
-    this.error = "";
-    try {
-      const st = await api("POST", "channels", { name, sources: ["*"] });
-      saved(this, st);
-      this.name = "";
-      this.open = name;
-    } catch (err) { this.error = errorLines(err).join(" "); }
-    this.busy = false;
-  }
-
-  noDelete(c) {
-    const st = this.state;
-    if (st.channels.length <= 1) return t("It is the only profile.");
-    if (c.name === st.default_channel) return t("{name} is the default profile. Pick another default in Settings first.", { name: c.name });
-    return "";
-  }
-
-  render() {
-    const st = this.state;
-    if (!st) return nothing;
-    return html`<section class="card" aria-labelledby="ch-h">
-      <div class="head"><h2 id="ch-h">${t("Profiles")}</h2></div>
-      <form class="create" @submit=${(e) => this.create(e)}>
-        <input aria-label=${t("New profile name")} placeholder=${t("New profile name")} maxlength="32" autocapitalize="none" spellcheck="false" class=${this.error ? "bad" : ""} .value=${this.name ?? ""} @input=${(e) => { this.name = e.target.value; this.error = ""; }}>
-        <button class="btn" type="submit" ?disabled=${this.busy || !(this.name ?? "").trim()}>${icons.plus}${t("Create profile")}</button>
-      </form>
-      ${this.error ? html`<p class="err">${this.error}</p>` : html`<p class="hint">${t("1 to 32 lowercase letters, digits, - or _.")}</p>`}
-      <ul class="list">${repeat(st.channels, (c) => c.name, (c) => {
-        const open = this.open === c.name;
-        const why = this.noDelete(c);
-        const sources = c.sources?.length ? (c.sources.includes("*") ? t("All") : c.sources.join(", ")) : t("None");
-        return html`<li class="item ${open ? "open" : ""}">
-          <div class="row">
-            <button class="toggle" aria-expanded=${String(open)} @click=${() => { this.open = open ? null : c.name; }}>
-              <span class="title"><b>${c.name}</b>${this.status?.channel === c.name ? html`<span class="tag on">${t("Showing")}</span>` : st.default_channel === c.name ? html`<span class="tag">${t("Default")}</span>` : nothing}
-                <span class="facts"><span>${t("Sources")}<b>${sources}</b></span><span>${t("Ambient")}<b>${ambientSummary(c.ambient)}</b></span><span>${t("Scenes")}<b>${(c.scenes ?? []).length}</b></span></span></span>
-              ${icons.chevron}</button>
-            <button class="icon trash" aria-disabled=${String(!!why)} title=${why || t("Delete {name}", { name: c.name })} aria-label=${t("Delete {name}", { name: c.name })}
-              @click=${() => (why ? toast(this, why) : send(this, "remove-channel", c.name))}>${icons.trash}</button>
-          </div>
-          ${open ? html`<div class="body"><ph-channel-editor .channel=${c} .sprites=${this.sprites} @renamed=${(e) => { this.open = e.detail; }}></ph-channel-editor></div>` : nothing}
-        </li>`;
-      })}</ul>
-    </section>`;
-  }
-}
-customElements.define("ph-channels", Channels);
-
-class WeekView extends LitElement {
-  static properties = { slots: { attribute: false }, names: { attribute: false }, fallback: {} };
-  static styles = [base, css`
-    .week { display: grid; grid-template-columns: 34px 1fr; gap: 5px 8px; align-items: center; }
-    .axis { grid-column: 2; display: flex; justify-content: space-between; font-family: var(--font-data); font-size: 10px; color: var(--muted); }
-    .day { font-size: 12px; color: var(--muted); text-transform: capitalize; }
-    .day.today { color: var(--ink); font-weight: 600; }
-    .track { position: relative; height: 22px; border-radius: 5px; overflow: hidden; background: var(--chip); }
-    .band { position: absolute; top: 0; bottom: 0; color: #fff; font-size: 10px; line-height: 22px; padding: 0 5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; border-right: 1px solid color-mix(in srgb, var(--surface) 70%, transparent); background: none; border-radius: 0; gap: 0; }
-    .now { position: absolute; top: -1px; bottom: -1px; width: 2px; background: var(--ink); }
-    .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 12px; font-size: 12px; }
-    .legend span { display: inline-flex; align-items: center; gap: 6px; }
-    .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
-  `];
-  segments(slots, day) {
-    const out = [];
-    for (let m = 0; m < 1440; m++) {
-      const i = matchingSlot(slots, day, m);
-      const channel = i < 0 ? this.fallback : slots[i].channel;
-      const last = out.at(-1);
-      if (last && last.channel === channel && last.slot === i) last.to = m + 1;
-      else out.push({ channel, slot: i, from: m, to: m + 1 });
-    }
-    return out;
-  }
-  render() {
-    const slots = withSets(this.slots ?? []);
-    const now = new Date();
-    const today = dayOf(now);
-    const fmt = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-    const used = [...new Set([this.fallback, ...(this.slots ?? []).map((s) => s.channel)])];
-    return html`<div class="week" role="img" aria-label=${t("Which profile is active at each hour of the week")}>
-      <span></span><div class="axis"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
-      ${DAY_KEYS.map((_, d) => html`<span class="day ${d === today ? "today" : ""}">${dayLabel(d)}</span>
-        <div class="track">${this.segments(slots, d).map((s) => html`<span class="band" style="left:${(s.from / 1440) * 100}%;width:${((s.to - s.from) / 1440) * 100}%;background:${channelColor(this.names, s.channel)}"
-          title="${s.channel} ${fmt(s.from)} - ${fmt(s.to)}">${s.to - s.from > 150 ? s.channel : ""}</span>`)}
-          ${d === today ? html`<span class="now" style="left:${(minuteOf(now) / 1440) * 100}%"></span>` : nothing}</div>`)}
-    </div>
-    <div class="legend">${used.map((n) => html`<span><i style="background:${channelColor(this.names, n)}"></i>${n}${n === this.fallback ? html`<span class="muted">${t("default")}</span>` : nothing}</span>`)}</div>`;
-  }
-}
-customElements.define("ph-week", WeekView);
-
-const slotDraft = (s) => ({ channel: s.channel, days: s.days, from: s.from, to: s.to });
-
-class Schedule extends LitElement {
-  static properties = { base: { attribute: false }, draft: { state: true }, errors: { state: true }, busy: { state: true } };
-  static styles = [base, css`
-    ol { list-style: none; margin: 0; padding: 0; counter-reset: slot; }
-    li { border-top: 1px solid var(--line); padding: 12px 0; display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-end; }
-    li .n { font-family: var(--font-data); font-size: 12px; color: var(--muted); width: 20px; align-self: center; }
-    li .chan { flex: 1; min-width: 120px; max-width: 140px; }
-    li .chan select { width: 100%; }
-    li .actions { margin-left: auto; display: flex; align-self: center; }
-    li { position: relative; }
-    @media (min-width: 700px) { li { padding-right: 104px; } li .actions { position: absolute; right: 0; top: 50%; transform: translateY(-50%); margin: 0; } }
-    li .errs { flex-basis: 100%; }
-    .foot { display: flex; gap: 8px; margin-top: 14px; align-items: center; flex-wrap: wrap; }
-    .week-wrap { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
-    .empty { margin: 0 0 4px; font-size: 13px; color: var(--muted); }
-  `];
-  willUpdate(c) {
-    if (c.has("base") && this.base && (!this.draft || same(this.draft, c.get("base") ? c.get("base").schedule.map(slotDraft) : null))) this.draft = this.base.schedule.map(slotDraft);
-  }
-  get dirty() { return this.draft && this.base && !same(this.draft, this.base.schedule.map(slotDraft)); }
-  setSlot(i, change) { this.draft = this.draft.map((s, j) => (j === i ? { ...s, ...change } : s)); }
-  move(i, by) {
-    const list = [...this.draft];
-    [list[i], list[i + by]] = [list[i + by], list[i]];
-    this.draft = list;
-  }
-  add() { this.draft = [...this.draft, { channel: this.base.default_channel, days: "daily", from: "09:00", to: "18:00" }]; }
-  remove(i) {
-    const slot = this.draft[i];
-    this.draft = this.draft.filter((_, j) => j !== i);
-    toast(this, t("Slot {n} removed", { n: i + 1 }), {
-      action: { label: t("Undo"), run: () => { const list = [...this.draft]; list.splice(i, 0, slot); this.draft = list; } },
-    });
-  }
-  async save() {
-    this.busy = true;
-    this.errors = [];
-    try {
-      const st = await api("PUT", "schedule", this.draft);
-      saved(this, st);
-      toast(this, t("Schedule saved"));
-    } catch (e) {
-      this.errors = errorLines(e);
-      toast(this, this.errors[0]);
-    }
-    this.busy = false;
-  }
-  render() {
-    if (!this.draft) return nothing;
-    const names = this.base.channels.map((c) => c.name);
-    const mine = {};
-    const rest = [];
-    for (const line of this.errors ?? []) {
-      const i = /schedule\[(\d+)\]/.exec(line)?.[1];
-      if (i !== undefined) (mine[i] ??= []).push(line.replace(/^schedule\[\d+\]:\s*/, ""));
-      else rest.push(line);
-    }
-    return html`<section class="card" aria-labelledby="sc-h">
-      <div class="head"><h2 id="sc-h">${t("Schedule")}</h2><button class="btn small" @click=${() => this.add()}>${icons.plus}${t("Add slot")}</button></div>
-      <p class="hint" style="margin:0 0 8px">${t("The first slot that matches wins. When none match, the default profile shows.")}</p>
-      ${this.draft.length ? nothing : html`<p class="empty">${t("No slots: the default profile always shows.")}</p>`}
-      <ol>${this.draft.map((s, i) => html`<li>
-        <span class="n">${i + 1}</span>
-        <div class="chan"><span class="label">${t("Profile")}</span>
-          <select aria-label=${t("Profile")} class=${mine[i] ? "bad" : ""} .value=${s.channel} @change=${(e) => this.setSlot(i, { channel: e.target.value })}>
-            ${(names.includes(s.channel) ? names : [s.channel, ...names]).map((n) => html`<option value=${n} ?selected=${n === s.channel}>${n}</option>`)}</select></div>
-        <div class="actions">
-          <button class="icon" aria-label=${t("Move up")} title=${t("Move up")} ?disabled=${i === 0} @click=${() => this.move(i, -1)}>${icons.up}</button>
-          <button class="icon" aria-label=${t("Move down")} title=${t("Move down")} ?disabled=${i === this.draft.length - 1} @click=${() => this.move(i, 1)}>${icons.down}</button>
-          <button class="icon trash" aria-label=${t("Remove slot {n}", { n: i + 1 })} title=${t("Remove")} @click=${() => this.remove(i)}>${icons.trash}</button>
-        </div>
-        <div><span class="label">${t("Days")}</span><ph-days .value=${s.days} @change=${(e) => this.setSlot(i, { days: e.detail })}></ph-days></div>
-        <div><span class="label">${t("From")}</span>${timeField(s.from, t("From"), (v) => this.setSlot(i, { from: v }), mine[i])}</div>
-        <div><span class="label">${t("To")}</span>${timeField(s.to, t("To"), (v) => this.setSlot(i, { to: v }), mine[i])}</div>
-        <div class="errs">${fieldErr(mine[i])}</div>
-      </li>`)}</ol>
-      ${rest.length ? html`<ul class="errors">${rest.map((l) => html`<li class="err">${l}</li>`)}</ul>` : nothing}
-      <div class="foot"><button class="btn primary" ?disabled=${!this.dirty || this.busy} @click=${() => this.save()}>${t("Save schedule")}</button>
-        <button class="btn" ?disabled=${!this.dirty || this.busy} @click=${() => { this.draft = this.base.schedule.map(slotDraft); this.errors = []; }}>${t("Revert")}</button></div>
-      <div class="week-wrap"><ph-week .slots=${this.draft} .names=${names} fallback=${this.base.default_channel}></ph-week></div>
-    </section>`;
-  }
-}
-customElements.define("ph-schedule", Schedule);
-
-// A toast hides by itself, but not while the pointer or focus is on it, so its action stays reachable.
-// `expire` is the work an Undo cancels: it runs when the toast goes away any other way.
 // The display drawn as what it is: a grid of round LEDs, lit from the preview, dark where off.
 const LED_SIZE = 16;
 class LedMatrix extends LitElement {
@@ -1107,9 +508,137 @@ const phaseNow = (status, st) => {
   return ["day", "dusk", "night"].find((k) => b[k] === status.brightness) ?? null;
 };
 
+const defaultChannel = (st) => st?.channels?.find((c) => c.name === st.default_channel);
+async function saveChannel(el, st, patch) {
+  const ch = defaultChannel(st);
+  try { saved(el, await api("PUT", `channels/${encodeURIComponent(ch.name)}`, { ...ch, ...patch })); send(el, "refresh"); return true; }
+  catch (e) { toast(el, e.message); return false; }
+}
+const daysText = (days) => {
+  const set = parseDays(days);
+  if (set.size === 0 || set.size === 7) return t("Every day");
+  if (formatDays(set) === "mon-fri") return t("Weekdays");
+  if (formatDays(set) === "sat,sun") return t("Weekends");
+  return [...set].sort().map(dayLabel).join(" ");
+};
+const STEPS = [["30s", "30 s"], ["1m", "1 min"], ["2m", "2 min"], ["5m", "5 min"]];
+
+// What automatic shows between clocks: one of the user's lists, in turn, or only the clock.
+class Playlist extends LitElement {
+  static properties = { state: { attribute: false }, lists: { attribute: false }, busy: { state: true } };
+  static styles = [base, css`
+    .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+    .opt { border: 1px solid var(--line); background: none; border-radius: 10px; min-height: 36px; padding: 0 14px; font-size: 14px; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+    .opt small { font-size: 12px; opacity: .8; }
+    .opt:hover { color: var(--ink); }
+    .opt[aria-pressed=true] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+    .rows { display: grid; gap: 14px; margin-top: 16px; }
+    .row { display: grid; grid-template-columns: 110px minmax(0, 1fr); align-items: center; gap: 10px; }
+    .row > span { font-size: 14px; color: var(--muted); }
+    p.note { margin: 12px 0 0; }
+  `];
+  async set(ambient) {
+    this.busy = true;
+    await saveChannel(this, this.state, { ambient: { ...defaultChannel(this.state).ambient, ...ambient } });
+    this.busy = false;
+  }
+  render() {
+    const ch = defaultChannel(this.state);
+    if (!ch) return nothing;
+    const a = ch.ambient, playing = a.list && seconds(a.pictures) > 0 ? a.list : "";
+    const pick = (v) => seconds(v);
+    const list = this.lists?.find((l) => l.name.toLowerCase() === playing.toLowerCase());
+    return html`<section class="card" aria-labelledby="pl-h">
+      <div class="head"><h2 id="pl-h">${t("In automatic")}</h2></div>
+      <div class="opts" role="group" aria-label=${t("What shows between clocks")}>
+        <button class="opt" aria-pressed=${String(!playing)} ?disabled=${this.busy} @click=${() => this.set({ pictures: "0s", list: "", clock: a.clock && seconds(a.clock) ? a.clock : "1m" })}>${t("Only the clock")}</button>
+        ${(this.lists ?? []).map((l) => html`<button class="opt" aria-pressed=${String(l.name === list?.name)} ?disabled=${this.busy}
+          @click=${() => this.set({ list: l.name, pictures: seconds(a.pictures) ? a.pictures : "1m" })}>${l.name}<small>${l.items.length}</small></button>`)}
+      </div>
+      ${!this.lists?.length ? html`<p class="small muted note">${t("Save drawings into a list in the Gallery to show them here.")}</p>` : nothing}
+      ${playing ? html`
+        ${list && !list.items.length ? html`<p class="small muted note">${t("The list {name} is empty, so only the clock shows.", { name: list.name })}</p>` : nothing}
+        <div class="rows">
+          <div class="row"><span>${t("Each drawing")}</span>${segmented(STEPS, STEPS.find(([v]) => pick(v) === pick(a.pictures))?.[0], (v) => this.set({ pictures: v }))}</div>
+          <div class="row"><span>${t("Clock between")}</span>${segmented([["0s", t("No")], ...STEPS], [["0s"], ...STEPS].find(([v]) => pick(v) === pick(a.clock))?.[0], (v) => this.set({ clock: v }))}</div>
+        </div>` : nothing}
+    </section>`;
+  }
+}
+customElements.define("ph-playlist", Playlist);
+
+const RULE_KINDS = () => [["clock", t("Only the clock")], ["light", t("Light")], ["animations", t("My animations")]];
+
+// Simple rules: on these days, between these hours, show this instead of the usual.
+class Rules extends LitElement {
+  static properties = { state: { attribute: false }, lists: { attribute: false }, draft: { state: true }, busy: { state: true } };
+  static styles = [base, css`
+    ul { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 8px; }
+    li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--case); }
+    li b { font-weight: 600; display: block; }
+    li span { font-size: 13px; color: var(--muted); }
+    form { display: grid; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
+    .line { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .line label { font-size: 14px; color: var(--muted); display: inline-flex; gap: 8px; align-items: center; }
+    input[type=time] { height: 36px; }
+    select { height: 36px; max-width: 100%; }
+  `];
+  constructor() { super(); this.draft = { what: "", days: "mon-fri", from: "14:00", to: "15:00" }; }
+  get scenes() { return defaultChannel(this.state)?.scenes ?? []; }
+  whatOf(s) {
+    if (s.list) return t("List {name}", { name: s.list });
+    if (s.view?.mode) return RULE_KINDS().find(([k]) => k === s.view.mode)?.[1] ?? modeName(s.view.mode);
+    return s.sprite ? t("Drawing {name}", { name: s.sprite }) : t("Only the clock");
+  }
+  async save(scenes) {
+    this.busy = true;
+    const ok = await saveChannel(this, this.state, { scenes });
+    this.busy = false;
+    return ok;
+  }
+  async add(e) {
+    e.preventDefault();
+    const d = this.draft, lists = this.lists ?? [];
+    const what = d.what || (lists[0] ? `list:${lists[0].name}` : "clock");
+    const scene = { name: `${what.replace(/^list:/, "")} ${d.from}`, days: d.days, from: d.from, to: d.to };
+    if (what.startsWith("list:")) scene.list = what.slice(5);
+    else if (what === "light") scene.view = { mode: "light", color: "#ffb547" };
+    else if (what === "animations") scene.view = { mode: "animations" };
+    else scene.view = { mode: "clock" };
+    if (await this.save([...this.scenes, scene])) toast(this, t("Scheduled"));
+  }
+  render() {
+    const d = this.draft, lists = this.lists ?? [];
+    return html`<section class="card" aria-labelledby="ru-h">
+      <div class="head"><h2 id="ru-h">${t("Schedule")}</h2></div>
+      <p class="small muted" style="margin:0 0 12px">${t("At these times the display shows this instead of the usual. Alerts, apps and music still go on top.")}</p>
+      ${this.scenes.length ? html`<ul>${this.scenes.map((s, i) => html`<li>
+          <div><b>${this.whatOf(s)}</b><span>${daysText(s.days)}, ${s.from}–${s.to}</span></div>
+          <button class="icon trash" aria-label=${t("Remove")} ?disabled=${this.busy} @click=${() => this.save(this.scenes.filter((_, k) => k !== i))}>${icons.trash}</button>
+        </li>`)}</ul>` : nothing}
+      <form @submit=${(e) => this.add(e)}>
+        <div class="line">
+          <select aria-label=${t("What to show")} @change=${(e) => { this.draft = { ...d, what: e.target.value }; }}>
+            ${lists.map((l) => html`<option value=${`list:${l.name}`} ?selected=${d.what === `list:${l.name}`}>${t("List {name}", { name: l.name })}</option>`)}
+            ${RULE_KINDS().map(([k, label]) => html`<option value=${k} ?selected=${d.what === k}>${label}</option>`)}
+          </select>
+          <label>${t("from")} <input type="time" .value=${d.from} @change=${(e) => { this.draft = { ...d, from: e.target.value }; }}></label>
+          <label>${t("to")} <input type="time" .value=${d.to} @change=${(e) => { this.draft = { ...d, to: e.target.value }; }}></label>
+        </div>
+        <div class="line"><ph-days .value=${d.days} @change=${(e) => { this.draft = { ...d, days: e.detail }; }}></ph-days>
+          <button class="btn primary" type="submit" ?disabled=${this.busy || d.from === d.to}>${t("Add")}</button></div>
+      </form>
+    </section>`;
+  }
+}
+customElements.define("ph-rules", Rules);
+
 class DisplayTab extends LitElement {
-  static properties = { status: { attribute: false }, state: { attribute: false }, sprites: { attribute: false }, styles: { attribute: false }, offline: { type: Boolean }, level: { state: true }, busy: { state: true }, now: { state: true } };
-  connectedCallback() { super.connectedCallback(); this.now = new Date(); this.tick = setInterval(() => { this.now = new Date(); }, 15000); }
+  static properties = { status: { attribute: false }, state: { attribute: false }, sprites: { attribute: false }, styles: { attribute: false }, offline: { type: Boolean }, level: { state: true }, busy: { state: true }, now: { state: true }, lists: { state: true } };
+  connectedCallback() {
+    super.connectedCallback(); this.now = new Date(); this.tick = setInterval(() => { this.now = new Date(); }, 15000);
+    api("GET", "lists").then((r) => { this.lists = r.lists; }).catch(() => {});
+  }
   disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.tick); }
 
   // The display draws its own modes; the preview redraws them as pixelhub sent them.
@@ -1186,13 +715,13 @@ class DisplayTab extends LitElement {
       <div class="stack">
         <section><h2 class="muted">${t("What the display shows")}</h2>
           <ph-modes .current=${this.state?.mode} .clock=${this.state?.clock} .styles=${this.styles}></ph-modes></section>
+        <ph-playlist .state=${this.state} .lists=${this.lists}></ph-playlist>
+        <ph-rules .state=${this.state} .lists=${this.lists}></ph-rules>
       </div>
     </div>`;
   }
 }
 customElements.define("ph-display", DisplayTab);
-
-
 
 // The Divoom community gallery: browse by category, show a picture now or keep it in a profile.
 const CATEGORIES = ["recommended", "top", "new", "animal", "food", "character", "emoji", "nature", "plant", "person", "festival", "pattern", "symbol", "creative", "daily"];
@@ -1203,7 +732,7 @@ const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
 
 class GalleryTab extends LitElement {
   static properties = { state: { attribute: false }, width: { state: true }, category: { state: true }, sort: { state: true }, items: { state: true }, page: { state: true },
-    more: { state: true }, pages: { state: true }, loading: { state: true }, picked: { state: true }, target: { state: true }, busy: { state: true }, problem: { state: true },
+    more: { state: true }, pages: { state: true }, loading: { state: true }, picked: { state: true }, busy: { state: true }, problem: { state: true },
     query: { state: true }, searched: { state: true }, indexing: { state: true }, lists: { state: true }, open: { state: true },
     saving: { state: true }, newList: { state: true }, renaming: { state: true } };
   static styles = [base, css`
@@ -1271,6 +800,32 @@ class GalleryTab extends LitElement {
     if (!name || !(await this.listCall("POST", "lists", { name }))) return;
     this.newList = "";
     if (item) await this.keep(this.lists.at(-1).name, item, true);
+  }
+  onEvo(l) {
+    const a = defaultChannel(this.state)?.ambient;
+    return !!a && seconds(a.pictures) > 0 && a.list?.toLowerCase() === l.name.toLowerCase();
+  }
+  async play(l) {
+    const a = defaultChannel(this.state).ambient;
+    this.busy = true;
+    if (await saveChannel(this, this.state, { ambient: { ...a, list: l.name, pictures: seconds(a.pictures) ? a.pictures : "1m" } })) toast(this, t("{name} plays on the Evo in automatic", { name: l.name }));
+    this.busy = false;
+  }
+  async upload(l, input) {
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    const form = new FormData();
+    form.append("file", file);
+    this.busy = true;
+    try {
+      const res = await fetch(`api/lists/${encodeURIComponent(l.name)}/upload`, { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      this.lists = data.lists;
+      toast(this, t("Added to {name}", { name: l.name }));
+    } catch (e) { toast(this, e.message); }
+    this.busy = false;
   }
   async renameList() {
     const name = (this.renaming ?? "").trim();
@@ -1379,16 +934,8 @@ class GalleryTab extends LitElement {
     catch (e) { toast(this, e.message); }
     this.busy = false;
   }
-  async save() {
-    const channel = this.target ?? this.state?.channels?.[0]?.name;
-    this.busy = true;
-    try { await api("POST", "gallery/save", { file: this.picked.file, name: this.picked.name, channel }); toast(this, t("Saved in {channel}", { channel })); }
-    catch (e) { toast(this, e.message); }
-    this.busy = false;
-  }
 
   sheet(p) {
-    const channels = this.state?.channels ?? [];
     const inLists = this.listsWith(p.file);
     return html`<div class="sheet" role="dialog" aria-label=${p.name}>
       <img class="pix" src=${gifURL(p.file)} alt="">
@@ -1399,9 +946,6 @@ class GalleryTab extends LitElement {
           <button class="btn small save" aria-expanded=${String(!!this.saving)} @click=${() => { this.saving = !this.saving; }}>
             ${icons.bookmark}${inLists.length ? t("Saved in {n}", { n: inLists.length }) : t("Save")}</button>
           <button class="btn primary small" ?disabled=${this.busy} @click=${() => this.show()}>${t("Show for 30 s")}</button>
-          ${channels.length ? html`<select aria-label=${t("Profile")} @change=${(e) => { this.target = e.target.value; }}>
-              ${channels.map((c) => html`<option value=${c.name} ?selected=${c.name === (this.target ?? channels[0].name)}>${c.name}</option>`)}</select>
-            <button class="btn small" ?disabled=${this.busy} @click=${() => this.save()}>${t("Add to profile")}</button>` : nothing}
           <button class="icon" aria-label=${t("Close")} @click=${() => { this.picked = null; this.saving = false; }}>${icons.close}</button>
         </div></div>
       ${this.saving ? html`<div class="saveto">
@@ -1431,6 +975,9 @@ class GalleryTab extends LitElement {
                 <input aria-label=${t("List name")} maxlength="40" .value=${this.renaming} @input=${(e) => { this.renaming = e.target.value; }}>
                 <button class="btn small" type="submit">${t("Rename")}</button><button class="btn small" type="button" @click=${() => { this.renaming = null; }}>${t("Cancel")}</button></form>`
             : html`<h2>${l.name}</h2><span class="small muted">${t("{n} drawings", { n: l.items.length })}</span>
+                ${this.onEvo(l) ? html`<span class="tag on">${t("On the Evo")}</span>`
+                  : html`<button class="btn small primary" ?disabled=${this.busy || !l.items.length} @click=${() => this.play(l)}>${t("Show on the Evo")}</button>`}
+                <label class="btn small">${icons.plus ?? ""}${t("Upload a drawing")}<input type="file" accept="image/gif,image/png" hidden @change=${(e) => this.upload(l, e.target)}></label>
                 <button class="btn small" @click=${() => { this.renaming = l.name; }}>${t("Rename")}</button>
                 <button class="icon trash" aria-label=${t("Delete list")} @click=${() => this.deleteList()}>${icons.trash}</button>`}
         </div>
@@ -1545,7 +1092,6 @@ class SpotifyCard extends LitElement {
   }
 }
 customElements.define("ph-spotify", SpotifyCard);
-
 
 // Everything about music in one place: what plays, how it shows, the account, the display's own visualiser.
 class MusicTab extends LitElement {
@@ -1860,6 +1406,8 @@ class ConnectionCard extends LitElement {
 }
 customElements.define("ph-connection", ConnectionCard);
 
+// A toast hides by itself, but not while the pointer or focus is on it, so its action stays reachable.
+// `expire` is the work an Undo cancels: it runs when the toast goes away any other way.
 class Toasts {
   constructor(host) { this.host = host; this.note = null; }
   show(note) { this.flush(); this.note = { ...note, ms: note.action ? 8000 : 6000 }; this.arm(); this.host.requestUpdate(); }
@@ -1888,8 +1436,6 @@ const TABS = [
   ["gallery", "Gallery", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="m14 20 2.5-3.5 2 2.5 1.5-2"/>`)],
   ["music", "Music", icon(svg`<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>`)],
   ["apps", "Apps", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M17 13.5v7M13.5 17h7"/>`)],
-  ["profiles", "Profiles", icon(svg`<path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="16" r="3"/>`)],
-  ["schedule", "Schedule", icon(svg`<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>`)],
   ["settings", "Settings", icon(svg`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>`)],
 ];
 
@@ -1911,7 +1457,7 @@ class PixelhubApp extends LitElement {
     .bottom { display: none; }
     @media (max-width: 759px) {
       .top { display: none; }
-      .bottom { display: grid; grid-template-columns: repeat(7, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
+      .bottom { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
         padding: 6px 8px max(8px, env(safe-area-inset-bottom, 0px)); background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--line); }
       .bottom button { flex-direction: column; gap: 3px; font-size: 11px; padding: 6px 2px; }
       .bottom button[aria-current=page] { background: none; }
@@ -2014,16 +1560,15 @@ class PixelhubApp extends LitElement {
       html`<button aria-current=${this.tab === id ? "page" : "false"} @click=${() => this.go(id)}>${glyph}<span>${t(label)}</span></button>`)}</nav>`;
   }
 
+  // The gallery stays mounted, hidden, so its first page is ready before it is opened.
   page(view) {
+    const gallery = html`<ph-gallery .state=${view} ?hidden=${this.tab !== "gallery"}></ph-gallery>`;
     switch (this.tab) {
-      case "gallery": return html`<ph-gallery .state=${view}></ph-gallery>`;
-      case "apps": return html`<ph-apps .state=${view}></ph-apps>`;
-      case "music": return html`<ph-music .state=${view} .status=${this.status} .styles=${this.modes}></ph-music>`;
-      case "profiles": return html`<div class="tab">${view?.channels?.length > 1 ? html`<ph-switch .state=${view} .status=${this.status}></ph-switch>` : nothing}
-        <ph-channels .state=${view} .status=${this.status} .sprites=${this.sprites}></ph-channels></div>`;
-      case "schedule": return html`<div class="tab">${view ? html`<ph-schedule .base=${view}></ph-schedule>` : nothing}</div>`;
-      case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<ph-connection .status=${this.status} .state=${view}></ph-connection></div>`;
-      default: return html`<ph-display .status=${this.status} .state=${view} .sprites=${this.sprites} .styles=${this.modes} ?offline=${this.offline}></ph-display>`;
+      case "gallery": return gallery;
+      case "apps": return html`<ph-apps .state=${view}></ph-apps>${gallery}`;
+      case "music": return html`<ph-music .state=${view} .status=${this.status} .styles=${this.modes}></ph-music>${gallery}`;
+      case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<ph-connection .status=${this.status} .state=${view}></ph-connection></div>${gallery}`;
+      default: return html`<ph-display .status=${this.status} .state=${view} .sprites=${this.sprites} .styles=${this.modes} ?offline=${this.offline}></ph-display>${gallery}`;
     }
   }
 
