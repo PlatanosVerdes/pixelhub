@@ -147,6 +147,15 @@ func TestEndpoints(t *testing.T) {
 		{"PUT", "/api/schedule", `[{"channel":"evening","days":"sat,sun","from":"10:00","to":"12:00"}]`, 200, `"days":"sat,sun"`},
 		{"PUT", "/api/schedule", `[{"channel":"gym","from":"10:00","to":"12:00"}]`, 400, "schedule[0]"},
 		{"PUT", "/api/schedule", `[{"channel":"evening","from":"25:00","to":"12:00"}]`, 400, "not a time"},
+		{"GET", "/api/modes", "", 200, `"visualizer":12`},
+		{"PUT", "/api/mode", `{"mode":"visualizer","style":4}`, 200, `"mode":{"mode":"visualizer","style":4}`},
+		{"PUT", "/api/mode", `{"mode":"clock","style":1,"weather":true,"color":"#00ff00"}`, 200, `"color":"#00ff00"`},
+		{"PUT", "/api/mode", `{"mode":"scoreboard","red":3,"blue":5}`, 200, `"red":3`},
+		{"PUT", "/api/mode", `{"mode":"vj","style":1}`, 400, "mode"},
+		{"PUT", "/api/mode", `{"mode":"visualizer","style":12}`, 400, "outside 0-11"},
+		{"PUT", "/api/mode", `{"mode":"light","color":"red"}`, 400, "#rrggbb"},
+		{"PUT", "/api/mode", `{"mode":"animations","list":1}`, 400, "unknown field"},
+		{"DELETE", "/api/mode", "", 200, `"default_channel"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.method+" "+tt.path+" "+tt.body, func(t *testing.T) {

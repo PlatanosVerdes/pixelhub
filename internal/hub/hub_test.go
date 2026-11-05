@@ -167,6 +167,51 @@ func TestLayers(t *testing.T) {
 	}
 }
 
+func TestModeLayer(t *testing.T) {
+	t.Parallel()
+	h, _, now := newHub(t, twoChannels, ambientDir{"a.gif"})
+	*now = time.Date(2026, 11, 7, 14, 0, 0, 0, madrid)
+	visualizer := display.View{Mode: display.ModeVisualizer, Style: 3}
+	if _, err := h.Update(func(s *state.State) error { s.Mode = visualizer; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	h.update()
+	if st := h.Status(); st.Layer != LayerMode || st.Showing != "visualizer 3" {
+		t.Errorf("mode over a scene: showing %s %s", st.Layer, st.Showing)
+	}
+	h.Notify(heart(""))
+	h.update()
+	if st := h.Status(); st.Layer != LayerAlert {
+		t.Errorf("alert over a mode: showing %s %s", st.Layer, st.Showing)
+	}
+	*now = now.Add(2 * time.Minute)
+	if _, err := h.Update(func(s *state.State) error { s.Mode = display.View{}; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	h.update()
+	if st := h.Status(); st.Layer != LayerScene || st.Showing != "lunch" {
+		t.Errorf("cleared mode: showing %s %s, want the lunch scene back", st.Layer, st.Showing)
+	}
+}
+
+func TestSceneWithAView(t *testing.T) {
+	t.Parallel()
+	h, _, now := newHub(t, oneChannel("1m", "1m"), nil)
+	*now = friday(21, 0)
+	_, err := h.Update(func(s *state.State) error {
+		s.Channels[0].Scenes = []state.Scene{{Name: "music", Window: state.Window{From: 20 * 60, To: 23 * 60},
+			View: display.View{Mode: display.ModeVisualizer, Style: 1}}}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.update()
+	if st := h.Status(); st.Layer != LayerScene || st.Showing != "visualizer 1" {
+		t.Errorf("showing %s %s, want the scene's visualizer", st.Layer, st.Showing)
+	}
+}
+
 func TestAlertsExpireByPriority(t *testing.T) {
 	t.Parallel()
 	h, d, now := newHub(t, "", ambientDir(nil))

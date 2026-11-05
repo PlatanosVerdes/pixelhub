@@ -239,6 +239,8 @@ func Render(c display.Content, size int) image.Image {
 	switch {
 	case c.Kind == display.Picture && len(c.Frames) > 0:
 		return c.Frames[0].Image
+	case c.Kind == display.Native:
+		return renderView(c.View, size)
 	case c.Kind == display.Color:
 		img := image.NewNRGBA(image.Rect(0, 0, size, size))
 		draw.Draw(img, img.Bounds(), image.NewUniform(c.Fill), image.Point{}, draw.Src)

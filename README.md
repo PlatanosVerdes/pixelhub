@@ -36,6 +36,20 @@ that lists nearby Bluetooth devices, to find the display's address. A display pa
 in the Divoom app needs the bridge's `bt_pin` setting, and a bridge on a weak WiFi signal may need a
 higher `wifi_power`.
 
+### A Mac as the bridge
+
+`bridges/macos/pixelbridge.swift` speaks the same TCP protocol over the Mac's own Bluetooth, so no
+ESP32 is needed while the display is near the Mac. Pair the display in System Settings first, then:
+
+```sh
+cd bridges/macos && swiftc -O pixelbridge.swift -o pixelbridge && ./pixelbridge   # 127.0.0.1:7777
+PIXELHUB_BRIDGE=127.0.0.1:7777 PIXELHUB_DEVICE_MAC=01:12:23:45:56:67 go run ./cmd/pixelhub
+```
+
+A display that is also a headset shares its serial channel with Hands-Free, which macOS opens by
+itself; the bridge drops that link before opening the serial one, so the display cannot play the
+Mac's sound while the bridge holds it. It logs every frame it sends and receives.
+
 ## Running it
 
 ```sh
@@ -84,6 +98,9 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `PUT /api/channels/{name}` | Replace; a different `name` renames it, its schedule slots, its pictures and an override on it. A missing `name` or `ambient` keeps the channel's own |
 | `DELETE /api/channels/{name}` | Delete with its schedule slots and pictures; not the default or the last one |
 | `PUT /api/schedule` | Replace the channel schedule |
+| `GET /api/modes` | How many styles each display mode has |
+| `PUT /api/mode` | Show one of the display's own modes until cleared: `{"mode": ...}` plus its options (below) |
+| `DELETE /api/mode` | Back to alerts, scenes and ambient |
 | `GET /api/channels/{name}/pictures/{file}` | A picture's first frame, drawn 10x like a sprite |
 | `GET/POST /api/channels/{name}/pictures` | List, upload (multipart field `file`, GIF or PNG, up to 1 MB and 512x512; the name is cleaned up and must be new) |
 | `DELETE /api/channels/{name}/pictures/{file}` | Delete a picture |
@@ -110,6 +127,25 @@ shows the clock. An ambient `pictures` or `clock` of `0s` skips that part. An al
 only shows on channels that accept `*`, and a channel with no sources is a quiet one; a dropped
 alert answers 200 with `"dropped": true`. A channel created without `ambient` alternates 2 minutes of
 pictures with 3 of the clock.
+
+### Display modes
+
+The display's own modes, the ones its side button cycles through. A mode set with `PUT /api/mode`
+shows over scenes and ambient and is saved; alerts still show on top. A scene can show one too with
+`"view"` instead of `"sprite"`.
+
+| `mode` | Options |
+| :--- | :--- |
+| `clock` | `style` 0-5 (full screen, rainbow, boxed, analog round, negative, analog square), `weather`, `temperature`, `calendar`, `color` `#rrggbb` (replaces the red parts) |
+| `light` | `color`, `style` 0-4 (plain, love, plants, no mosquitoes, sleep) |
+| `visualizer` | `style` 0-11; it follows what the display plays as a speaker |
+| `animations` | none: plays the list kept on the display from the Divoom app, which pixelhub never writes |
+| `scoreboard` | `red`, `blue`, 0-999 |
+
+```sh
+curl -X PUT localhost:8000/api/mode -d '{"mode":"clock","style":1,"calendar":true}'
+curl -X DELETE localhost:8000/api/mode
+```
 
 ## Sprites
 

@@ -118,6 +118,54 @@ func TestMessage(t *testing.T) {
 	}
 }
 
+// The view messages are the ones the Evo acknowledged with 04 45 55 <view> on 2026-11-05.
+func TestView(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 11, 4, 14, 56, 7, 0, time.UTC)
+	now = func() time.Time { return at }
+	t.Cleanup(func() { now = time.Now })
+	tests := []struct {
+		name string
+		view display.View
+		want []string
+	}{
+		{"clock with options and colour", display.View{Mode: display.ModeClock, Style: 1, Weather: true, Calendar: true, Color: "#FF8000"},
+			[]string{hex.EncodeToString(TimeFormat24()), hex.EncodeToString(DateTime(at)), "010d004500010101010001ff8000d60102"}},
+		{"plain clock style", display.View{Mode: display.ModeClock, Style: 2},
+			[]string{hex.EncodeToString(TimeFormat24()), hex.EncodeToString(DateTime(at)), "010a004500010201000000530002"}},
+		{"light effect", display.View{Mode: display.ModeLight, Style: 1, Color: "#ff0000"}, []string{"010d004501ff0000500101000000a40102"}},
+		{"visualizer", display.View{Mode: display.ModeVisualizer, Style: 3}, []string{"010500450403510002"}},
+		{"animations", display.View{Mode: display.ModeAnimations}, []string{"01040045054e0002"}},
+		{"scoreboard", display.View{Mode: display.ModeScoreboard, Red: 12, Blue: 7}, []string{"0109004506000c000700670002"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			for _, m := range View(tt.view, 80) {
+				got = append(got, hex.EncodeToString(m))
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEncodeRejectsAnInvalidView(t *testing.T) {
+	t.Parallel()
+	for _, v := range []display.View{
+		{Mode: "vj"},
+		{Mode: display.ModeVisualizer, Style: 12},
+		{Mode: display.ModeScoreboard, Red: 1000},
+		{Mode: display.ModeLight, Color: "red"},
+		{Mode: display.ModeAnimations, Weather: true},
+	} {
+		if _, err := Encode(v.Content()); err == nil {
+			t.Errorf("%+v: want an error", v)
+		}
+	}
+}
+
 func TestPaletteFollowsFirstSeenOrder(t *testing.T) {
 	t.Parallel()
 	img := image.NewNRGBA(image.Rect(0, 0, 3, 2))
@@ -230,6 +278,8 @@ func TestEncode(t *testing.T) {
 		{"color", display.ColorContent(color.RGBA{R: 9}), []byte{cmdView, cmdBrightness}},
 		{"still", display.Content{Kind: display.Picture, Frames: []display.Frame{still}}, []byte{cmdImage, cmdBrightness}},
 		{"animation", display.Content{Kind: display.Picture, Frames: []display.Frame{still, still}}, []byte{cmdAnimation, cmdBrightness}},
+		{"native clock", display.View{Mode: display.ModeClock}.Content(), []byte{cmdTimeFormat, cmdDateTime, cmdView, cmdBrightness}},
+		{"native visualizer", display.View{Mode: display.ModeVisualizer}.Content(), []byte{cmdView, cmdBrightness}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

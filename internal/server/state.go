@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/PlatanosVerdes/pixelhub/internal/display"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
 )
 
@@ -55,6 +56,32 @@ func (s *Server) putSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	s.update(w, func(st *state.State) error {
 		st.Schedule = slots
+		return nil
+	})
+}
+
+func (s *Server) modes(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"styles": display.Styles, "max_score": display.MaxScore})
+}
+
+func (s *Server) putMode(w http.ResponseWriter, r *http.Request) {
+	var v display.View
+	if !decode(w, r, &v, smallBody) {
+		return
+	}
+	if err := v.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	s.update(w, func(st *state.State) error {
+		st.Mode = v
+		return nil
+	})
+}
+
+func (s *Server) clearMode(w http.ResponseWriter, _ *http.Request) {
+	s.update(w, func(st *state.State) error {
+		st.Mode = display.View{}
 		return nil
 	})
 }

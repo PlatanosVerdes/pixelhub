@@ -79,6 +79,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/channels/{name}", s.updateChannel)
 	mux.HandleFunc("DELETE /api/channels/{name}", s.deleteChannel)
 	mux.HandleFunc("PUT /api/schedule", s.putSchedule)
+	mux.HandleFunc("GET /api/modes", s.modes)
+	mux.HandleFunc("PUT /api/mode", s.putMode)
+	mux.HandleFunc("DELETE /api/mode", s.clearMode)
 
 	mux.HandleFunc("GET /api/channels/{name}/pictures", s.listPictures)
 	mux.HandleFunc("POST /api/channels/{name}/pictures", s.addPicture)

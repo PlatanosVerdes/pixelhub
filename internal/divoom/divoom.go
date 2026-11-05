@@ -26,6 +26,12 @@ const (
 	cmdAnimation  = 0x49
 	cmdBrightness = 0x74
 
+	viewClock      = 0x00
+	viewLight      = 0x01
+	viewVisualizer = 0x04
+	viewAnimations = 0x05
+	viewScoreboard = 0x06
+
 	respOK       = 0x55
 	respGreeting = 0xbd
 
@@ -55,7 +61,50 @@ func Brightness(level int) []byte {
 }
 
 func Light(c color.RGBA, level int) []byte {
-	return Message(cmdView, []byte{0x01, c.R, c.G, c.B, byte(clamp(level)), 0x00, 0x01, 0x00, 0x00, 0x00})
+	return lightView(c, level, 0)
+}
+
+// lightView's effect is one of the display's light effects; 0 is a plain colour.
+func lightView(c color.RGBA, level, effect int) []byte {
+	return Message(cmdView, []byte{viewLight, c.R, c.G, c.B, byte(clamp(level)), byte(effect), 0x01, 0x00, 0x00, 0x00})
+}
+
+func clockView(v display.View) []byte {
+	payload := []byte{viewClock, 0x01, byte(v.Style), 0x01, flag(v.Weather), flag(v.Temperature), flag(v.Calendar)}
+	if v.Color != "" {
+		c := v.RGB()
+		payload = append(payload, c.R, c.G, c.B)
+	}
+	return Message(cmdView, payload)
+}
+
+func scoreboardView(red, blue int) []byte {
+	payload := binary.LittleEndian.AppendUint16([]byte{viewScoreboard, 0x00}, uint16(red))
+	return Message(cmdView, binary.LittleEndian.AppendUint16(payload, uint16(blue)))
+}
+
+// View paints one of the display's own modes.
+func View(v display.View, level int) [][]byte {
+	switch v.Mode {
+	case display.ModeClock:
+		return [][]byte{TimeFormat24(), DateTime(now()), clockView(v)}
+	case display.ModeLight:
+		return [][]byte{lightView(v.RGB(), level, v.Style)}
+	case display.ModeVisualizer:
+		return [][]byte{Message(cmdView, []byte{viewVisualizer, byte(v.Style)})}
+	case display.ModeAnimations:
+		return [][]byte{Message(cmdView, []byte{viewAnimations})}
+	case display.ModeScoreboard:
+		return [][]byte{scoreboardView(v.Red, v.Blue)}
+	}
+	return nil
+}
+
+func flag(b bool) byte {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // DateTime sets the display's own clock, which otherwise keeps whatever the phone app last told it.
@@ -84,6 +133,11 @@ func Encode(c display.Content) ([][]byte, error) {
 	switch {
 	case c.Kind == display.Clock:
 		return [][]byte{TimeFormat24(), DateTime(now()), Clock(), brightness}, nil
+	case c.Kind == display.Native:
+		if err := c.View.Validate(); err != nil {
+			return nil, err
+		}
+		return append(View(c.View, c.Brightness), brightness), nil
 	case c.Kind == display.Color:
 		return [][]byte{Light(c.Fill, c.Brightness), brightness}, nil
 	case len(c.Frames) == 0:

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/PlatanosVerdes/pixelhub/internal/display"
 )
 
 var madrid = mustLocation("Europe/Madrid")
@@ -260,6 +262,14 @@ func TestValidateRejects(t *testing.T) {
 		{"level out of range", func(s *State) { s.Brightness.Night = 120 }, "brightness.night"},
 		{"short release", func(s *State) { s.ReleaseFor = Duration(time.Second) }, "release_for"},
 		{"latitude", func(s *State) { s.Location.Latitude = 100 }, "location"},
+		{"bad mode", func(s *State) { s.Mode = display.View{Mode: "vj"} }, "mode:"},
+		{"scene with sprite and view", func(s *State) {
+			s.Channels[1].Scenes[0].View = display.View{Mode: display.ModeAnimations}
+		}, "not both"},
+		{"bad scene view", func(s *State) {
+			s.Channels[1].Scenes[0].Sprite = ""
+			s.Channels[1].Scenes[0].View = display.View{Mode: display.ModeClock, Style: 9}
+		}, "outside 0-5"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

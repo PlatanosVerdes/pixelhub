@@ -18,6 +18,7 @@ import (
 
 const (
 	LayerAlert   = "alert"
+	LayerMode    = "mode"
 	LayerScene   = "scene"
 	LayerAmbient = "ambient"
 
@@ -130,7 +131,9 @@ func (h *Hub) build(st state.State) (map[string]channel, map[string]bool) {
 		c := channel{Channel: ch}
 		for _, s := range ch.Scenes {
 			content := display.ClockContent()
-			if s.Sprite != "" {
+			if !s.View.IsZero() {
+				content = s.View.Content()
+			} else if s.Sprite != "" {
 				if found, ok := h.sprites.Get(s.Sprite); ok {
 					content = found
 				} else {
@@ -481,11 +484,14 @@ func (h *Hub) update() {
 	}
 }
 
-// aboveAmbient returns the alert or scene to show, if any; the ambient layer is left to the caller
+// aboveAmbient returns the alert, mode or scene to show, if any; the ambient layer is left to the caller
 // so pictures are only read from disk when they will be seen, and never under h.mu.
 func (h *Hub) aboveAmbient(now time.Time, ch channel, level int) (string, display.Content, bool) {
 	if a, ok := h.alerts.head(now); ok {
 		return LayerAlert, a.Content.WithBrightness(level), true
+	}
+	if !h.st.Mode.IsZero() {
+		return LayerMode, h.st.Mode.Content().WithBrightness(level), true
 	}
 	for _, s := range ch.scenes {
 		if s.ActiveAt(now) {

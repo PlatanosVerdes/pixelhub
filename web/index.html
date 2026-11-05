@@ -3,28 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1a1730">
 <title>pixelhub</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
-  /* Design tokens: every component reads these through var(--…), so both themes live here only. */
+  /* Design tokens: every component reads these through var(--…). Dark only: the page frames a lit display. */
   :root {
-    --bg: #f4f5f9; --surface: #ffffff; --ink: #161a2b; --muted: #5d6479; --line: #dde0ea; --chip: #eceef5;
-    --accent: #4b4fd6; --on-accent: #ffffff; --ok: #11804a; --warn: #a96500; --bad: #c03636;
-    --font-display: "Unbounded", "Figtree", system-ui, sans-serif;
+    --bg: #1a1730; --surface: #242040; --case: #0f0d1c; --ink: #f2eeff; --muted: #a59dc6; --line: #363057; --chip: #2e2950;
+    --accent: #ffb547; --on-accent: #2a1a00; --ok: #4ad38a; --warn: #ffb547; --bad: #ff6b6b;
+    --font-pixel: "Pixelify Sans", "Figtree", system-ui, sans-serif;
+    --font-display: var(--font-pixel);
     --font-ui: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
     --font-data: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
-    color-scheme: light;
+    color-scheme: dark;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0d1020; --surface: #151a2e; --ink: #e9ebf5; --muted: #9aa1ba; --line: #252b44; --chip: #1e2439;
-      --accent: #8f93ff; --on-accent: #0d1020; --ok: #3cc47c; --warn: #f0b342; --bad: #ff7d7d; color-scheme: dark;
-    }
-  }
-  html { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font-ui); }
+  html { padding-top: env(safe-area-inset-top, 0px); background: var(--bg); }
+  body { margin: 0; background: radial-gradient(1200px 600px at 50% -200px, #2b2550 0%, transparent 70%), var(--bg); color: var(--ink); font: 15px/1.5 var(--font-ui); min-height: 100vh; overflow-x: hidden; }
 </style>
 <script type="module" src="app.js"></script>
 </head>

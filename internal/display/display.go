@@ -13,6 +13,8 @@ const (
 	Clock Kind = iota
 	Color
 	Picture
+	// Native is one of the display's own modes, described by View.
+	Native
 )
 
 type Frame struct {
@@ -20,12 +22,14 @@ type Frame struct {
 	Delay time.Duration
 }
 
-// Content is what a display should show. Picture uses Frames (one is a still image), Color uses Fill.
+// Content is what a display should show. Picture uses Frames (one is a still image), Color uses Fill,
+// Native uses View.
 type Content struct {
 	Kind       Kind
 	Name       string
 	Frames     []Frame
 	Fill       color.RGBA
+	View       View
 	Brightness int
 }
 
@@ -36,7 +40,7 @@ func (c Content) WithBrightness(level int) Content {
 
 // SamePicture reports whether two contents show the same thing, perhaps at different brightness.
 func (c Content) SamePicture(o Content) bool {
-	return c.Kind == o.Kind && c.Name == o.Name && c.Fill == o.Fill
+	return c.Kind == o.Kind && c.Name == o.Name && c.Fill == o.Fill && c.View == o.View
 }
 
 func ClockContent() Content { return Content{Kind: Clock, Name: "clock"} }

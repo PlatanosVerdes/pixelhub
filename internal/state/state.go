@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"slices"
 	"time"
+
+	"github.com/PlatanosVerdes/pixelhub/internal/display"
 )
 
 const AllSources = "*"
@@ -26,6 +28,9 @@ type State struct {
 	DefaultChannel string    `json:"default_channel"`
 	Channels       []Channel `json:"channels"`
 	Schedule       []Slot    `json:"schedule"`
+	// Mode, when set, is one of the display's own modes picked by hand; it shows over scenes and
+	// ambient until cleared, alerts still go on top.
+	Mode display.View `json:"mode,omitzero"`
 }
 
 type Location struct {
@@ -62,8 +67,9 @@ type Window struct {
 type Scene struct {
 	Name string `json:"name"`
 	Window
-	Sprite     string `json:"sprite,omitempty"`
-	Brightness *Level `json:"brightness,omitempty"`
+	Sprite     string       `json:"sprite,omitempty"`
+	View       display.View `json:"view,omitzero"`
+	Brightness *Level       `json:"brightness,omitempty"`
 }
 
 type Slot struct {
@@ -210,6 +216,11 @@ func (s State) Validate() error {
 		seen[c.Name] = true
 		errs = append(errs, c.validate()...)
 	}
+	if !s.Mode.IsZero() {
+		if err := s.Mode.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("mode: %w", err))
+		}
+	}
 	for i, slot := range s.Schedule {
 		if s.index(slot.Channel) < 0 {
 			errs = append(errs, fmt.Errorf("schedule[%d]: %q is not a channel", i, slot.Channel))
@@ -241,6 +252,14 @@ func (c Channel) validate() []error {
 		}
 		if sc.From == sc.To {
 			errs = append(errs, fmt.Errorf("channel %s: scene %q: from and to are the same", c.Name, sc.Name))
+		}
+		if !sc.View.IsZero() {
+			if sc.Sprite != "" {
+				errs = append(errs, fmt.Errorf("channel %s: scene %q: give a sprite or a view, not both", c.Name, sc.Name))
+			}
+			if err := sc.View.Validate(); err != nil {
+				errs = append(errs, fmt.Errorf("channel %s: scene %q: %w", c.Name, sc.Name, err))
+			}
 		}
 	}
 	return errs
