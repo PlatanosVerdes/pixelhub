@@ -36,6 +36,21 @@ that lists nearby Bluetooth devices, to find the display's address. A display pa
 in the Divoom app needs the bridge's `bt_pin` setting, and a bridge on a weak WiFi signal may need a
 higher `wifi_power`.
 
+### A Linux machine as the bridge
+
+`pixelbridge`, built into the same image, speaks the same TCP protocol over the machine's own
+Bluetooth (an RFCOMM socket, no BlueZ D-Bus needed), so no ESP32 is needed while the display is in
+reach. Pair the display once with `bluetoothctl` (`pair` with the display's PIN, then `trust`), then
+run it on the host network and point pixelhub at it:
+
+```sh
+docker run --network host ghcr.io/platanosverdes/pixelhub pixelbridge -listen 172.17.0.1:7777
+PIXELHUB_BRIDGE=host.docker.internal:7777   # in pixelhub, with extra_hosts host.docker.internal:host-gateway
+```
+
+Bluetooth sockets only work in the host's network namespace, which is why the bridge runs apart
+from pixelhub. It needs no extra capabilities.
+
 ### A Mac as the bridge
 
 `bridges/macos/pixelbridge.swift` speaks the same TCP protocol over the Mac's own Bluetooth, so no

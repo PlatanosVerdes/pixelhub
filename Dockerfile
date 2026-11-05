@@ -8,7 +8,8 @@ COPY internal/ ./internal/
 COPY web/ ./web/
 # Static binary: the runtime image has no libc to link against.
 RUN CGO_ENABLED=0 go build -trimpath \
-    -ldflags="-s -w -X main.buildVersion=${VERSION}" -o /out/pixelhub ./cmd/pixelhub
+    -ldflags="-s -w -X main.buildVersion=${VERSION}" -o /out/pixelhub ./cmd/pixelhub \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pixelbridge ./cmd/pixelbridge
 
 FROM alpine:3.21
 
@@ -16,7 +17,7 @@ WORKDIR /app
 RUN apk add --no-cache tzdata \
     && adduser -D -H -u 10001 pixelhub \
     && install -d -o pixelhub -g pixelhub -m 700 /data
-COPY --from=build /out/pixelhub /usr/local/bin/pixelhub
+COPY --from=build /out/pixelhub /out/pixelbridge /usr/local/bin/
 
 # state.json, sprites/ and ambient/ live here.
 VOLUME /data
