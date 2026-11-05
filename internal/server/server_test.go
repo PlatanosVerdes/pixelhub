@@ -172,6 +172,16 @@ func TestEndpoints(t *testing.T) {
 	}
 }
 
+func TestMusicSettingsReplaceTheView(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.do(t, "PUT", "/api/settings", `{"music":{"enabled":true,"view":{"mode":"visualizer"}}}`)
+	rec := f.do(t, "PUT", "/api/settings", `{"music":{"enabled":true}}`)
+	if strings.Contains(rec.Body.String(), "visualizer") {
+		t.Errorf("going back to the cover kept the view: %s", rec.Body)
+	}
+}
+
 func TestCallbackURL(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

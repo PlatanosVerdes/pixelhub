@@ -184,12 +184,16 @@ func (s *State) ApplySettings(data []byte) error {
 		Brightness     *Levels   `json:"brightness"`
 		ReleaseFor     *Duration `json:"release_for"`
 		DefaultChannel *string   `json:"default_channel"`
-		Music          *Music    `json:"music"`
-	}{&s.Location, &s.Brightness, &s.ReleaseFor, &s.DefaultChannel, &s.Music}
+		// Music is replaced whole: leaving out its view means the cover.
+		Music *Music `json:"music"`
+	}{Location: &s.Location, Brightness: &s.Brightness, ReleaseFor: &s.ReleaseFor, DefaultChannel: &s.DefaultChannel}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&settings); err != nil {
 		return fmt.Errorf("%w: settings: %w", ErrInvalid, err)
+	}
+	if settings.Music != nil {
+		s.Music = *settings.Music
 	}
 	return nil
 }
