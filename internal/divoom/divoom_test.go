@@ -356,7 +356,8 @@ func TestTools(t *testing.T) {
 		want string
 	}{
 		{display.View{Mode: display.ModeStopwatch, Running: true}, "720001"},
-		{display.View{Mode: display.ModeStopwatch}, "720000"},
+		{display.View{Mode: display.ModeStopwatch, Seconds: 12}, "720000"},
+		{display.View{Mode: display.ModeStopwatch}, "720002"},
 		{display.View{Mode: display.ModeNoise, Running: true}, "720201"},
 		{display.View{Mode: display.ModeNoise}, "720202"},
 		{countdown, "720301011e"},

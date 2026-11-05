@@ -115,7 +115,12 @@ const (
 func tool(v display.View) []byte {
 	switch v.Mode {
 	case display.ModeStopwatch:
-		return Message(cmdTool, []byte{toolStopwatch, flag(v.Running)})
+		// 1 runs, 0 pauses, 2 puts it back to zero.
+		state := flag(v.Running)
+		if !v.Running && v.Seconds == 0 {
+			state = 2
+		}
+		return Message(cmdTool, []byte{toolStopwatch, state})
 	case display.ModeNoise:
 		// The noise meter takes 1 to start and 2 to stop.
 		return Message(cmdTool, []byte{toolNoise, 2 - flag(v.Running)})

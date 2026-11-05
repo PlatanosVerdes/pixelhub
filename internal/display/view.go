@@ -44,7 +44,7 @@ type View struct {
 	Color       string `json:"color,omitempty"`
 	Red         int    `json:"red,omitempty"`
 	Blue        int    `json:"blue,omitempty"`
-	// Seconds is the countdown's length.
+	// Seconds is the countdown's length, or the time a paused stopwatch had counted.
 	Seconds int  `json:"seconds,omitempty"`
 	Running bool `json:"running,omitempty"`
 	// Since is when a running tool started, in Unix seconds: a countdown sent again resumes from it.
@@ -86,8 +86,8 @@ func (v View) Validate() error {
 	if v.Mode == ModeCountdown && (v.Seconds < 1 || v.Seconds > MaxCountdown) {
 		errs = append(errs, fmt.Errorf("countdown seconds must be 1-%d", MaxCountdown))
 	}
-	if v.Mode != ModeCountdown && v.Seconds != 0 {
-		errs = append(errs, errors.New("seconds only go with the countdown"))
+	if v.Mode != ModeCountdown && v.Mode != ModeStopwatch && v.Seconds != 0 {
+		errs = append(errs, errors.New("seconds only go with the countdown and the stopwatch"))
 	}
 	return errors.Join(errs...)
 }

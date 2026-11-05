@@ -1694,6 +1694,7 @@ class AppsTab extends LitElement {
   get showing() { return APPS.includes(this.mode.mode) ? this.mode.mode : null; }
   // Seconds since a running tool started, from the time pixelhub sent it.
   elapsed() { return this.mode.since ? Math.max(0, Math.floor(this.now / 1000) - this.mode.since) : 0; }
+  counted() { const m = this.mode; return (m.seconds ?? 0) + (m.running ? this.elapsed() : 0); }
   left() { const m = this.mode; return m.running ? Math.max(0, (m.seconds ?? 0) - this.elapsed()) : (m.seconds ?? 0); }
   get total() { return Math.min(5999, Math.max(1, (Number(this.minutes) || 0) * 60 + (Number(this.seconds) || 0))); }
 
@@ -1710,7 +1711,7 @@ class AppsTab extends LitElement {
     if (a === "weather") return this.weather?.known ? html`<small>${this.weather.celsius}°</small>` : html`<small></small>`;
     if (!on) return html`<small></small>`;
     if (a === "countdown") return html`<small class=${m.running ? "live" : ""}>${mmss(this.left())}</small>`;
-    if (a === "stopwatch") return html`<small class="live">${mmss(this.elapsed())}</small>`;
+    if (a === "stopwatch") return html`<small class=${m.running ? "live" : ""}>${mmss(this.counted())}</small>`;
     if (a === "scoreboard") return html`<small class="live">${m.red ?? 0} : ${m.blue ?? 0}</small>`;
     return html`<small class=${m.running ? "live" : ""}>${m.running ? t("On") : t("Off")}</small>`;
   }
@@ -1761,14 +1762,16 @@ class AppsTab extends LitElement {
   }
 
   stopwatchPanel() {
-    const shown = this.showing === "stopwatch", on = shown && this.mode.running;
+    const m = this.mode, shown = this.showing === "stopwatch", on = shown && m.running, paused = shown && !m.running && m.seconds > 0;
     return html`
-      <div class="lcd"><output class=${on ? "" : "idle"}>${mmss(on ? this.elapsed() : 0)}</output>
-        <span>${on ? t("Running") : shown ? t("Stopped, back to automatic in a minute") : t("Ready")}</span></div>
+      <div class="lcd"><output class=${on ? "" : "idle"}>${mmss(shown ? this.counted() : 0)}</output>
+        <span>${on ? t("Running") : paused ? t("Paused") : shown ? t("At zero, back to automatic in a minute") : t("Ready")}</span></div>
       <div class="side">
-        <div><h3>${t("Stopwatch")}</h3><p>${t("Counts up on the Evo from zero. Stopping puts it back to zero.")}</p></div>
+        <div><h3>${t("Stopwatch")}</h3><p>${t("Counts up on the Evo from zero.")}</p></div>
         <div class="actions">${on
-          ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch" })}>${t("Stop")}</button>`
+          ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", seconds: this.counted() })}>${t("Pause")}</button>`
+          : paused ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", seconds: m.seconds, running: true })}>${t("Resume")}</button>
+              <button class="btn" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch" })}>${t("Reset to 0")}</button>`
           : html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", running: true })}>${t("Start")}</button>`}</div>
         ${this.back()}
       </div>`;

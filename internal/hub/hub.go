@@ -577,7 +577,7 @@ func (h *Hub) sunLevel(now time.Time) int {
 }
 
 // toolDone reports a picked tool that has sat at zero for idleTool: a stopped stopwatch or noise
-// meter, or a countdown that ran out. A paused countdown still has time on it and stays.
+// meter at zero, or a countdown that ran out. Anything paused with time on it stays.
 func (h *Hub) toolDone(now time.Time) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -587,7 +587,7 @@ func (h *Hub) toolDone(now time.Time) bool {
 	case !m.Mode.Tool():
 	case m.Mode == display.ModeCountdown && m.Running && m.Since != 0:
 		since = time.Unix(m.Since+int64(m.Seconds), 0)
-	case m.Mode != display.ModeCountdown && !m.Running:
+	case m.Mode != display.ModeCountdown && !m.Running && m.Seconds == 0:
 		if h.idle.IsZero() || h.idleView != m {
 			h.idle, h.idleView = now, m
 		}
