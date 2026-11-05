@@ -182,10 +182,12 @@ const segmented = (options, value, pick) => html`<div class="seg" role="group">$
 class DurationPicker extends LitElement {
   static properties = { options: { attribute: false }, value: {}, max: { type: Number }, custom: { state: true }, n: { state: true }, unit: { state: true } };
   static styles = [base, css`
-    :host { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .own { display: inline-flex; gap: 6px; align-items: center; }
-    .own input { width: 72px; height: 34px; text-align: center; }
-    .own select { height: 34px; }
+    .seg { align-items: center; }
+    .own { display: inline-flex; align-items: center; height: 32px; border-radius: 8px; background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); padding: 0 4px 0 8px; }
+    .own input { width: 44px; height: 28px; border: 0; background: none; padding: 0; text-align: right; font: inherit; font-size: 13px; font-weight: 500; color: var(--ink); -moz-appearance: textfield; }
+    .own input::-webkit-inner-spin-button, .own input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    .own select { height: 28px; border: 0; background: none; padding: 0 2px 0 4px; font: inherit; font-size: 13px; font-weight: 500; color: var(--ink); cursor: pointer; }
+    .own input:focus-visible, .own select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
   `];
   get known() { return this.options.find(([v]) => seconds(v) === seconds(this.value))?.[0]; }
   willUpdate(c) {
@@ -204,17 +206,16 @@ class DurationPicker extends LitElement {
     this.emit(`${n}${this.unit}`);
   }
   render() {
-    const known = this.custom ? "custom" : this.known;
-    return html`${segmented([...this.options, ["custom", t("Custom")]], known, (v) => {
-        if (v === "custom") { this.openCustom(); return; }
-        this.custom = false;
-        this.emit(v);
-      })}
-      ${this.custom ? html`<span class="own">
-        <input type="number" min="1" step="any" aria-label=${t("Amount")} .value=${String(this.n)} @input=${(e) => { this.n = e.target.value; }} @change=${() => this.typed()}>
-        <select aria-label=${t("Unit")} @change=${(e) => { this.unit = e.target.value; this.typed(); }}>
-          ${[["s", t("seconds")], ["m", t("minutes")], ["h", t("hours")]].map(([u, l]) => html`<option value=${u} ?selected=${u === this.unit}>${l}</option>`)}</select>
-      </span>` : nothing}`;
+    const known = this.custom ? null : this.known;
+    return html`<div class="seg" role="group">
+      ${this.options.map(([v, label]) => html`<button type="button" aria-pressed=${String(v === known)} @click=${() => { this.custom = false; this.emit(v); }}>${label}</button>`)}
+      ${this.custom
+        ? html`<span class="own"><input type="number" min="1" step="any" aria-label=${t("Amount")} .value=${String(this.n)}
+              @input=${(e) => { this.n = e.target.value; }} @change=${() => this.typed()}>
+            <select aria-label=${t("Unit")} @change=${(e) => { this.unit = e.target.value; this.typed(); }}>
+              ${[["s", "s"], ["m", "min"], ["h", "h"]].map(([u, l]) => html`<option value=${u} ?selected=${u === this.unit}>${l}</option>`)}</select></span>`
+        : html`<button type="button" aria-pressed="false" @click=${() => this.openCustom()}>${t("Custom")}</button>`}
+    </div>`;
   }
 }
 customElements.define("ph-duration", DurationPicker);
