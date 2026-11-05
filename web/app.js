@@ -686,6 +686,7 @@ class DisplayTab extends LitElement {
     @media (min-width: 900px) { .layout { grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); align-items: start; gap: 32px; } .hero { position: sticky; top: 88px; } }
     .hero { display: grid; gap: 14px; justify-items: center; }
     ph-led { width: min(100%, 360px); }
+    @media (max-width: 599px) { ph-led { width: min(64%, 240px); } }
     .now { text-align: center; display: grid; gap: 4px; }
     .now b { font-family: var(--font-pixel); font-weight: 400; font-size: 22px; letter-spacing: .02em; }
     .now span { font-size: 13px; color: var(--muted); }
@@ -768,6 +769,10 @@ class GalleryTab extends LitElement {
   static styles = [base, css`
     .bar { display: grid; gap: 10px; margin-bottom: 14px; }
     .cats { display: flex; gap: 6px; flex-wrap: wrap; }
+    @media (max-width: 599px) {
+      .cats { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px; scroll-padding: 16px; }
+      .cats::-webkit-scrollbar { display: none; }
+    }
     .find { display: flex; gap: 8px; }
     .find input { flex: 1; min-width: 0; height: 40px; border-radius: 12px; padding: 0 14px; }
     .cat { flex: none; border: 1px solid var(--line); background: none; border-radius: 999px; height: 34px; padding: 0 14px; font-size: 13px; color: var(--muted); cursor: pointer; }
@@ -1132,6 +1137,10 @@ class MusicTab extends LitElement {
     .side, .main { display: grid; gap: 18px; min-width: 0; }
     .playing { display: grid; gap: 12px; justify-items: center; text-align: center; }
     ph-led { width: min(100%, 300px); }
+    .playing.idle { padding-block: 14px; gap: 4px; }
+    .playing.idle p { margin: 0; }
+    .playing.idle .head { margin-bottom: 0; }
+    @media (max-width: 599px) { ph-led { width: min(60%, 220px); } }
     .playing b { font-size: 17px; font-weight: 600; }
     .playing .who { color: var(--muted); font-size: 14px; }
     .state { font-size: 13px; padding: 6px 12px; border-radius: 999px; background: var(--chip); }
@@ -1174,7 +1183,7 @@ class MusicTab extends LitElement {
     const [on, why] = this.why();
     return html`<div class="layout">
       <div class="side">
-        <section class="card playing" aria-labelledby="np-h">
+        <section class="card playing ${now ? "" : "idle"}" aria-labelledby="np-h">
           <div class="head" style="width:100%"><h2 id="np-h">${t("Now playing")}</h2></div>
           ${now ? html`
             <ph-led .src=${`api/spotify/cover.png?t=${encodeURIComponent(now.track)}`} .label=${now.track}></ph-led>
@@ -1215,6 +1224,11 @@ class AppsTab extends LitElement {
   static properties = { state: { attribute: false }, weather: { state: true }, busy: { state: true }, picked: { state: true }, minutes: { state: true }, seconds: { state: true }, now: { state: true } };
   static styles = [base, css`
     .apps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    @media (max-width: 559px) {
+      .apps { display: flex; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 2px 16px; }
+      .apps::-webkit-scrollbar { display: none; }
+      .app { flex: 0 0 96px; }
+    }
     @media (min-width: 560px) { .apps { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
     .app { border: 1px solid var(--line); background: var(--surface); border-radius: 16px; padding: 12px 6px 10px; display: grid; justify-items: center; gap: 4px; cursor: pointer; color: var(--muted); min-width: 0; }
     .app svg { width: 24px; height: 24px; margin-bottom: 2px; }
