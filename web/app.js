@@ -1754,8 +1754,8 @@ class AppsTab extends LitElement {
         </div>
         <div class="actions">
           ${on && m.running ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "countdown", seconds: Math.max(1, this.left()) })}>${t("Pause")}</button>`
-            : on && m.seconds ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "countdown", seconds: m.seconds, running: true })}>${t("Resume")}</button>` : nothing}
-          <button class="btn ${on ? "" : "primary"}" ?disabled=${this.busy} @click=${() => this.run({ mode: "countdown", seconds: total, running: true })}>${on ? t("Restart with {time}", { time: mmss(total) }) : t("Start")}</button>
+            : html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "countdown", seconds: on && m.seconds ? m.seconds : total, running: true })}>${on && m.seconds ? t("Resume") : t("Start")}</button>`}
+          <button class="btn" ?disabled=${this.busy || !on} @click=${() => this.run({ mode: "countdown", seconds: total })}>${t("Reset")}</button>
         </div>
         ${this.back()}
       </div>`;
@@ -1768,11 +1768,11 @@ class AppsTab extends LitElement {
         <span>${on ? t("Running") : paused ? t("Paused") : shown ? t("At zero, back to automatic in a minute") : t("Ready")}</span></div>
       <div class="side">
         <div><h3>${t("Stopwatch")}</h3><p>${t("Counts up on the Evo from zero.")}</p></div>
-        <div class="actions">${on
-          ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", seconds: this.counted() })}>${t("Pause")}</button>`
-          : paused ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", seconds: m.seconds, running: true })}>${t("Resume")}</button>
-              <button class="btn" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch" })}>${t("Reset to 0")}</button>`
-          : html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", running: true })}>${t("Start")}</button>`}</div>
+        <div class="actions">
+          ${on ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", seconds: this.counted() })}>${t("Pause")}</button>`
+            : html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", seconds: paused ? m.seconds : undefined, running: true })}>${paused ? t("Resume") : t("Start")}</button>`}
+          <button class="btn" ?disabled=${this.busy || !(on || paused)} @click=${() => this.run({ mode: "stopwatch" })}>${t("Reset to 0")}</button>
+        </div>
         ${this.back()}
       </div>`;
   }

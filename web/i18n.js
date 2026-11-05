@@ -321,6 +321,7 @@ const es = {
   "Back to automatic in a minute": "Vuelve a automático en un minuto",
   "Done, back to automatic in a minute": "Terminada, vuelve a automático en un minuto",
   "At zero, back to automatic in a minute": "A cero, vuelve a automático en un minuto",
+  "Reset": "Reiniciar",
   "Page {n}": "Página {n}",
   "Previous page": "Página anterior",
   "Next page": "Página siguiente",
