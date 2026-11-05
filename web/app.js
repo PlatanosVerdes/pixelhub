@@ -1656,7 +1656,7 @@ class AppsTab extends LitElement {
     .panel { margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 18px; display: grid; gap: 18px; }
     @media (min-width: 760px) { .panel { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); align-items: center; gap: 28px; padding: 24px; } }
     .lcd { background: var(--case); border: 1px solid var(--line); border-radius: 16px; min-height: 150px; display: grid; place-items: center; align-content: center; gap: 6px; padding: 18px; text-align: center; }
-    .lcd output { font-family: var(--font-pixel); font-size: 64px; line-height: 1; color: var(--accent); text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 45%, transparent); font-variant-numeric: tabular-nums; }
+    .lcd output { font-family: var(--font-data); font-weight: 500; letter-spacing: -.02em; font-size: 60px; line-height: 1; color: var(--accent); text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 45%, transparent); font-variant-numeric: tabular-nums; }
     .lcd output.idle { color: var(--muted); text-shadow: none; }
     .lcd span { font-size: 13px; color: var(--muted); }
     .side { display: grid; gap: 16px; min-width: 0; }
@@ -1677,7 +1677,7 @@ class AppsTab extends LitElement {
     .score { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .team { border-radius: 14px; padding: 14px 10px; display: grid; justify-items: center; gap: 10px; background: color-mix(in srgb, var(--team) 14%, var(--case)); border: 1px solid color-mix(in srgb, var(--team) 40%, transparent); }
     .team span { font-size: 13px; color: var(--muted); }
-    .team output { font-family: var(--font-pixel); font-size: 48px; line-height: 1; color: var(--team); }
+    .team output { font-family: var(--font-data); font-weight: 500; font-size: 46px; line-height: 1; color: var(--team); font-variant-numeric: tabular-nums; }
     .team .pm { display: flex; gap: 8px; }
     .team button { width: 46px; height: 40px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--team) 40%, transparent); background: var(--surface); color: var(--ink); font-size: 20px; cursor: pointer; }
   `];
