@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
+	"github.com/PlatanosVerdes/pixelhub/internal/favorites"
 	"github.com/PlatanosVerdes/pixelhub/internal/gallery"
 	"github.com/PlatanosVerdes/pixelhub/internal/hub"
 	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
@@ -468,11 +469,46 @@ func (fakeGallery) List(_ context.Context, category int, _ gallery.Sort, page, _
 		return nil, nil
 	}
 	return []gallery.Item{{Name: "cat", Author: "someone", Likes: 3, FileID: "group1/M00/aa"},
-		{Name: "Corazón", Tags: []string{"love"}, Likes: 9, FileID: fmt.Sprintf("group1/M00/heart-%d", category)}}, nil
+		{Name: "Corazón", Tags: []string{"love"}, Likes: 9, FileID: fmt.Sprintf("group1/M00/heart-%d", category)},
+		{Name: "Super Mario Bros", Likes: 1, FileID: "group1/M00/mario"}}, nil
 }
 
-func (fakeGallery) Download(context.Context, string) ([]byte, error) {
-	return []byte("not a gallery file"), nil
+func (fakeGallery) Download(_ context.Context, file string) ([]byte, error) {
+	if file == "group1/M00/aa" {
+		return []byte("not a gallery file"), nil
+	}
+	frame := image.NewRGBA(image.Rect(0, 0, 16, 16))
+	return gallery.Encode([]*image.RGBA{frame}, 100*time.Millisecond), nil
+}
+
+func TestFavorites(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	liked, err := favorites.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := (&Server{Hub: f.hub, Gallery: fakeGallery{}, Favorites: liked, Size: 16}).Handler()
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
+		return rec
+	}
+	if rec := do("POST", "/api/favorites", `{"file":"group1/M00/mario","name":"Mario","likes":4}`); rec.Code != 201 || !strings.Contains(rec.Body.String(), `"name":"Mario"`) {
+		t.Fatalf("add: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do("POST", "/api/favorites", `{"file":"group1/M00/aa","name":"broken"}`); rec.Code != 422 {
+		t.Errorf("adding an unreadable file: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do("GET", "/api/gallery/gif?file=group1/M00/mario", ""); rec.Code != 200 || rec.Header().Get("Content-Type") != "image/gif" {
+		t.Errorf("a favourite's gif: %d", rec.Code)
+	}
+	if rec := do("DELETE", "/api/favorites?file=group1/M00/mario", ""); rec.Code != 200 || strings.Contains(rec.Body.String(), "Mario") {
+		t.Errorf("remove: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do("DELETE", "/api/favorites?file=group1/M00/mario", ""); rec.Code != 404 {
+		t.Errorf("remove twice: %d", rec.Code)
+	}
 }
 
 func TestGallery(t *testing.T) {
@@ -491,7 +527,7 @@ func TestGallery(t *testing.T) {
 		t.Fatal("the gallery index never finished")
 		return ""
 	}
-	for q, want := range map[string]string{"corazon": `"name":"Corazón"`, "LOVE": `"name":"Corazón"`, "cat+someone": `"name":"cat"`, "dog": `"items":[]`, "ove": `"items":[]`} {
+	for q, want := range map[string]string{"corazon": `"name":"Corazón"`, "LOVE": `"name":"Corazón"`, "cat+someone": `"name":"cat"`, "dog": `"items":[]`, "ove": `"items":[]`, "mariobros": `"name":"Super Mario Bros"`, "bros": `"name":"Super Mario Bros"`} {
 		if got := search(q); !strings.Contains(got, want) {
 			t.Errorf("search %s: %s, want %s", q, got, want)
 		}

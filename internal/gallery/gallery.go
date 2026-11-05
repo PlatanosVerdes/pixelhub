@@ -134,6 +134,23 @@ var (
 	ErrRateLimited = errors.New("the Divoom gallery asks to slow down; try again in a few minutes")
 )
 
+// Encode builds a 16x16 gallery file from frames, the way the gallery stores them.
+func Encode(frames []*image.RGBA, delay time.Duration) []byte {
+	data := make([]byte, 0, len(frames)*frameBytes)
+	for _, f := range frames {
+		for y := range 16 {
+			for x := range 16 {
+				c := f.RGBAAt(x, y)
+				data = append(data, c.R, c.G, c.B)
+			}
+		}
+	}
+	block, _ := aes.NewCipher(aesKey)
+	cipher.NewCBCEncrypter(block, aesIV).CryptBlocks(data, data)
+	ms := delay.Milliseconds()
+	return append([]byte{formatAnim, 0, byte(ms >> 8), byte(ms)}, data...)
+}
+
 // Decode turns a 16x16 gallery file into its frames and the delay between them.
 func Decode(file []byte) ([]*image.RGBA, time.Duration, error) {
 	if len(file) < 4 || file[0] != formatAnim {

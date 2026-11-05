@@ -56,6 +56,16 @@ func TestDecodeRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEncodeIsDecodesInverse(t *testing.T) {
+	t.Parallel()
+	frame := image.NewRGBA(image.Rect(0, 0, 16, 16))
+	frame.SetRGBA(3, 4, color.RGBA{1, 2, 3, 255})
+	got, delay, err := Decode(Encode([]*image.RGBA{frame, frame}, 250*time.Millisecond))
+	if err != nil || len(got) != 2 || delay != 250*time.Millisecond || got[1].RGBAAt(3, 4) != (color.RGBA{1, 2, 3, 255}) {
+		t.Errorf("round trip: %d frames, %s, %v", len(got), delay, err)
+	}
+}
+
 func TestDecodeRejects(t *testing.T) {
 	t.Parallel()
 	for name, file := range map[string][]byte{

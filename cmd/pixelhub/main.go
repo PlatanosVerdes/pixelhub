@@ -18,6 +18,7 @@ import (
 	"github.com/PlatanosVerdes/pixelhub/internal/config"
 	"github.com/PlatanosVerdes/pixelhub/internal/demo"
 	"github.com/PlatanosVerdes/pixelhub/internal/divoom"
+	"github.com/PlatanosVerdes/pixelhub/internal/favorites"
 	"github.com/PlatanosVerdes/pixelhub/internal/gallery"
 	"github.com/PlatanosVerdes/pixelhub/internal/hub"
 	"github.com/PlatanosVerdes/pixelhub/internal/server"
@@ -88,13 +89,17 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 		return err
 	}
 	h.Music = music
+	liked, err := favorites.Open(filepath.Join(cfg.DataDir, "favorites"))
+	if err != nil {
+		return err
+	}
 	go session.Run(ctx)
 	go h.Run(ctx)
 	go music.Run(ctx)
 
 	srv := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),
-		Handler:           (&server.Server{Hub: h, Sprites: sprites, Spotify: music, Gallery: gallery.NewClient(), Size: divoom.Size, Version: buildVersion}).Handler(),
+		Handler:           (&server.Server{Hub: h, Sprites: sprites, Spotify: music, Gallery: gallery.NewClient(), Favorites: liked, Size: divoom.Size, Version: buildVersion}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,

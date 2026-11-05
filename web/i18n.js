@@ -269,4 +269,8 @@ const es = {
   "Results for “{q}” among the most liked of every category.": "Resultados de «{q}» entre los más gustados de cada categoría.",
   "Nothing found. Try another word, in English it finds more.": "No hay nada. Prueba otra palabra; en inglés encuentra más.",
   "Still gathering the gallery ({n} of {of} pages); search again in a minute for more.": "Todavía estoy reuniendo la galería ({n} de {of} páginas); vuelve a buscar en un minuto para ver más.",
+  "Favourites": "Favoritos",
+  "Favourite": "Favorito",
+  "Saved": "Guardado",
+  "No favourites yet. Open a drawing and tap ♡ Save.": "Todavía no hay favoritos. Abre un dibujo y pulsa ♡ Guardar.",
 };

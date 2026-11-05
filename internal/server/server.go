@@ -57,6 +57,8 @@ type Server struct {
 	Spotify Spotify
 	// Gallery, when set, browses the Divoom community gallery under /api/gallery.
 	Gallery Gallery
+	// Favorites, with Gallery, keeps the gallery pictures someone liked under /api/favorites.
+	Favorites Favorites
 	// GalleryPace is the pause between the gallery pages read for search; 0 means 3 s.
 	GalleryPace time.Duration
 	gifs        gifCache

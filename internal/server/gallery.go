@@ -18,6 +18,7 @@ import (
 	"unicode"
 
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
+	"github.com/PlatanosVerdes/pixelhub/internal/favorites"
 	"github.com/PlatanosVerdes/pixelhub/internal/gallery"
 )
 
@@ -169,8 +170,12 @@ func matches(it gallery.Item, words []string) bool {
 	have := strings.FieldsFunc(fold(it.Name+" "+it.Author+" "+strings.Join(it.Tags, " ")), func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
+	joined := strings.Join(have, "")
 	for _, w := range words {
-		if !slices.ContainsFunc(have, func(h string) bool { return strings.HasPrefix(h, w) }) {
+		prefix := slices.ContainsFunc(have, func(h string) bool { return strings.HasPrefix(h, w) })
+		// A long word also finds the same words written apart: "mariobros" finds "Mario Bros".
+		together := len(w) >= 6 && strings.Contains(joined, w)
+		if !prefix && !together {
 			return false
 		}
 	}
@@ -197,6 +202,11 @@ func (s *Server) galleryRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/gallery/search", s.gallerySearch)
 	mux.HandleFunc("POST /api/gallery/show", s.galleryShow)
 	mux.HandleFunc("POST /api/gallery/save", s.gallerySave)
+	if s.Favorites != nil {
+		mux.HandleFunc("GET /api/favorites", s.listFavorites)
+		mux.HandleFunc("POST /api/favorites", s.addFavorite)
+		mux.HandleFunc("DELETE /api/favorites", s.removeFavorite)
+	}
 }
 
 type galleryItem struct {
@@ -237,8 +247,14 @@ func (s *Server) galleryList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": out, "more": len(items) > 0})
 }
 
-// gifOf fetches and decodes a gallery file once, then serves it from memory.
+// gifOf fetches and decodes a gallery file once, then serves it from memory; a favourite comes from
+// its own copy, so it works without the gallery.
 func (s *Server) gifOf(ctx context.Context, file string) ([]byte, error) {
+	if s.Favorites != nil {
+		if b, err := s.Favorites.GIF(file); err == nil {
+			return b, nil
+		}
+	}
 	if b, ok := s.gifs.get(file); ok {
 		return b, nil
 	}
@@ -344,4 +360,45 @@ func galleryStatus(err error) int {
 		return http.StatusBadRequest
 	}
 	return http.StatusBadGateway
+}
+
+type Favorites interface {
+	List() []favorites.Favorite
+	Add(f favorites.Favorite, gif []byte) error
+	Remove(file string) error
+	GIF(file string) ([]byte, error)
+}
+
+func (s *Server) listFavorites(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"items": s.Favorites.List()})
+}
+
+func (s *Server) addFavorite(w http.ResponseWriter, r *http.Request) {
+	var req galleryItem
+	if !decode(w, r, &req, smallBody) {
+		return
+	}
+	b, err := s.gifOf(r.Context(), req.File)
+	if err != nil {
+		writeError(w, galleryStatus(err), err)
+		return
+	}
+	f := favorites.Favorite{File: req.File, Name: req.Name, Author: req.Author, Likes: req.Likes}
+	if err := s.Favorites.Add(f, b); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"items": s.Favorites.List()})
+}
+
+func (s *Server) removeFavorite(w http.ResponseWriter, r *http.Request) {
+	if err := s.Favorites.Remove(r.URL.Query().Get("file")); err != nil {
+		code := http.StatusInternalServerError
+		if errors.Is(err, favorites.ErrNotFound) {
+			code = http.StatusNotFound
+		}
+		writeError(w, code, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": s.Favorites.List()})
 }

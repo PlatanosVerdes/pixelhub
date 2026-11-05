@@ -1181,7 +1181,7 @@ customElements.define("ph-display", DisplayTab);
 
 // The Divoom community gallery: browse by category, show a picture now or keep it in a profile.
 const CATEGORIES = ["recommended", "top", "new", "animal", "food", "character", "emoji", "nature", "plant", "person", "festival", "pattern", "symbol", "creative", "daily"];
-const categoryName = (c) => ({ recommended: t("Recommended"), top: t("Top"), new: t("New"), animal: t("Animals"), food: t("Food"), character: t("Characters"),
+const categoryName = (c) => ({ favorites: `♥ ${t("Favourites")}`, recommended: t("Recommended"), top: t("Top"), new: t("New"), animal: t("Animals"), food: t("Food"), character: t("Characters"),
   emoji: t("Emoji"), nature: t("Nature"), plant: t("Plants"), person: t("People"), festival: t("Festivals"), pattern: t("Patterns"), symbol: t("Symbols"),
   creative: t("Creative"), daily: t("Everyday") })[c] ?? c;
 const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
@@ -1189,7 +1189,7 @@ const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
 class GalleryTab extends LitElement {
   static properties = { state: { attribute: false }, category: { state: true }, sort: { state: true }, items: { state: true }, page: { state: true },
     more: { state: true }, loading: { state: true }, picked: { state: true }, target: { state: true }, busy: { state: true }, problem: { state: true },
-    query: { state: true }, searched: { state: true }, indexing: { state: true } };
+    query: { state: true }, searched: { state: true }, indexing: { state: true }, favs: { state: true } };
   static styles = [base, css`
     .bar { display: grid; gap: 10px; margin-bottom: 14px; }
     .cats { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -1199,7 +1199,10 @@ class GalleryTab extends LitElement {
     .cat[aria-pressed=true] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 600; }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; }
     .item { aspect-ratio: 1; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: #000; overflow: hidden; cursor: pointer; }
+    .item { position: relative; }
     .item img { width: 100%; height: 100%; display: block; }
+    .heart { position: absolute; right: 5px; top: 3px; color: #ff375f; font-size: 15px; text-shadow: 0 0 4px #000; }
+    .fav[aria-pressed=true] { color: #ff375f; border-color: color-mix(in srgb, #ff375f 50%, var(--line)); }
     .item[aria-pressed=true] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
     .more { display: flex; justify-content: center; margin-top: 16px; }
     .sheet { position: sticky; top: 64px; z-index: 3; margin-bottom: 14px; background: var(--surface); border: 1px solid var(--accent); border-radius: 18px; padding: 14px;
@@ -1212,13 +1215,37 @@ class GalleryTab extends LitElement {
     .empty { padding: 30px 0; text-align: center; }
   `];
   constructor() { super(); this.category = "recommended"; this.sort = "likes"; this.items = []; this.page = 1; }
-  connectedCallback() { super.connectedCallback(); if (!this.items.length) this.load(true); }
+  connectedCallback() { super.connectedCallback(); this.loadFavs(); if (!this.items.length) this.load(true); }
+
+  async loadFavs() {
+    try { this.favs = (await api("GET", "favorites")).items; } catch { this.favs = []; }
+  }
+  isFav(file) { return (this.favs ?? []).some((f) => f.file === file); }
+  async toggleFav(item) {
+    this.busy = true;
+    try {
+      const r = this.isFav(item.file)
+        ? await api("DELETE", `favorites?file=${encodeURIComponent(item.file)}`)
+        : await api("POST", "favorites", { file: item.file, name: item.name, author: item.author, likes: item.likes });
+      this.favs = r.items;
+      if (this.category === "favorites" && !this.searched) { this.items = this.favs; if (!this.isFav(item.file)) this.picked = null; }
+    } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
 
   async load(fresh) {
     this.loading = true;
     this.problem = "";
     const page = fresh ? 1 : this.page + 1;
     try {
+      if (this.category === "favorites" && !this.searched) {
+        await this.loadFavs();
+        this.items = this.favs;
+        this.more = false;
+        this.indexing = null;
+        this.loading = false;
+        return;
+      }
       const r = this.searched
         ? await api("GET", `gallery/search?q=${encodeURIComponent(this.searched)}`)
         : await api("GET", `gallery?category=${this.category}&sort=${this.sort}&page=${page}`);
@@ -1261,17 +1288,19 @@ class GalleryTab extends LitElement {
           <input type="search" placeholder=${t("Search: cat, heart, pumpkin…")} aria-label=${t("Search the gallery")} .value=${this.query ?? ""} @input=${(e) => { this.query = e.target.value; }}>
           <button class="btn primary" type="submit">${t("Search")}</button>
         </form>
-        <div class="cats" role="group" aria-label=${t("Categories")}>${CATEGORIES.map((c) =>
+        <div class="cats" role="group" aria-label=${t("Categories")}>${["favorites", ...CATEGORIES].map((c) =>
           html`<button class="cat" aria-pressed=${String(!this.searched && c === this.category)} @click=${() => this.pick("category", c)}>${categoryName(c)}</button>`)}</div>
         ${this.searched
           ? html`<p class="small muted">${t("Results for “{q}” among the most liked of every category.", { q: this.searched })}
               ${this.indexing ? html`<br>${t("Still gathering the gallery ({n} of {of} pages); search again in a minute for more.", { n: this.indexing.indexed, of: this.indexing.of })}` : nothing}</p>`
+          : this.category === "favorites" ? nothing
           : html`<div>${segmented([["likes", t("Most liked")], ["new", t("Newest")]], this.sort, (v) => this.pick("sort", v))}</div>`}
       </div>
       ${p ? html`<div class="sheet" role="dialog" aria-label=${p.name}>
         <img class="pix" src=${gifURL(p.file)} alt="">
         <div><h3>${p.name}</h3><span class="small muted meta"><span>${p.author}</span><span>${p.likes} ♥</span></span>
           <div class="acts">
+            <button class="btn small fav" aria-pressed=${String(this.isFav(p.file))} ?disabled=${this.busy} @click=${() => this.toggleFav(p)}>${this.isFav(p.file) ? `♥ ${t("Saved")}` : `♡ ${t("Save")}`}</button>
             <button class="btn primary small" ?disabled=${this.busy} @click=${() => this.show()}>${t("Show now")}</button>
             ${channels.length ? html`<select aria-label=${t("Profile")} @change=${(e) => { this.target = e.target.value; }}>
                 ${channels.map((c) => html`<option value=${c.name} ?selected=${c.name === (this.target ?? channels[0].name)}>${c.name}</option>`)}</select>
@@ -1279,9 +1308,10 @@ class GalleryTab extends LitElement {
             <button class="icon" aria-label=${t("Close")} @click=${() => { this.picked = null; }}>${icons.close}</button>
           </div></div></div>` : nothing}
       ${this.problem ? html`<p class="err">${this.problem}</p>` : nothing}
-      ${!this.items.length && !this.loading && !this.problem ? html`<p class="empty muted">${this.searched ? t("Nothing found. Try another word, in English it finds more.") : t("Nothing in this category right now.")}</p>` : nothing}
+      ${!this.items.length && !this.loading && !this.problem ? html`<p class="empty muted">${this.searched ? t("Nothing found. Try another word, in English it finds more.")
+        : this.category === "favorites" ? t("No favourites yet. Open a drawing and tap ♡ Save.") : t("Nothing in this category right now.")}</p>` : nothing}
       <div class="grid">${repeat(this.items, (i) => i.file, (i) => html`<button class="item" aria-pressed=${String(p?.file === i.file)} title=${i.name} aria-label=${i.name}
-        @click=${() => { this.picked = i; }}><img class="pix" src=${gifURL(i.file)} alt="" loading="lazy"></button>`)}</div>
+        @click=${() => { this.picked = i; }}><img class="pix" src=${gifURL(i.file)} alt="" loading="lazy">${this.isFav(i.file) ? html`<span class="heart" aria-label=${t("Favourite")}>♥</span>` : nothing}</button>`)}</div>
       <div class="more">${this.loading ? html`<span class="muted small">${t("Loading")}</span>`
         : this.more ? html`<button class="btn" @click=${() => this.load(false)}>${t("Load more")}</button>` : nothing}</div>`;
   }
