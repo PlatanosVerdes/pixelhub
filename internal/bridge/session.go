@@ -290,6 +290,9 @@ func (l *link) hold() error {
 			}
 			l.acked()
 			unanswered = nil
+			if v, ok := divoom.ParseState(ev.frame); ok {
+				l.reported(v)
+			}
 			if divoom.IsGreeting(ev.frame) {
 				l.painted, l.shown = 0, display.Content{}
 			}
@@ -424,6 +427,15 @@ func (s *Session) isReleased() bool {
 func (s *Session) setConnected(up bool) {
 	s.mu.Lock()
 	s.status.Connected = up
+	if !up {
+		s.status.Device = nil
+	}
+	s.mu.Unlock()
+}
+
+func (s *Session) reported(v display.View) {
+	s.mu.Lock()
+	s.status.Device = &v
 	s.mu.Unlock()
 }
 

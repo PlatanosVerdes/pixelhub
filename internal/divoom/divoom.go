@@ -3,6 +3,7 @@ package divoom
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"math/bits"
@@ -33,6 +34,7 @@ const (
 	viewScoreboard = 0x06
 
 	respOK       = 0x55
+	respState    = 0x46
 	respGreeting = 0xbd
 
 	chunkSize    = 200
@@ -275,4 +277,28 @@ func FrameLen(buf []byte) int {
 		return 0
 	}
 	return int(binary.LittleEndian.Uint16(buf[1:3])) + 4
+}
+
+// ParseState reads what the display reports it is showing: one of its own modes with the
+// settings it keeps for it. Pictures sent to it report as the clock, so ok is false for them.
+func ParseState(frame []byte) (display.View, bool) {
+	cmd, ok := Ack(frame)
+	if !ok || cmd != respState || len(frame) < 6+16 {
+		return display.View{}, false
+	}
+	p := frame[6:]
+	hex := func(b []byte) string { return fmt.Sprintf("#%02x%02x%02x", b[0], b[1], b[2]) }
+	switch p[0] {
+	case viewClock:
+		return display.View{Mode: display.ModeClock, Style: int(p[15]), Color: hex(p[12:15])}, true
+	case viewLight:
+		return display.View{Mode: display.ModeLight, Style: int(p[7]), Color: hex(p[3:6])}, true
+	case viewVisualizer:
+		return display.View{Mode: display.ModeVisualizer, Style: int(p[9])}, true
+	case viewAnimations:
+		return display.View{Mode: display.ModeAnimations}, true
+	case viewScoreboard:
+		return display.View{Mode: display.ModeScoreboard}, true
+	}
+	return display.View{}, false
 }

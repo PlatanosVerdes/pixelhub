@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 )
@@ -158,5 +159,20 @@ func TestListReportsAPIErrors(t *testing.T) {
 	c := &Client{HTTP: srv.Client(), API: srv.URL, Files: srv.URL}
 	if _, err := c.List(context.Background(), 0, Newest, 1, 5); err == nil {
 		t.Error("a non-zero ReturnCode was accepted")
+	}
+}
+
+func TestDecodeStill(t *testing.T) {
+	t.Parallel()
+	file, err := os.ReadFile("testdata/still.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	frames, _, err := Decode(file)
+	if err != nil || len(frames) != 1 {
+		t.Fatalf("%d frames, %v", len(frames), err)
+	}
+	if c := frames[0].RGBAAt(0, 0); c.R < 200 || c.B > 150 {
+		t.Errorf("the corner should be the sand colour, got %v", c)
 	}
 }

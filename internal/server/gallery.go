@@ -27,11 +27,13 @@ import (
 )
 
 const (
-	searchPages   = 10
+	searchPages   = 16
 	crawlPace     = 3 * time.Second
 	reindexEvery  = 6 * time.Hour
 	listFresh     = 15 * time.Minute
-	galleryPage   = 24
+	// The gallery answers at most about 30 pictures a request, so a page here is two of its pages.
+	upstreamPage  = 30
+	galleryPage   = 2 * upstreamPage
 	galleryCached = 300
 	defaultShow   = 30 * time.Second
 )
@@ -91,7 +93,7 @@ func (s *Server) listPage(ctx context.Context, category int, sort gallery.Sort, 
 	if ok && time.Since(hit.at) < listFresh {
 		return hit.items, nil
 	}
-	items, err := s.Gallery.List(ctx, category, sort, page, galleryPage)
+	items, err := s.Gallery.List(ctx, category, sort, page, upstreamPage)
 	if err != nil {
 		return nil, err
 	}
@@ -215,6 +217,11 @@ func (s *Server) gallerySearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("q: give some words to look for"))
 		return
 	}
+	page, err := pageOf(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	s.indexGallery()
 	total := len(gallery.Categories) * searchPages
 	s.index.mu.Lock()
@@ -227,16 +234,15 @@ func (s *Server) gallerySearch(w http.ResponseWriter, r *http.Request) {
 	done := min(s.index.done, total)
 	s.index.mu.Unlock()
 	slices.SortFunc(found, func(a, b gallery.Item) int { return cmp.Or(b.Likes-a.Likes, strings.Compare(a.FileID, b.FileID)) })
-	out := make([]galleryItem, 0, len(found))
-	for _, it := range found {
-		out = append(out, galleryItem{File: it.FileID, Name: it.Name, Author: it.Author, Likes: it.Likes})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out, "more": false, "indexed": done, "of": total})
+	pages := max(1, (len(found)+galleryPage-1)/galleryPage)
+	from := min(len(found), (page-1)*galleryPage)
+	found = found[from:min(len(found), from+galleryPage)]
+	writeJSON(w, http.StatusOK, map[string]any{"items": itemsOf(found), "page": page, "pages": pages, "more": page < pages, "indexed": done, "of": total})
 }
 
 // matches wants every word to start one of the item's words, so "cat" finds "cats" but not "vacation".
 func matches(it gallery.Item, words []string) bool {
-	have := strings.FieldsFunc(fold(it.Name+" "+it.Author+" "+strings.Join(it.Tags, " ")), func(r rune) bool {
+	have := strings.FieldsFunc(fold(it.Name+" "+it.Author+" "+it.About+" "+strings.Join(it.Tags, " ")), func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
 	joined := strings.Join(have, "")
@@ -277,10 +283,33 @@ func (s *Server) galleryRoutes(mux *http.ServeMux) {
 }
 
 type galleryItem struct {
-	File   string `json:"file"`
-	Name   string `json:"name"`
-	Author string `json:"author"`
-	Likes  int    `json:"likes"`
+	File     string `json:"file"`
+	Name     string `json:"name"`
+	Author   string `json:"author"`
+	Likes    int    `json:"likes"`
+	About    string `json:"about,omitempty"`
+	Category string `json:"category,omitempty"`
+}
+
+func itemsOf(items []gallery.Item) []galleryItem {
+	out := make([]galleryItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, galleryItem{File: it.FileID, Name: strings.TrimSpace(it.Name), Author: it.Author, Likes: it.Likes,
+			About: strings.TrimSpace(it.About), Category: gallery.CategoryOf(it.Class)})
+	}
+	return out
+}
+
+func pageOf(r *http.Request) (int, error) {
+	q := r.URL.Query().Get("page")
+	if q == "" {
+		return 1, nil
+	}
+	page, err := strconv.Atoi(q)
+	if err != nil || page < 1 || page > 100 {
+		return 0, fmt.Errorf("page %q: want 1-100", q)
+	}
+	return page, nil
 }
 
 func (s *Server) galleryList(w http.ResponseWriter, r *http.Request) {
@@ -294,24 +323,27 @@ func (s *Server) galleryList(w http.ResponseWriter, r *http.Request) {
 	if q.Get("sort") == "new" {
 		sort = gallery.Newest
 	}
-	page, err := strconv.Atoi(q.Get("page"))
-	if q.Get("page") == "" {
-		page, err = 1, nil
-	}
-	if err != nil || page < 1 || page > 100 {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("page %q: want 1-100", q.Get("page")))
-		return
-	}
-	items, err := s.listPage(r.Context(), category, sort, page)
+	page, err := pageOf(r)
 	if err != nil {
-		writeError(w, galleryStatus(err), err)
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	out := make([]galleryItem, 0, len(items))
-	for _, it := range items {
-		out = append(out, galleryItem{File: it.FileID, Name: it.Name, Author: it.Author, Likes: it.Likes})
+	var items []gallery.Item
+	for up := 2*page - 1; up <= 2*page; up++ {
+		got, err := s.listPage(r.Context(), category, sort, up)
+		if err != nil {
+			writeError(w, galleryStatus(err), err)
+			return
+		}
+		items = append(items, got...)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out, "more": len(items) > 0})
+	seen := map[string]bool{}
+	items = slices.DeleteFunc(items, func(it gallery.Item) bool {
+		dup := seen[it.FileID]
+		seen[it.FileID] = true
+		return dup
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"items": itemsOf(items), "page": page, "more": len(items) > 0})
 }
 
 // gifOf fetches and decodes a gallery file once, then serves it from memory; a picture kept in a list

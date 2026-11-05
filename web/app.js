@@ -1,7 +1,7 @@
 // pixelhub's web UI: the app element fetches, every component below renders what it is given.
 import { LitElement, html, svg, css, nothing, keyed, repeat } from "./vendor/lit-all.min.js";
 import { lang, t } from "./i18n.js";
-import { clockFace } from "./faces.js";
+import { clockFace, lightFace } from "./faces.js";
 
 document.documentElement.lang = lang;
 
@@ -1103,8 +1103,12 @@ class DisplayTab extends LitElement {
   connectedCallback() { super.connectedCallback(); this.now = new Date(); this.tick = setInterval(() => { this.now = new Date(); }, 15000); }
   disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.tick); }
 
-  // The display draws its clock itself; the preview redraws the same face with the time.
+  // The display draws its own modes; the preview redraws them from what it reports, colour included.
   preview(s) {
+    const own = s.showing === "clock" || (s.layer === "mode" && this.state?.mode);
+    const d = s.device;
+    if (own && d?.mode === "clock") return clockFace(d.style, this.now, d.color);
+    if (own && d?.mode === "light") return lightFace(d.color);
     if (s.layer === "mode" && this.state?.mode?.mode === "clock") return clockFace(this.state.mode.style ?? 0, this.now, this.state.mode.color);
     if (s.showing === "clock") return clockFace(0, this.now);
     return `api/preview.png?v=${s.preview_version}`;
@@ -1190,7 +1194,7 @@ const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
 
 class GalleryTab extends LitElement {
   static properties = { state: { attribute: false }, category: { state: true }, sort: { state: true }, items: { state: true }, page: { state: true },
-    more: { state: true }, loading: { state: true }, picked: { state: true }, target: { state: true }, busy: { state: true }, problem: { state: true },
+    more: { state: true }, pages: { state: true }, loading: { state: true }, picked: { state: true }, target: { state: true }, busy: { state: true }, problem: { state: true },
     query: { state: true }, searched: { state: true }, indexing: { state: true }, lists: { state: true }, open: { state: true },
     saving: { state: true }, newList: { state: true }, renaming: { state: true } };
   static styles = [base, css`
@@ -1207,7 +1211,12 @@ class GalleryTab extends LitElement {
     .item[aria-pressed=true] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
     .kept { position: absolute; right: 4px; top: 4px; width: 16px; height: 16px; color: var(--accent); filter: drop-shadow(0 0 3px #000); }
     .kept svg { width: 16px; height: 16px; }
-    .more { display: flex; justify-content: center; margin-top: 16px; }
+    .more { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 18px; flex-wrap: wrap; }
+    .pg { min-width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--line); background: none; color: var(--muted); font: inherit; font-variant-numeric: tabular-nums; cursor: pointer; }
+    .pg[aria-current=page] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+    .pg:disabled { opacity: .35; cursor: default; }
+    .gap { color: var(--muted); padding: 0 2px; }
+    .about { margin: 6px 0 0; font-size: 13px; color: var(--muted); white-space: pre-line; max-height: 4.5em; overflow: auto; }
     .sheet { position: sticky; top: 64px; z-index: 3; margin-bottom: 14px; background: var(--surface); border: 1px solid var(--accent); border-radius: 18px; padding: 14px;
       display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px; align-items: start; box-shadow: 0 14px 40px -12px rgba(0, 0, 0, .6); }
     .sheet img { width: 96px; height: 96px; border-radius: 10px; background: #000; }
@@ -1263,22 +1272,35 @@ class GalleryTab extends LitElement {
     if (await this.listCall("DELETE", `lists/${encodeURIComponent(this.open)}`)) { this.open = null; this.picked = null; }
   }
 
-  async load(fresh) {
+  async load(fresh, page = 1) {
     if (this.category === "lists") return;
     this.loading = true;
     this.problem = "";
-    const page = fresh ? 1 : this.page + 1;
+    if (!fresh) { this.picked = null; this.scrollIntoView({ block: "start" }); }
     try {
       const r = this.searched
-        ? await api("GET", `gallery/search?q=${encodeURIComponent(this.searched)}`)
+        ? await api("GET", `gallery/search?q=${encodeURIComponent(this.searched)}&page=${page}`)
         : await api("GET", `gallery?category=${this.category}&sort=${this.sort}&page=${page}`);
-      const seen = new Set(fresh ? [] : this.items.map((i) => i.file));
-      this.items = [...(fresh ? [] : this.items), ...r.items.filter((i) => !seen.has(i.file))];
+      this.items = r.items;
       this.page = page;
       this.more = r.more;
+      this.pages = r.pages;
       this.indexing = r.of && r.indexed < r.of ? r : null;
     } catch (e) { this.problem = e.message; }
     this.loading = false;
+  }
+
+  // Search knows how many pages it has; a category only knows whether there is a next one.
+  pager() {
+    const p = this.page, last = this.pages ?? (this.more ? p + 1 : p);
+    if (last <= 1) return nothing;
+    const shown = [...new Set([1, p - 2, p - 1, p, p + 1, p + 2, ...(this.pages ? [last] : [])])].filter((n) => n >= 1 && n <= last).sort((a, b) => a - b);
+    const btn = (n, label, aria) => html`<button class="pg" aria-label=${aria ?? t("Page {n}", { n })} aria-current=${n === p ? "page" : "false"}
+      ?disabled=${this.loading || n < 1 || n > last} @click=${() => n !== p && this.load(false, n)}>${label ?? n}</button>`;
+    return html`${btn(p - 1, "‹", t("Previous page"))}
+      ${shown.map((n, i) => html`${i && n - shown[i - 1] > 1 ? html`<span class="gap">…</span>` : nothing}${btn(n)}`)}
+      ${!this.pages && this.more ? html`<span class="gap">…</span>` : nothing}
+      ${btn(p + 1, "›", t("Next page"))}`;
   }
   pick(field, value) {
     this[field] = value;
@@ -1312,7 +1334,9 @@ class GalleryTab extends LitElement {
     const inLists = this.listsWith(p.file);
     return html`<div class="sheet" role="dialog" aria-label=${p.name}>
       <img class="pix" src=${gifURL(p.file)} alt="">
-      <div><h3>${p.name}</h3><span class="small muted meta"><span>${p.author}</span><span>${p.likes} ♥</span></span>
+      <div><h3>${p.name}</h3><span class="small muted meta"><span>${p.author}</span><span>${p.likes} ♥</span>
+          ${p.category && CATEGORIES.includes(p.category) ? html`<button class="cat" style="height:24px;padding:0 10px" @click=${() => this.pick("category", p.category)}>${categoryName(p.category)}</button>` : nothing}</span>
+        ${p.about ? html`<p class="about">${p.about}</p>` : nothing}
         <div class="acts">
           <button class="btn small save" aria-expanded=${String(!!this.saving)} @click=${() => { this.saving = !this.saving; }}>
             ${icons.bookmark}${inLists.length ? t("Saved in {n}", { n: inLists.length }) : t("Save")}</button>
@@ -1336,7 +1360,7 @@ class GalleryTab extends LitElement {
     const p = this.picked;
     const kept = new Set(this.lists.flatMap((l) => l.items.map((i) => i.file)));
     return html`<div class="grid">${repeat(items, (i) => i.file, (i) => html`<button class="item" aria-pressed=${String(p?.file === i.file)} title=${i.name} aria-label=${i.name}
-      @click=${() => { this.picked = i; this.saving = false; }}><img class="pix" src=${gifURL(i.file)} alt="" loading="lazy">${kept.has(i.file) ? html`<span class="kept" aria-label=${t("Saved")}>${icons.bookmark}</span>` : nothing}</button>`)}</div>`;
+      @click=${() => { this.picked = i; this.saving = false; }}><img class="pix" src=${gifURL(i.file)} alt="" loading="lazy" @error=${(e) => { e.target.parentElement.hidden = true; }}>${kept.has(i.file) ? html`<span class="kept" aria-label=${t("Saved")}>${icons.bookmark}</span>` : nothing}</button>`)}</div>`;
   }
 
   myLists() {
@@ -1388,8 +1412,7 @@ class GalleryTab extends LitElement {
         ${this.problem ? html`<p class="err">${this.problem}</p>` : nothing}
         ${!this.items.length && !this.loading && !this.problem ? html`<p class="empty muted">${this.searched ? t("Nothing found. Try another word, in English it finds more.") : t("Nothing in this category right now.")}</p>` : nothing}
         ${this.grid(this.items)}
-        <div class="more">${this.loading ? html`<span class="muted small">${t("Loading")}</span>`
-          : this.more ? html`<button class="btn" @click=${() => this.load(false)}>${t("Load more")}</button>` : nothing}</div>`}`;
+        <nav class="more" aria-label=${t("Pages")}>${this.pager()}${this.loading ? html`<span class="muted small">${t("Loading")}</span>` : nothing}</nav>`}`;
   }
 }
 customElements.define("ph-gallery", GalleryTab);

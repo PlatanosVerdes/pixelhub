@@ -116,3 +116,12 @@ export function clockFace(style, d = new Date(), colour = "") {
   ctx.putImageData(img, 0, 0);
   return canvas.toDataURL();
 }
+
+export function lightFace(colour) {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = SIZE;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = colour || "#ffffff";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  return canvas.toDataURL();
+}

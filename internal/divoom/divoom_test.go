@@ -3,6 +3,7 @@ package divoom
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"image"
 	"image/color"
 	"os"
@@ -324,5 +325,25 @@ func TestAck(t *testing.T) {
 				t.Errorf("Ack = %x %v, greeting %v", cmd, ok, IsGreeting(tt.frame))
 			}
 		})
+	}
+}
+
+func TestParseState(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ frame, want string }{
+		{"000000ff3b30500001005001bf5af200010000005500", "clock 0 #bf5af2"},
+		{"000000ff3b3050000103500111223302010000005500", "clock 2 #112233"},
+		{"01000044556650010100500111223302010000005500", "light 1 #445566"},
+		{"04000044556650010103500111223302010000005500", "visualizer 3 "},
+	} {
+		payload, _ := hex.DecodeString(tc.frame)
+		frame := append([]byte{0x01, 0x1b, 0x00, 0x04, 0x46, 0x55}, append(payload, 0x00, 0x00, 0x02)...)
+		v, ok := ParseState(frame)
+		if got := fmt.Sprintf("%s %d %s", v.Mode, v.Style, v.Color); !ok || got != tc.want {
+			t.Errorf("%s: %q %v, want %q", tc.frame, got, ok, tc.want)
+		}
+	}
+	if _, ok := ParseState(Brightness(50)); ok {
+		t.Error("a command is not a state report")
 	}
 }

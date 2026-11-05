@@ -30,6 +30,7 @@ const (
 	frameBytes = 16 * 16 * 3
 	maxFile    = 1 << 20
 	formatAnim = 0x09
+	formatPic  = 0x08
 )
 
 var (
@@ -58,6 +59,18 @@ type Item struct {
 	Tags   []string `json:"FileTagArray"`
 	Likes  int      `json:"LikeCnt"`
 	FileID string   `json:"FileId"`
+	About  string   `json:"Content"`
+	Class  int      `json:"Classify"`
+}
+
+// CategoryOf names the category a picture was filed under, or "" when it has no tab of its own.
+func CategoryOf(class int) string {
+	for name, c := range Categories {
+		if c == class && name != "new" && name != "recommended" && name != "top" {
+			return name
+		}
+	}
+	return ""
 }
 
 type Client struct {
@@ -153,12 +166,19 @@ func Encode(frames []*image.RGBA, delay time.Duration) []byte {
 
 // Decode turns a 16x16 gallery file into its frames and the delay between them.
 func Decode(file []byte) ([]*image.RGBA, time.Duration, error) {
-	if len(file) < 4 || file[0] != formatAnim {
+	var delay time.Duration
+	var data []byte
+	switch {
+	case len(file) > 1 && file[0] == formatPic:
+		// Older uploads: one still picture, the cipher text right after the format byte.
+		data = append(data, file[1:]...)
+	case len(file) >= 4 && file[0] == formatAnim:
+		// Header: format, one unused byte, the frame delay in ms (big endian); the cipher text follows.
+		delay = time.Duration(int(file[2])<<8|int(file[3])) * time.Millisecond
+		data = append(data, file[4:]...)
+	default:
 		return nil, 0, ErrFormat
 	}
-	// Header: format, one unused byte, the frame delay in ms (big endian); the cipher text follows.
-	delay := time.Duration(int(file[2])<<8|int(file[3])) * time.Millisecond
-	data := append([]byte{}, file[4:]...)
 	if len(data)%aes.BlockSize != 0 || len(data) < frameBytes {
 		return nil, 0, ErrFormat
 	}

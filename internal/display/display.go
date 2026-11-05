@@ -54,6 +54,8 @@ type Status struct {
 	Connected bool      `json:"connected"`
 	Acks      int       `json:"acks"`
 	LastAck   time.Time `json:"last_ack,omitzero"`
+	// Device is the mode the display last reported, with the colour and style it keeps for it.
+	Device *View `json:"device,omitempty"`
 }
 
 // Display drives a physical screen. Show only records what should be on screen: the driver
