@@ -74,3 +74,42 @@ func TestBridge(t *testing.T) {
 		t.Errorf("the link dropping: %x", got)
 	}
 }
+
+func TestNewClientDropsTheLink(t *testing.T) {
+	t.Parallel()
+	dials := 0
+	links := make(chan *fakeLink, 2)
+	b := New(func([6]byte, byte) (io.ReadWriteCloser, error) {
+		dials++
+		r, w := io.Pipe()
+		l := &fakeLink{Reader: r, w: w, written: make(chan []byte, 8)}
+		links <- l
+		return l, nil
+	}, slog.New(slog.DiscardHandler))
+	b.GreetAfter = time.Hour
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer ln.Close()
+	go b.Serve(ln)
+	connect := []byte{opConnect, 0x01, 0x12, 0x23, 0x45, 0x56, 0x67, 0x01}
+	frame := []byte{0x01, 0x04, 0x00, 0x74, 0x50, 0xc8, 0x00, 0x02}
+
+	first, _ := net.Dial("tcp", ln.Addr().String())
+	first.Write(connect)
+	<-links
+	first.Close()
+
+	second, _ := net.Dial("tcp", ln.Addr().String())
+	defer second.Close()
+	second.Write(frame)
+	second.SetReadDeadline(time.Now().Add(2 * time.Second))
+	got := make([]byte, 1)
+	if _, err := io.ReadFull(second, got); err != nil || got[0] != linkDown {
+		t.Fatalf("a new client finds the old link dropped: %x %v", got, err)
+	}
+	second.Write(connect)
+	select {
+	case <-links:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the new client could not connect again")
+	}
+}

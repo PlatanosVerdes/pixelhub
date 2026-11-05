@@ -67,6 +67,12 @@ func (b *Bridge) accept(c net.Conn) {
 	if b.cl != nil {
 		b.cl.Close()
 	}
+	// A client comes back after the display stopped answering; a link kept open can look up while the
+	// display no longer listens, so every client starts from a fresh one.
+	if b.lk != nil {
+		b.Log.Info("new client, dropping the old link")
+		b.close()
+	}
 	b.cl = c
 	b.Log.Info("client connected", "from", c.RemoteAddr())
 	go b.readClient(c)
