@@ -38,6 +38,8 @@ type State struct {
 type Music struct {
 	Enabled bool         `json:"enabled"`
 	View    display.View `json:"view,omitzero"`
+	// Devices, when set, limits the music layer to what plays on these devices.
+	Devices []string `json:"devices,omitempty"`
 }
 
 type Location struct {

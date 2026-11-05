@@ -1407,6 +1407,7 @@ class SpotifyCard extends LitElement {
     .now { display: grid; gap: 2px; padding: 12px; border-radius: 12px; background: var(--chip); }
     .now b { font-weight: 600; }
     .toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+    .devices { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 4px 0 6px; }
     input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
   `];
   connectedCallback() { super.connectedCallback(); this.load(); this.timer = setInterval(() => { if (!document.hidden) this.load(); }, 5000); }
@@ -1420,6 +1421,7 @@ class SpotifyCard extends LitElement {
   async music(patch) {
     const next = { ...(this.state?.music ?? { enabled: false }), ...patch };
     if (!next.view) delete next.view;
+    if (!next.devices?.length) delete next.devices;
     try { saved(this, await api("PUT", "settings", { music: next })); send(this, "refresh"); } catch (e) { toast(this, e.message); }
   }
   callback() {
@@ -1454,6 +1456,10 @@ class SpotifyCard extends LitElement {
           <label class="toggle"><input type="checkbox" .checked=${!!m.enabled} @change=${(e) => this.music({ enabled: e.target.checked })}>${t("Show on the display while it plays")}</label>
           <div><span class="label">${t("What to show")}</span>${segmented([["cover", t("Album cover")], ["visualizer", t("Music")], ["animations", t("My animations")]], show,
             (v) => this.music({ view: v === "cover" ? undefined : { mode: v } }))}</div>
+          ${i.devices?.length ? html`<div><span class="label">${t("Only when it plays on")}</span>
+            <div class="devices">${i.devices.map((d) => html`<label class="toggle"><input type="checkbox" .checked=${(m.devices ?? []).includes(d)}
+              @change=${(e) => this.music({ devices: e.target.checked ? [...(m.devices ?? []), d] : (m.devices ?? []).filter((x) => x !== d) })}>${d}</label>`)}</div>
+            <p class="small muted">${(m.devices ?? []).length ? t("Music on any other device is left alone.") : t("None ticked: music on any device shows, also away from home.")}</p></div>` : nothing}
           <p class="small muted">${t("Alerts and a mode picked by hand stay on top.")}</p>
           ${i.error ? html`<p class="err">${i.error}</p>` : nothing}
           <div class="row"><button class="btn small" ?disabled=${this.busy} @click=${() => this.call("DELETE")}>${t("Disconnect")}</button></div>`}

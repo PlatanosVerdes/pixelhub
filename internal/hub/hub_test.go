@@ -196,8 +196,8 @@ func TestModeLayer(t *testing.T) {
 
 type fakeMusic struct{ playing bool }
 
-func (m fakeMusic) Content() (display.Content, bool) {
-	return display.Content{Kind: display.Picture, Name: "♪ song"}, m.playing
+func (m fakeMusic) Content() (display.Content, string, bool) {
+	return display.Content{Kind: display.Picture, Name: "♪ song"}, "Living room", m.playing
 }
 
 func TestMusicLayer(t *testing.T) {
@@ -215,6 +215,8 @@ func TestMusicLayer(t *testing.T) {
 		{"nothing playing", state.Music{Enabled: true}, false, false, LayerScene, "lunch"},
 		{"switched off", state.Music{}, true, false, LayerScene, "lunch"},
 		{"a picked mode wins", state.Music{Enabled: true}, true, true, LayerMode, "animations"},
+		{"one of the picked devices", state.Music{Enabled: true, Devices: []string{"Living room"}}, true, false, LayerMusic, "♪ song"},
+		{"another device", state.Music{Enabled: true, Devices: []string{"Office"}}, true, false, LayerScene, "lunch"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

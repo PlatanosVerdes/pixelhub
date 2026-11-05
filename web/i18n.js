@@ -285,4 +285,7 @@ const es = {
   "Create list": "Crear lista",
   "No lists yet. Create one here, or open a drawing and tap Save.": "Todavía no tienes listas. Crea una aquí, o abre un dibujo y pulsa Guardar.",
   "My lists": "Mis listas",
+  "Only when it plays on": "Solo cuando suene en",
+  "Music on any other device is left alone.": "Lo que suene en otros dispositivos no se muestra.",
+  "None ticked: music on any device shows, also away from home.": "Sin marcar ninguno se muestra lo que suene en cualquier dispositivo, también fuera de casa.",
 };

@@ -16,10 +16,12 @@ import (
 	_ "image/png"
 	"io"
 	"log/slog"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -58,7 +60,9 @@ type Status struct {
 	Connected  bool     `json:"connected"`
 	User       string   `json:"user,omitempty"`
 	Now        *Playing `json:"now,omitempty"`
-	Error      string   `json:"error,omitempty"`
+	// Devices are the account's devices seen so far, to pick which ones show on the display.
+	Devices []string `json:"devices"`
+	Error   string   `json:"error,omitempty"`
 }
 
 type saved struct {
@@ -86,6 +90,8 @@ type Account struct {
 	pending map[string]login
 	now     Playing
 	lastErr string
+	devices map[string]bool
+	listed  time.Time
 	wake    chan struct{}
 }
 
@@ -112,7 +118,8 @@ func Open(path string, log *slog.Logger) (*Account, error) {
 func (a *Account) Status() Status {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	s := Status{Configured: a.saved.ClientID != "", ClientID: a.saved.ClientID, Connected: a.saved.Refresh != "", User: a.saved.User, Error: a.lastErr}
+	s := Status{Configured: a.saved.ClientID != "", ClientID: a.saved.ClientID, Connected: a.saved.Refresh != "", User: a.saved.User, Error: a.lastErr,
+		Devices: slices.Sorted(maps.Keys(a.devices))}
 	if a.now.Track != "" {
 		now := a.now
 		s.Now = &now
@@ -263,6 +270,7 @@ func (a *Account) poll(ctx context.Context) time.Duration {
 			} `json:"album"`
 		} `json:"item"`
 	}
+	a.listDevices(ctx)
 	err := a.get(ctx, "/me/player", &p)
 	var limited *rateLimited
 	if errors.As(err, &limited) {
@@ -305,11 +313,50 @@ func (a *Account) poll(ctx context.Context) time.Duration {
 			next.Cover, next.coverAt = cover, smallest
 		}
 	}
+	a.seen(next.Device)
 	if next.Track != a.now.Track || next.Playing != a.now.Playing {
 		a.log.Info("spotify", "playing", next.Playing, "track", next.Track, "artists", next.Artists, "device", next.Device)
 	}
 	a.now = next
 	return 0
+}
+
+// listDevices asks for the account's devices at most once a minute, so they can be picked before
+// they ever play.
+func (a *Account) listDevices(ctx context.Context) {
+	a.mu.Lock()
+	due := time.Since(a.listed) > time.Minute
+	if due {
+		a.listed = time.Now()
+	}
+	a.mu.Unlock()
+	if !due {
+		return
+	}
+	var d struct {
+		Devices []struct {
+			Name string `json:"name"`
+		} `json:"devices"`
+	}
+	if err := a.get(ctx, "/me/player/devices", &d); err != nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, dev := range d.Devices {
+		a.seen(dev.Name)
+	}
+}
+
+// seen needs a.mu held.
+func (a *Account) seen(device string) {
+	if device == "" {
+		return
+	}
+	if a.devices == nil {
+		a.devices = map[string]bool{}
+	}
+	a.devices[device] = true
 }
 
 func (a *Account) cover(ctx context.Context, u string) (image.Image, error) {
@@ -380,13 +427,13 @@ func shrink(src image.Image, size int) *image.NRGBA {
 	return dst
 }
 
-// Content is the cover of what plays now, for the display.
-func (a *Account) Content() (display.Content, bool) {
+// Content is the cover of what plays now, for the display, and the device it plays on.
+func (a *Account) Content() (display.Content, string, bool) {
 	p, ok := a.Now()
 	if !ok || p.Cover == nil {
-		return display.Content{}, false
+		return display.Content{}, p.Device, false
 	}
-	return display.Content{Kind: display.Picture, Name: "♪ " + p.Track, Frames: []display.Frame{{Image: p.Cover}}}, true
+	return display.Content{Kind: display.Picture, Name: "♪ " + p.Track, Frames: []display.Frame{{Image: p.Cover}}}, p.Device, true
 }
 
 type rateLimited struct{ wait time.Duration }

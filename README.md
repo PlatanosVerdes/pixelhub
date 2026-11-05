@@ -163,7 +163,9 @@ curl -X DELETE localhost:8000/api/mode
 ### Spotify
 
 pixelhub can follow what a Spotify account plays on any of its devices and show the album cover, or
-a display mode, while it plays (`"music": {"enabled": true, "view": {...}}` in `PUT /api/settings`).
+a display mode, while it plays (`"music": {"enabled": true, "view": {...}, "devices": [...]}` in `PUT /api/settings`;
+with `devices`, only what plays on those Spotify devices shows, so music played away from home does
+not reach the display at home; `GET /api/spotify` lists the devices seen).
 It sits under alerts and a picked mode, over scenes and ambient. Create an app at
 developer.spotify.com/dashboard with the Web API, add `<pixelhub URL>/api/spotify/callback` as a
 redirect URI (Spotify takes `http://127.0.0.1:<port>` but not `localhost`, and otherwise wants

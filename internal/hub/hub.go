@@ -46,9 +46,9 @@ type Pictures interface {
 	DeleteChannel(channel string) error
 }
 
-// Music is what a linked music account plays now, if anything.
+// Music is what a linked music account plays now, if anything, and on which device.
 type Music interface {
-	Content() (display.Content, bool)
+	Content() (c display.Content, device string, playing bool)
 }
 
 type Alert struct {
@@ -512,7 +512,8 @@ func (h *Hub) aboveAmbient(now time.Time, ch channel, level int) (string, displa
 		return LayerMode, h.st.Mode.Content().WithBrightness(level), true
 	}
 	if h.st.Music.Enabled && h.Music != nil {
-		if c, ok := h.Music.Content(); ok {
+		c, device, ok := h.Music.Content()
+		if ok && (len(h.st.Music.Devices) == 0 || slices.Contains(h.st.Music.Devices, device)) {
 			if !h.st.Music.View.IsZero() {
 				c = h.st.Music.View.Content()
 			}

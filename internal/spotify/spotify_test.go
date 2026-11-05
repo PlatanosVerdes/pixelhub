@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -44,6 +45,9 @@ func newFake(t *testing.T) *fakeSpotify {
 		_ = json.NewEncoder(w).Encode(map[string]string{"display_name": "Someone", "id": "someone"})
 	})
 	mux.HandleFunc("GET /v1/me/player", f.player)
+	mux.HandleFunc("GET /v1/me/player/devices", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"devices":[{"name":"Phone"}]}`)
+	})
 	mux.HandleFunc("GET /cover.png", func(w http.ResponseWriter, r *http.Request) {
 		img := image.NewNRGBA(image.Rect(0, 0, 64, 64))
 		for i := range img.Pix {
@@ -153,9 +157,12 @@ func TestSignInFollowsPlayback(t *testing.T) {
 	if !ok || p.Track != "Song" || p.Artists != "A, B" || p.Device != "Kitchen" {
 		t.Fatalf("now %+v, %v", p, ok)
 	}
-	c, ok := a.Content()
-	if !ok || c.Name != "♪ Song" || c.Frames[0].Image.Bounds().Dx() != coverSize {
-		t.Fatalf("content %+v, %v", c, ok)
+	c, device, ok := a.Content()
+	if !ok || c.Name != "♪ Song" || device != "Kitchen" || c.Frames[0].Image.Bounds().Dx() != coverSize {
+		t.Fatalf("content %+v on %q, %v", c, device, ok)
+	}
+	if s := a.Status(); !slices.Equal(s.Devices, []string{"Kitchen", "Phone"}) {
+		t.Errorf("devices %v, want the listed and the playing ones", s.Devices)
 	}
 	if got := color.NRGBAModel.Convert(c.Frames[0].Image.At(3, 3)).(color.NRGBA); got.R < 200 || got.G > 10 || got.B > 10 {
 		t.Errorf("cover pixel %v, want the cover's red, made purer", got)
@@ -169,7 +176,7 @@ func TestPausedShowsNothing(t *testing.T) {
 	a := open(t, f)
 	signIn(t, a, f)
 	a.poll(context.Background())
-	if _, ok := a.Content(); ok {
+	if _, _, ok := a.Content(); ok {
 		t.Error("a paused track should not show")
 	}
 	if s := a.Status(); s.Now == nil || s.Now.Playing {
