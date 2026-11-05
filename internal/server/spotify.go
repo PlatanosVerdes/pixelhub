@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/PlatanosVerdes/pixelhub/internal/display"
 	"github.com/PlatanosVerdes/pixelhub/internal/spotify"
 )
 
 type Spotify interface {
+	Content() (display.Content, string, bool)
 	Status() spotify.Status
 	SetClientID(id string) error
 	LoginURL(redirect string) (string, error)
@@ -41,6 +43,16 @@ func (s *Server) spotifyRoutes(mux *http.ServeMux) {
 			return
 		}
 		writeJSON(w, http.StatusOK, s.Spotify.Status())
+	})
+	// The cover as the display shows it, also while paused; 404 when there is none.
+	mux.HandleFunc("GET /api/spotify/cover.png", func(w http.ResponseWriter, _ *http.Request) {
+		c, _, _ := s.Spotify.Content()
+		if len(c.Frames) == 0 {
+			writeError(w, http.StatusNotFound, errors.New("no cover"))
+			return
+		}
+		w.Header().Set("Cache-Control", "no-cache")
+		writePNG(w, c.Frames[0].Image)
 	})
 	mux.HandleFunc("GET /api/spotify/login", func(w http.ResponseWriter, r *http.Request) {
 		to, err := s.Spotify.LoginURL(callbackURL(r))

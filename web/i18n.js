@@ -288,4 +288,13 @@ const es = {
   "Only when it plays on": "Solo cuando suene en",
   "Music on any other device is left alone.": "Lo que suene en otros dispositivos no se muestra.",
   "None ticked: music on any device shows, also away from home.": "Sin marcar ninguno se muestra lo que suene en cualquier dispositivo, también fuera de casa.",
+  "Now playing": "Ahora suena",
+  "On the display now": "En la pantalla ahora",
+  "Not shown: showing music on the display is off": "No se muestra: mostrar la música está desactivado",
+  "Not shown: {device} is not one of the picked devices": "No se muestra: {device} no es uno de los dispositivos marcados",
+  "Not shown: an alert or a mode picked by hand is on top": "No se muestra: hay un aviso o un modo elegido a mano por encima",
+  "Not shown yet": "Todavía no se muestra",
+  "Connect Spotify below to see what plays.": "Conecta Spotify aquí debajo para ver qué suena.",
+  "The Evo's visualiser": "Visualizador del Evo",
+  "Back to automatic": "Volver a automático",
 };

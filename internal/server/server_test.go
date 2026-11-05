@@ -523,12 +523,14 @@ func TestGallery(t *testing.T) {
 		for range 200 {
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, httptest.NewRequest("GET", "/api/gallery/search?q="+q, nil))
-			if strings.Contains(rec.Body.String(), `"indexed":48,`) {
+			if strings.Contains(rec.Body.String(), `"indexed":160,`) {
 				return rec.Body.String()
 			}
 			time.Sleep(5 * time.Millisecond)
 		}
-		t.Fatal("the gallery index never finished")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest("GET", "/api/gallery/search?q=x", nil))
+		t.Fatalf("the gallery index never finished: %s", rec.Body)
 		return ""
 	}
 	for q, want := range map[string]string{"corazon": `"name":"Corazón"`, "LOVE": `"name":"Corazón"`, "cat+someone": `"name":"cat"`, "dog": `"items":[]`, "ove": `"items":[]`, "mariobros": `"name":"Super Mario Bros"`, "bros": `"name":"Super Mario Bros"`} {

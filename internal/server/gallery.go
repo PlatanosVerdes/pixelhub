@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	searchPages   = 3
+	searchPages   = 10
 	crawlPace     = 3 * time.Second
 	reindexEvery  = 6 * time.Hour
 	listFresh     = 15 * time.Minute
@@ -190,6 +190,15 @@ func (s *Server) crawl(ctx context.Context) {
 				}
 				s.index.mu.Unlock()
 				time.Sleep(pace)
+				if err == nil && len(items) == 0 {
+					// The category ran out: count its remaining pages as read.
+					s.index.mu.Lock()
+					if !rebuilding {
+						s.index.done += searchPages - page
+					}
+					s.index.mu.Unlock()
+					break
+				}
 			}
 		}
 		s.index.mu.Lock()

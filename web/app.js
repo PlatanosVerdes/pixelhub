@@ -1469,6 +1469,82 @@ class SpotifyCard extends LitElement {
 }
 customElements.define("ph-spotify", SpotifyCard);
 
+
+// Everything about music in one place: what plays, how it shows, the account, the display's own visualiser.
+class MusicTab extends LitElement {
+  static properties = { state: { attribute: false }, status: { attribute: false }, styles: { attribute: false }, info: { state: true }, busy: { state: true } };
+  static styles = [base, css`
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+    @media (min-width: 900px) { .layout { grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); align-items: start; } .side { position: sticky; top: 88px; } }
+    .side, .main { display: grid; gap: 18px; min-width: 0; }
+    .playing { display: grid; gap: 12px; justify-items: center; text-align: center; }
+    ph-led { width: min(100%, 300px); }
+    .playing b { font-size: 17px; font-weight: 600; }
+    .playing .who { color: var(--muted); font-size: 14px; }
+    .state { font-size: 13px; padding: 6px 12px; border-radius: 999px; background: var(--chip); }
+    .state.on { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+    .choices { display: flex; flex-wrap: wrap; gap: 6px; }
+    .choice { border: 1px solid var(--line); background: none; border-radius: 999px; height: 36px; width: 44px; font-size: 14px; color: var(--muted); cursor: pointer; }
+    .choice[aria-pressed=true] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  `];
+  connectedCallback() { super.connectedCallback(); this.load(); this.timer = setInterval(() => { if (!document.hidden) this.load(); }, 5000); }
+  disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.timer); }
+  async load() { try { this.info = await api("GET", "spotify"); } catch { /* the status poll shows outages */ } }
+
+  // Why the music shows on the display or not, in the user's terms.
+  why() {
+    const i = this.info, m = this.state?.music ?? {}, s = this.status;
+    if (s?.layer === "music") return [true, t("On the display now")];
+    if (!i?.now?.playing) return [false, t("Paused")];
+    if (!m.enabled) return [false, t("Not shown: showing music on the display is off")];
+    if (m.devices?.length && !m.devices.includes(i.now.device)) return [false, t("Not shown: {device} is not one of the picked devices", { device: i.now.device })];
+    if (s?.layer === "alert" || s?.layer === "mode") return [false, t("Not shown: an alert or a mode picked by hand is on top")];
+    return [false, t("Not shown yet")];
+  }
+
+  async visualizer(style) {
+    this.busy = true;
+    try { saved(this, await api("PUT", "mode", { mode: "visualizer", ...(style ? { style } : {}) })); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+  async automatic() {
+    this.busy = true;
+    try { saved(this, await api("DELETE", "mode")); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+
+  render() {
+    const now = this.info?.now;
+    const mode = this.state?.mode;
+    const vis = mode?.mode === "visualizer" ? (mode.style ?? 0) : -1;
+    const [on, why] = this.why();
+    return html`<div class="layout">
+      <div class="side">
+        <section class="card playing" aria-labelledby="np-h">
+          <div class="head" style="width:100%"><h2 id="np-h">${t("Now playing")}</h2></div>
+          ${now ? html`
+            <ph-led .src=${`api/spotify/cover.png?t=${encodeURIComponent(now.track)}`} .label=${now.track}></ph-led>
+            <div><b>${now.track}</b><div class="who">${now.artists}</div><div class="small muted">${now.device}</div></div>
+            <span class="state ${on ? "on" : ""}">${why}</span>`
+          : html`<p class="muted">${this.info?.connected ? t("Nothing is playing.") : t("Connect Spotify below to see what plays.")}</p>`}
+        </section>
+      </div>
+      <div class="main">
+        <ph-spotify .state=${this.state}></ph-spotify>
+        <section class="card" aria-labelledby="vz-h">
+          <div class="head"><h2 id="vz-h">${t("The Evo's visualiser")}</h2></div>
+          <div class="choices" role="group" aria-label=${t("Visualiser")}>${Array.from({ length: this.styles?.visualizer ?? 12 }, (_, k) =>
+            html`<button class="choice" aria-pressed=${String(vis === k)} ?disabled=${this.busy} @click=${() => this.visualizer(k)}>${k + 1}</button>`)}</div>
+          <p class="small muted">${t("It follows what the Evo plays as a speaker, not the room's sound.")}</p>
+          ${vis >= 0 ? html`<div class="row"><button class="btn small" ?disabled=${this.busy} @click=${() => this.automatic()}>${t("Back to automatic")}</button></div>` : nothing}
+        </section>
+      </div>
+    </div>`;
+  }
+}
+customElements.define("ph-music", MusicTab);
+
 class ConnectionCard extends LitElement {
   static properties = { status: { attribute: false }, busy: { state: true } };
   static styles = [base, css`
@@ -1531,6 +1607,7 @@ class Toasts {
 const TABS = [
   ["display", "Display", icon(svg`<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 8.5h.01M12 8.5h.01M15.5 8.5h.01M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 15.5h.01M12 15.5h.01M15.5 15.5h.01" stroke-width="2.6"/>`)],
   ["gallery", "Gallery", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="m14 20 2.5-3.5 2 2.5 1.5-2"/>`)],
+  ["music", "Music", icon(svg`<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>`)],
   ["profiles", "Profiles", icon(svg`<path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="16" r="3"/>`)],
   ["schedule", "Schedule", icon(svg`<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>`)],
   ["settings", "Settings", icon(svg`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>`)],
@@ -1554,7 +1631,7 @@ class PixelhubApp extends LitElement {
     .bottom { display: none; }
     @media (max-width: 759px) {
       .top { display: none; }
-      .bottom { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
+      .bottom { display: grid; grid-template-columns: repeat(6, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
         padding: 6px 8px max(8px, env(safe-area-inset-bottom, 0px)); background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--line); }
       .bottom button { flex-direction: column; gap: 3px; font-size: 11px; padding: 6px 2px; }
       .bottom button[aria-current=page] { background: none; }
@@ -1657,10 +1734,11 @@ class PixelhubApp extends LitElement {
   page(view) {
     switch (this.tab) {
       case "gallery": return html`<ph-gallery .state=${view}></ph-gallery>`;
+      case "music": return html`<ph-music .state=${view} .status=${this.status} .styles=${this.modes}></ph-music>`;
       case "profiles": return html`<div class="tab"><ph-switch .state=${view} .status=${this.status}></ph-switch>
         <ph-channels .state=${view} .status=${this.status} .sprites=${this.sprites}></ph-channels></div>`;
       case "schedule": return html`<div class="tab">${view ? html`<ph-schedule .base=${view}></ph-schedule>` : nothing}</div>`;
-      case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<div class="tab"><ph-spotify .state=${view}></ph-spotify><ph-connection .status=${this.status}></ph-connection></div></div>`;
+      case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<ph-connection .status=${this.status}></ph-connection></div>`;
       default: return html`<ph-display .status=${this.status} .state=${view} .sprites=${this.sprites} .styles=${this.modes} ?offline=${this.offline}></ph-display>`;
     }
   }

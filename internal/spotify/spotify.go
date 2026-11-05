@@ -427,13 +427,13 @@ func shrink(src image.Image, size int) *image.NRGBA {
 	return dst
 }
 
-// Content is the cover of what plays now, for the display, and the device it plays on.
+// Content is the cover of the current track and its device; playing is false while paused.
 func (a *Account) Content() (display.Content, string, bool) {
-	p, ok := a.Now()
-	if !ok || p.Cover == nil {
+	p, playing := a.Now()
+	if p.Cover == nil {
 		return display.Content{}, p.Device, false
 	}
-	return display.Content{Kind: display.Picture, Name: "♪ " + p.Track, Frames: []display.Frame{{Image: p.Cover}}}, p.Device, true
+	return display.Content{Kind: display.Picture, Name: "♪ " + p.Track, Frames: []display.Frame{{Image: p.Cover}}}, p.Device, playing
 }
 
 type rateLimited struct{ wait time.Duration }
