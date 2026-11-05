@@ -495,7 +495,7 @@ class Modes extends LitElement {
       </div>
       ${active && !MODES.includes(active) ? html`<div class="panel"><p>${t("{app} is on. Change it in Apps or Music.", { app: modeName(active) })}</p></div>`
         : active && active !== "clock" ? html`<div class="panel">${this.options(active)}</div>`
-        : html`<div class="panel"><p class="small muted">${active ? t("Only the clock, until you pick something else.") : t("Pictures and what you scheduled, with this clock between them.")}</p>
+        : html`<div class="panel">${active ? html`<p class="small muted">${t("Only the clock, until you pick something else.")}</p>` : nothing}
           ${this.options("clock", { mode: "clock", color: "#ff1e28", ...this.clock }, (p) => this.setClock(p))}</div>`}`;
   }
 }
@@ -523,115 +523,102 @@ const daysText = (days) => {
 };
 const STEPS = [["30s", "30 s"], ["1m", "1 min"], ["2m", "2 min"], ["5m", "5 min"]];
 
-// What automatic shows between clocks: one of the user's lists, in turn, or only the clock.
-class Playlist extends LitElement {
-  static properties = { state: { attribute: false }, lists: { attribute: false }, busy: { state: true } };
+const RULE_KINDS = () => [["clock", t("Only the clock")], ["light", t("Light")], ["animations", t("My animations")]];
+
+// What automatic shows: one usual choice, and exceptions at set times. Read as a sentence.
+class Automatic extends LitElement {
+  static properties = { state: { attribute: false }, lists: { attribute: false }, draft: { state: true }, busy: { state: true } };
   static styles = [base, css`
+    h3 { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
+    .block + .block { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
     .opts { display: flex; flex-wrap: wrap; gap: 6px; }
-    .opt { border: 1px solid var(--line); background: none; border-radius: 10px; min-height: 36px; padding: 0 14px; font-size: 14px; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+    .opt { border: 1px solid var(--line); background: none; border-radius: 10px; min-height: 38px; padding: 0 14px; font-size: 14px; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
     .opt small { font-size: 12px; opacity: .8; }
     .opt:hover { color: var(--ink); }
     .opt[aria-pressed=true] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
-    .rows { display: grid; gap: 14px; margin-top: 16px; }
-    .row { display: grid; grid-template-columns: 110px minmax(0, 1fr); align-items: center; gap: 10px; }
+    .rows { display: grid; gap: 12px; margin-top: 14px; }
+    .row { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: center; gap: 10px; }
     .row > span { font-size: 14px; color: var(--muted); }
-    p.note { margin: 12px 0 0; }
+    .hint { margin: 10px 0 0; }
+    ul { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+    li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--case); font-size: 14px; }
+    li span { color: var(--muted); }
+    form { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--accent); border-radius: 12px; }
+    .line { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 14px; color: var(--muted); }
+    input[type=time], select { height: 36px; }
   `];
-  async set(ambient) {
+  get channel() { return defaultChannel(this.state); }
+  async save(patch, done) {
     this.busy = true;
-    await saveChannel(this, this.state, { ambient: { ...defaultChannel(this.state).ambient, ...ambient } });
+    const ok = await saveChannel(this, this.state, patch);
     this.busy = false;
-  }
-  render() {
-    const ch = defaultChannel(this.state);
-    if (!ch) return nothing;
-    const a = ch.ambient, playing = a.list && seconds(a.pictures) > 0 ? a.list : "";
-    const pick = (v) => seconds(v);
-    const list = this.lists?.find((l) => l.name.toLowerCase() === playing.toLowerCase());
-    return html`<section class="card" aria-labelledby="pl-h">
-      <div class="head"><h2 id="pl-h">${t("In automatic")}</h2></div>
-      <div class="opts" role="group" aria-label=${t("What shows between clocks")}>
-        <button class="opt" aria-pressed=${String(!playing)} ?disabled=${this.busy} @click=${() => this.set({ pictures: "0s", list: "", clock: a.clock && seconds(a.clock) ? a.clock : "1m" })}>${t("Only the clock")}</button>
-        ${(this.lists ?? []).map((l) => html`<button class="opt" aria-pressed=${String(l.name === list?.name)} ?disabled=${this.busy}
-          @click=${() => this.set({ list: l.name, pictures: seconds(a.pictures) ? a.pictures : "1m" })}>${l.name}<small>${l.items.length}</small></button>`)}
-      </div>
-      ${!this.lists?.length ? html`<p class="small muted note">${t("Save drawings into a list in the Gallery to show them here.")}</p>` : nothing}
-      ${playing ? html`
-        ${list && !list.items.length ? html`<p class="small muted note">${t("The list {name} is empty, so only the clock shows.", { name: list.name })}</p>` : nothing}
-        <div class="rows">
-          <div class="row"><span>${t("Each drawing")}</span>${segmented(STEPS, STEPS.find(([v]) => pick(v) === pick(a.pictures))?.[0], (v) => this.set({ pictures: v }))}</div>
-          <div class="row"><span>${t("Clock between")}</span>${segmented([["0s", t("No")], ...STEPS], [["0s"], ...STEPS].find(([v]) => pick(v) === pick(a.clock))?.[0], (v) => this.set({ clock: v }))}</div>
-        </div>` : nothing}
-    </section>`;
-  }
-}
-customElements.define("ph-playlist", Playlist);
-
-const RULE_KINDS = () => [["clock", t("Only the clock")], ["light", t("Light")], ["animations", t("My animations")]];
-
-// Simple rules: on these days, between these hours, show this instead of the usual.
-class Rules extends LitElement {
-  static properties = { state: { attribute: false }, lists: { attribute: false }, draft: { state: true }, busy: { state: true } };
-  static styles = [base, css`
-    ul { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 8px; }
-    li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--case); }
-    li b { font-weight: 600; display: block; }
-    li span { font-size: 13px; color: var(--muted); }
-    form { display: grid; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
-    .line { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-    .line label { font-size: 14px; color: var(--muted); display: inline-flex; gap: 8px; align-items: center; }
-    input[type=time] { height: 36px; }
-    select { height: 36px; max-width: 100%; }
-  `];
-  constructor() { super(); this.draft = { what: "", days: "mon-fri", from: "14:00", to: "15:00" }; }
-  get scenes() { return defaultChannel(this.state)?.scenes ?? []; }
-  whatOf(s) {
-    if (s.list) return t("List {name}", { name: s.list });
-    if (s.view?.mode) return RULE_KINDS().find(([k]) => k === s.view.mode)?.[1] ?? modeName(s.view.mode);
-    return s.sprite ? t("Drawing {name}", { name: s.sprite }) : t("Only the clock");
-  }
-  async save(scenes) {
-    this.busy = true;
-    const ok = await saveChannel(this, this.state, { scenes });
-    this.busy = false;
+    if (ok && done) toast(this, done);
     return ok;
+  }
+  setAmbient(a) { return this.save({ ambient: { ...this.channel.ambient, ...a } }); }
+  whatOf(s) {
+    if (s.list) return s.list;
+    if (s.view?.mode) return RULE_KINDS().find(([k]) => k === s.view.mode)?.[1] ?? modeName(s.view.mode);
+    return s.sprite || t("Only the clock");
   }
   async add(e) {
     e.preventDefault();
+    const d = this.draft;
+    const scene = { name: `${d.what.replace(/^list:/, "")} ${d.from}`, days: d.days, from: d.from, to: d.to };
+    if (d.what.startsWith("list:")) scene.list = d.what.slice(5);
+    else scene.view = d.what === "light" ? { mode: "light", color: "#ffb547" } : { mode: d.what };
+    if (await this.save({ scenes: [...this.channel.scenes, scene] }, t("Exception added"))) this.draft = null;
+  }
+  form() {
     const d = this.draft, lists = this.lists ?? [];
-    const what = d.what || (lists[0] ? `list:${lists[0].name}` : "clock");
-    const scene = { name: `${what.replace(/^list:/, "")} ${d.from}`, days: d.days, from: d.from, to: d.to };
-    if (what.startsWith("list:")) scene.list = what.slice(5);
-    else if (what === "light") scene.view = { mode: "light", color: "#ffb547" };
-    else if (what === "animations") scene.view = { mode: "animations" };
-    else scene.view = { mode: "clock" };
-    if (await this.save([...this.scenes, scene])) toast(this, t("Scheduled"));
+    return html`<form @submit=${(e) => this.add(e)}>
+      <div class="line"><ph-days .value=${d.days} @change=${(e) => { this.draft = { ...d, days: e.detail }; }}></ph-days></div>
+      <div class="line">${t("from")} <input type="time" aria-label=${t("from")} .value=${d.from} @change=${(e) => { this.draft = { ...d, from: e.target.value }; }}>
+        ${t("to")} <input type="time" aria-label=${t("to")} .value=${d.to} @change=${(e) => { this.draft = { ...d, to: e.target.value }; }}>
+        ${t("show")} <select aria-label=${t("What to show")} @change=${(e) => { this.draft = { ...d, what: e.target.value }; }}>
+          ${lists.map((l) => html`<option value=${`list:${l.name}`} ?selected=${d.what === `list:${l.name}`}>${l.name}</option>`)}
+          ${RULE_KINDS().map(([k, label]) => html`<option value=${k} ?selected=${d.what === k}>${label}</option>`)}</select></div>
+      <div class="line"><button class="btn primary" type="submit" ?disabled=${this.busy || d.from === d.to}>${t("Save")}</button>
+        <button class="btn" type="button" @click=${() => { this.draft = null; }}>${t("Cancel")}</button></div>
+    </form>`;
   }
   render() {
-    const d = this.draft, lists = this.lists ?? [];
-    return html`<section class="card" aria-labelledby="ru-h">
-      <div class="head"><h2 id="ru-h">${t("Schedule")}</h2></div>
-      <p class="small muted" style="margin:0 0 12px">${t("At these times the display shows this instead of the usual. Alerts, apps and music still go on top.")}</p>
-      ${this.scenes.length ? html`<ul>${this.scenes.map((s, i) => html`<li>
-          <div><b>${this.whatOf(s)}</b><span>${daysText(s.days)}, ${s.from}–${s.to}</span></div>
-          <button class="icon trash" aria-label=${t("Remove")} ?disabled=${this.busy} @click=${() => this.save(this.scenes.filter((_, k) => k !== i))}>${icons.trash}</button>
-        </li>`)}</ul>` : nothing}
-      <form @submit=${(e) => this.add(e)}>
-        <div class="line">
-          <select aria-label=${t("What to show")} @change=${(e) => { this.draft = { ...d, what: e.target.value }; }}>
-            ${lists.map((l) => html`<option value=${`list:${l.name}`} ?selected=${d.what === `list:${l.name}`}>${t("List {name}", { name: l.name })}</option>`)}
-            ${RULE_KINDS().map(([k, label]) => html`<option value=${k} ?selected=${d.what === k}>${label}</option>`)}
-          </select>
-          <label>${t("from")} <input type="time" .value=${d.from} @change=${(e) => { this.draft = { ...d, from: e.target.value }; }}></label>
-          <label>${t("to")} <input type="time" .value=${d.to} @change=${(e) => { this.draft = { ...d, to: e.target.value }; }}></label>
+    const ch = this.channel;
+    if (!ch) return nothing;
+    const a = ch.ambient, lists = this.lists ?? [];
+    const playing = a.list && seconds(a.pictures) > 0 ? a.list.toLowerCase() : "";
+    const list = lists.find((l) => l.name.toLowerCase() === playing);
+    const step = (v, opts) => opts.find(([o]) => seconds(o) === seconds(v))?.[0];
+    return html`<section class="card" aria-labelledby="au-h">
+      <div class="head"><h2 id="au-h">${t("In automatic")}</h2></div>
+      <div class="block">
+        <h3>${t("Usually it shows")}</h3>
+        <div class="opts" role="group">
+          <button class="opt" aria-pressed=${String(!playing)} ?disabled=${this.busy} @click=${() => this.setAmbient({ pictures: "0s", list: "", clock: seconds(a.clock) ? a.clock : "1m" })}>${t("Only the clock")}</button>
+          ${lists.map((l) => html`<button class="opt" aria-pressed=${String(l.name.toLowerCase() === playing)} ?disabled=${this.busy}
+            @click=${() => this.setAmbient({ list: l.name, pictures: seconds(a.pictures) ? a.pictures : "1m" })}>${l.name}<small>${l.items.length}</small></button>`)}
         </div>
-        <div class="line"><ph-days .value=${d.days} @change=${(e) => { this.draft = { ...d, days: e.detail }; }}></ph-days>
-          <button class="btn primary" type="submit" ?disabled=${this.busy || d.from === d.to}>${t("Add")}</button></div>
-      </form>
+        ${!lists.length ? html`<p class="small muted hint">${t("Your lists from the Gallery show up here.")}</p>` : nothing}
+        ${playing ? html`
+          ${list && !list.items.length ? html`<p class="small muted hint">${t("The list {name} is empty, so only the clock shows.", { name: list.name })}</p>` : nothing}
+          <div class="rows">
+            <div class="row"><span>${t("Each drawing")}</span>${segmented(STEPS, step(a.pictures, STEPS), (v) => this.setAmbient({ pictures: v }))}</div>
+            <div class="row"><span>${t("Clock between")}</span>${segmented([["0s", t("No")], ...STEPS], step(a.clock, [["0s"], ...STEPS]), (v) => this.setAmbient({ clock: v }))}</div>
+          </div>` : nothing}
+      </div>
+      <div class="block">
+        <h3>${t("Except")}</h3>
+        ${ch.scenes.length ? html`<ul>${ch.scenes.map((s, i) => html`<li>
+            <div><span>${daysText(s.days)}, ${s.from}–${s.to}:</span> ${this.whatOf(s)}</div>
+            <button class="icon trash" aria-label=${t("Remove")} ?disabled=${this.busy} @click=${() => this.save({ scenes: ch.scenes.filter((_, k) => k !== i) })}>${icons.trash}</button>
+          </li>`)}</ul>` : html`<p class="small muted" style="margin:0 0 12px">${t("No exceptions: it shows the same all day.")}</p>`}
+        ${this.draft ? this.form() : html`<button class="btn" @click=${() => { this.draft = { what: lists[0] ? `list:${lists[0].name}` : "clock", days: "mon-fri", from: "14:00", to: "15:00" }; }}>${icons.plus}${t("Add an exception")}</button>`}
+      </div>
     </section>`;
   }
 }
-customElements.define("ph-rules", Rules);
+customElements.define("ph-automatic", Automatic);
+
 
 class DisplayTab extends LitElement {
   static properties = { status: { attribute: false }, state: { attribute: false }, sprites: { attribute: false }, styles: { attribute: false }, offline: { type: Boolean }, level: { state: true }, busy: { state: true }, now: { state: true }, lists: { state: true } };
@@ -715,8 +702,7 @@ class DisplayTab extends LitElement {
       <div class="stack">
         <section><h2 class="muted">${t("What the display shows")}</h2>
           <ph-modes .current=${this.state?.mode} .clock=${this.state?.clock} .styles=${this.styles}></ph-modes></section>
-        <ph-playlist .state=${this.state} .lists=${this.lists}></ph-playlist>
-        <ph-rules .state=${this.state} .lists=${this.lists}></ph-rules>
+        <ph-automatic .state=${this.state} .lists=${this.lists}></ph-automatic>
       </div>
     </div>`;
   }
