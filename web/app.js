@@ -178,6 +178,47 @@ const segmented = (options, value, pick) => html`<div class="seg" role="group">$
   html`<button type="button" aria-pressed=${String(v === value)} @click=${() => pick(v)}>${label}</button>`)}</div>`;
 
 
+// A length of time: a few usual ones, and Custom for any other, typed with its unit.
+class DurationPicker extends LitElement {
+  static properties = { options: { attribute: false }, value: {}, max: { type: Number }, custom: { state: true }, n: { state: true }, unit: { state: true } };
+  static styles = [base, css`
+    :host { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .own { display: inline-flex; gap: 6px; align-items: center; }
+    .own input { width: 72px; height: 34px; text-align: center; }
+    .own select { height: 34px; }
+  `];
+  get known() { return this.options.find(([v]) => seconds(v) === seconds(this.value))?.[0]; }
+  willUpdate(c) {
+    if (c.has("value") && !this.custom && this.known === undefined && this.value !== undefined) this.openCustom();
+  }
+  openCustom() {
+    const s = seconds(this.value);
+    this.unit = s && s % 3600 === 0 ? "h" : s && s % 60 === 0 ? "m" : "s";
+    this.n = s ? s / { h: 3600, m: 60, s: 1 }[this.unit] : 1;
+    this.custom = true;
+  }
+  emit(v) { this.dispatchEvent(new CustomEvent("change", { detail: v })); }
+  typed() {
+    const n = Number(this.n), total = n * { h: 3600, m: 60, s: 1 }[this.unit];
+    if (!(n > 0) || (this.max && total > this.max)) return;
+    this.emit(`${n}${this.unit}`);
+  }
+  render() {
+    const known = this.custom ? "custom" : this.known;
+    return html`${segmented([...this.options, ["custom", t("Custom")]], known, (v) => {
+        if (v === "custom") { this.openCustom(); return; }
+        this.custom = false;
+        this.emit(v);
+      })}
+      ${this.custom ? html`<span class="own">
+        <input type="number" min="1" step="any" aria-label=${t("Amount")} .value=${String(this.n)} @input=${(e) => { this.n = e.target.value; }} @change=${() => this.typed()}>
+        <select aria-label=${t("Unit")} @change=${(e) => { this.unit = e.target.value; this.typed(); }}>
+          ${[["s", t("seconds")], ["m", t("minutes")], ["h", t("hours")]].map(([u, l]) => html`<option value=${u} ?selected=${u === this.unit}>${l}</option>`)}</select>
+      </span>` : nothing}`;
+  }
+}
+customElements.define("ph-duration", DurationPicker);
+
 class DaysPicker extends LitElement {
   static properties = { value: {} };
   static styles = [base];
@@ -588,7 +629,6 @@ class Automatic extends LitElement {
     const a = ch.ambient, lists = this.lists ?? [];
     const playing = a.list && seconds(a.pictures) > 0 ? a.list.toLowerCase() : "";
     const list = lists.find((l) => l.name.toLowerCase() === playing);
-    const step = (v, opts) => opts.find(([o]) => seconds(o) === seconds(v))?.[0];
     return html`<section class="card" aria-labelledby="au-h">
       <div class="head"><h2 id="au-h">${t("In automatic")}</h2></div>
       <div class="block">
@@ -602,8 +642,8 @@ class Automatic extends LitElement {
         ${playing ? html`
           ${list && !list.items.length ? html`<p class="small muted hint">${t("The list {name} is empty, so only the clock shows.", { name: list.name })}</p>` : nothing}
           <div class="rows">
-            <div class="row"><span>${t("Each drawing")}</span>${segmented(STEPS, step(a.pictures, STEPS), (v) => this.setAmbient({ pictures: v }))}</div>
-            <div class="row"><span>${t("Clock between")}</span>${segmented([["0s", t("No")], ...STEPS], step(a.clock, [["0s"], ...STEPS]), (v) => this.setAmbient({ clock: v }))}</div>
+            <div class="row"><span>${t("Each drawing")}</span><ph-duration .options=${STEPS} .value=${a.pictures} max="86400" @change=${(e) => this.setAmbient({ pictures: e.detail })}></ph-duration></div>
+            <div class="row"><span>${t("Clock between")}</span><ph-duration .options=${[["0s", t("No")], ...STEPS]} .value=${a.clock} max="86400" @change=${(e) => this.setAmbient({ clock: e.detail })}></ph-duration></div>
           </div>` : nothing}
       </div>
       <div class="block">
@@ -1383,8 +1423,8 @@ class ConnectionCard extends LitElement {
         ${released
           ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.call("claim")}>${t("Take back")}</button><span class="small muted">${t("Released until {time}", { time: until(s.released_until) })}</span>`
           : html`<button class="btn" ?disabled=${this.busy} @click=${() => this.call("release")}>${t("Lend to the phone")}</button>
-            <label class="small muted">${t("for")} <select aria-label=${t("How long")} ?disabled=${this.busy} @change=${(e) => this.setFor(e.target.value)}>
-              ${["30m", "1h", "3h", "8h"].map((v) => html`<option value=${v} ?selected=${seconds(this.state?.release_for) === seconds(v)}>${v.replace("m", " min").replace("h", " h")}</option>`)}</select></label>
+            <span class="small muted">${t("for")}</span>
+            <ph-duration .options=${[["30m", "30 min"], ["1h", "1 h"], ["3h", "3 h"], ["8h", "8 h"]]} .value=${this.state?.release_for} max="604800" @change=${(e) => this.setFor(e.detail)}></ph-duration>
             <p class="small muted" style="flex-basis:100%;margin:0">${t("Lets the Divoom app use the display for a while; then pixelhub takes it back.")}</p>`}
       </div>
     </section>`;
