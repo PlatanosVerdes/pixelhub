@@ -15,6 +15,7 @@ import (
 	_ "image/png"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -327,12 +328,38 @@ func (a *Account) cover(ctx context.Context, u string) (image.Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	return shrink(img, coverSize), nil
+	return forLEDs(shrink(img, coverSize)), nil
+}
+
+// forLEDs makes a shrunk photo read on a LED grid, where mid tones glow almost as bright as
+// highlights: it stretches the levels, adds saturation, then darkens mid tones with a gamma.
+func forLEDs(img *image.NRGBA) *image.NRGBA {
+	const saturation, gamma = 1.5, 2.2
+	lo, hi := 255.0, 0.0
+	for i := 0; i < len(img.Pix); i += 4 {
+		l := luma(img.Pix[i : i+3])
+		lo, hi = min(lo, l), max(hi, l)
+	}
+	span := max(hi-lo, 1)
+	for i := 0; i < len(img.Pix); i += 4 {
+		px := img.Pix[i : i+3]
+		grey := luma(px)
+		for c := range px {
+			v := grey + (float64(px[c])-grey)*saturation
+			v = (v - lo) / span
+			px[c] = uint8(math.Round(255 * math.Pow(min(max(v, 0), 1), gamma)))
+		}
+	}
+	return img
+}
+
+func luma(px []uint8) float64 {
+	return 0.299*float64(px[0]) + 0.587*float64(px[1]) + 0.114*float64(px[2])
 }
 
 // shrink averages each block of pixels, which keeps a photo readable at 16x16 where picking one
 // pixel per block would not.
-func shrink(src image.Image, size int) image.Image {
+func shrink(src image.Image, size int) *image.NRGBA {
 	b := src.Bounds()
 	dst := image.NewNRGBA(image.Rect(0, 0, size, size))
 	for y := range size {

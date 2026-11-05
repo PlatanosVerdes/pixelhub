@@ -157,8 +157,8 @@ func TestSignInFollowsPlayback(t *testing.T) {
 	if !ok || c.Name != "♪ Song" || c.Frames[0].Image.Bounds().Dx() != coverSize {
 		t.Fatalf("content %+v, %v", c, ok)
 	}
-	if got := color.NRGBAModel.Convert(c.Frames[0].Image.At(3, 3)).(color.NRGBA); got.R != 200 || got.G != 10 {
-		t.Errorf("cover pixel %v, want the cover's red", got)
+	if got := color.NRGBAModel.Convert(c.Frames[0].Image.At(3, 3)).(color.NRGBA); got.R < 200 || got.G > 10 || got.B > 10 {
+		t.Errorf("cover pixel %v, want the cover's red, made purer", got)
 	}
 }
 
@@ -265,5 +265,19 @@ func TestRevokedSignInDisconnects(t *testing.T) {
 	a.poll(context.Background())
 	if s := a.Status(); s.Connected || !s.Configured {
 		t.Errorf("after a revoked refresh token: %+v", s)
+	}
+}
+
+func TestForLEDsSpreadsTheLevels(t *testing.T) {
+	t.Parallel()
+	img := image.NewNRGBA(image.Rect(0, 0, 2, 1))
+	copy(img.Pix, []uint8{90, 60, 110, 255, 200, 150, 220, 255})
+	forLEDs(img)
+	dark, light := img.Pix[0:3], img.Pix[4:7]
+	if luma(dark) > 20 {
+		t.Errorf("the darkest pixel should go dark and keep its hue: %v", dark)
+	}
+	if light[0] < 200 || light[2] < 200 {
+		t.Errorf("the lightest pixel should stay bright: %v", light)
 	}
 }
