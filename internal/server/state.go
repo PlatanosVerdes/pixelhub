@@ -84,13 +84,23 @@ func (s *Server) putMode(w http.ResponseWriter, r *http.Request) {
 }
 
 // showWeather puts the clock with the weather on for a moment; the display shows it briefly and goes back to the time.
-func (s *Server) showWeather(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) showWeather(w http.ResponseWriter, r *http.Request) {
+	what := r.URL.Query().Get("what")
 	v := s.Hub.State().ClockView()
-	v.Weather, v.Temperature = true, true
+	v.Calendar = false
+	switch what {
+	case "weather":
+		v.Weather, v.Temperature = true, false
+	case "temperature":
+		v.Weather, v.Temperature = false, true
+	default:
+		writeError(w, http.StatusBadRequest, fmt.Errorf("what %q: want weather or temperature", what))
+		return
+	}
 	c := v.Content()
-	c.Name = "weather"
+	c.Name = what
 	s.Hub.Show(c, weatherFor)
-	writeJSON(w, http.StatusAccepted, map[string]string{"showing": "weather"})
+	writeJSON(w, http.StatusAccepted, map[string]string{"showing": what})
 }
 
 func (s *Server) clearMode(w http.ResponseWriter, _ *http.Request) {

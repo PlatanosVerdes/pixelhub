@@ -1628,32 +1628,58 @@ customElements.define("ph-music", MusicTab);
 
 const SKIES = () => ({ 1: t("Clear"), 3: t("Cloudy"), 5: t("Storm"), 6: t("Rain"), 8: t("Snow"), 9: t("Fog") });
 const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+const APPS = ["weather", "countdown", "stopwatch", "noise", "scoreboard"];
+const appIcons = {
+  weather: icon(svg`<path d="M7 18a4 4 0 1 1 .9-7.9A5.5 5.5 0 0 1 18.5 12 3 3 0 0 1 18 18Z"/>`),
+  countdown: icon(svg`<path d="M6 2h12M6 22h12M7 2c0 6 10 6 10 10S7 16 7 22M17 2c0 6-10 6-10 10s10 4 10 10"/>`),
+  stopwatch: icon(svg`<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M10 2h4M12 2v3"/>`),
+  noise: icon(svg`<path d="M3 15v4M7 11v8M11 7v12M15 11v8M19 4v15"/>`),
+  scoreboard: icon(svg`<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M12 6v12"/>`),
+};
+const appName = (a) => ({ weather: t("Weather"), countdown: t("Countdown"), stopwatch: t("Stopwatch"), noise: t("Noise meter"), scoreboard: t("Scoreboard") })[a];
 
-// The display's built-in apps, and the weather that its clock shows.
+// The display's built-in apps, and the weather its clock can show; one app's controls at a time.
 class AppsTab extends LitElement {
-  static properties = { state: { attribute: false }, weather: { state: true }, busy: { state: true }, minutes: { state: true }, seconds: { state: true }, now: { state: true } };
+  static properties = { state: { attribute: false }, weather: { state: true }, busy: { state: true }, picked: { state: true }, minutes: { state: true }, seconds: { state: true }, now: { state: true } };
   static styles = [base, css`
-    .grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
-    @media (min-width: 760px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
-    .card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-    .banner { padding: 10px 12px; border-radius: 12px; font-size: 13px; background: color-mix(in srgb, var(--warn) 16%, transparent); margin: 12px 0; }
-    .head { display: flex; align-items: center; gap: 10px; }
-    .head svg { width: 22px; height: 22px; color: var(--accent); }
-    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
-    .big { font-family: var(--font-pixel); font-size: 44px; line-height: 1; }
-    .presets { display: flex; gap: 6px; flex-wrap: wrap; }
-    .choice { border: 1px solid var(--line); background: none; border-radius: 999px; height: 34px; padding: 0 14px; font-size: 13px; color: var(--muted); cursor: pointer; }
+    .apps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    @media (min-width: 560px) { .apps { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+    .app { border: 1px solid var(--line); background: var(--surface); border-radius: 16px; padding: 12px 6px 10px; display: grid; justify-items: center; gap: 4px; cursor: pointer; color: var(--muted); min-width: 0; }
+    .app svg { width: 24px; height: 24px; margin-bottom: 2px; }
+    .app b { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+    .app small { font-size: 12px; font-variant-numeric: tabular-nums; min-height: 15px; display: inline-flex; align-items: center; gap: 5px; }
+    .app small.live { color: var(--ok); }
+    .app small.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .app:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); }
+    .app[aria-pressed=true] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+    .app[aria-pressed=true] svg { color: var(--accent); }
+    .panel { margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 18px; display: grid; gap: 18px; }
+    @media (min-width: 760px) { .panel { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); align-items: center; gap: 28px; padding: 24px; } }
+    .lcd { background: var(--case); border: 1px solid var(--line); border-radius: 16px; min-height: 150px; display: grid; place-items: center; align-content: center; gap: 6px; padding: 18px; text-align: center; }
+    .lcd output { font-family: var(--font-pixel); font-size: 64px; line-height: 1; color: var(--accent); text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 45%, transparent); font-variant-numeric: tabular-nums; }
+    .lcd output.idle { color: var(--muted); text-shadow: none; }
+    .lcd span { font-size: 13px; color: var(--muted); }
+    .side { display: grid; gap: 16px; min-width: 0; }
+    .side h3 { margin: 0; font-size: 17px; font-weight: 600; }
+    .side p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .actions .btn { height: 42px; padding: 0 18px; font-size: 15px; }
+    @media (max-width: 559px) { .actions .btn { flex: 1 1 0; justify-content: center; } }
+    .label { font-size: 12px; color: var(--muted); margin-bottom: 6px; display: block; }
+    .presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .choice { border: 1px solid var(--line); background: none; border-radius: 10px; height: 36px; padding: 0 14px; font-size: 14px; color: var(--muted); cursor: pointer; font-variant-numeric: tabular-nums; }
     .choice:hover { color: var(--ink); }
-    .time { display: flex; align-items: center; gap: 6px; }
-    .time input { width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
-    .toggles { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; }
-    .toggles label { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
-    input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
-    .score { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
-    .team { border-radius: 14px; padding: 12px; display: grid; justify-items: center; gap: 8px; background: color-mix(in srgb, var(--team) 16%, transparent); border: 1px solid color-mix(in srgb, var(--team) 45%, transparent); }
-    .team output { font-family: var(--font-pixel); font-size: 40px; line-height: 1; color: var(--team); }
+    .choice[aria-pressed=true] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+    .time { display: inline-flex; align-items: center; gap: 4px; font-size: 18px; color: var(--muted); margin-left: 6px; }
+    .time input { width: 64px; height: 36px; text-align: center; font-variant-numeric: tabular-nums; }
+    .note { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; }
+    .link { border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; padding: 0; }
+    .score { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .team { border-radius: 14px; padding: 14px 10px; display: grid; justify-items: center; gap: 10px; background: color-mix(in srgb, var(--team) 14%, var(--case)); border: 1px solid color-mix(in srgb, var(--team) 40%, transparent); }
+    .team span { font-size: 13px; color: var(--muted); }
+    .team output { font-family: var(--font-pixel); font-size: 48px; line-height: 1; color: var(--team); }
     .team .pm { display: flex; gap: 8px; }
-    .team button { width: 44px; height: 40px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--team) 45%, transparent); background: var(--surface); font-size: 20px; cursor: pointer; }
+    .team button { width: 46px; height: 40px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--team) 40%, transparent); background: var(--surface); color: var(--ink); font-size: 20px; cursor: pointer; }
   `];
   constructor() { super(); this.minutes = 5; this.seconds = 0; }
   connectedCallback() {
@@ -1662,101 +1688,131 @@ class AppsTab extends LitElement {
     this.tick = setInterval(() => { if (this.mode.running) this.now = Date.now(); }, 1000);
   }
   disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.timer); clearInterval(this.tick); }
-  // Seconds since a running tool started, from the time pixelhub sent it.
-  elapsed() { return this.mode.since ? Math.max(0, Math.floor(this.now / 1000) - this.mode.since) : 0; }
-  left() { const m = this.mode; return m.running ? Math.max(0, (m.seconds ?? 0) - this.elapsed()) : (m.seconds ?? 0); }
-  async showWeather() {
-    this.busy = true;
-    try { await api("POST", "weather/show"); send(this, "refresh"); toast(this, t("Showing the weather on the Evo")); } catch (e) { toast(this, e.message); }
-    this.busy = false;
-  }
   async load() { try { this.weather = await api("GET", "weather"); } catch { /* the status poll shows outages */ } }
 
   get mode() { return this.state?.mode ?? {}; }
-  async run(view) {
+  get showing() { return APPS.includes(this.mode.mode) ? this.mode.mode : null; }
+  // Seconds since a running tool started, from the time pixelhub sent it.
+  elapsed() { return this.mode.since ? Math.max(0, Math.floor(this.now / 1000) - this.mode.since) : 0; }
+  left() { const m = this.mode; return m.running ? Math.max(0, (m.seconds ?? 0) - this.elapsed()) : (m.seconds ?? 0); }
+  get total() { return Math.min(5999, Math.max(1, (Number(this.minutes) || 0) * 60 + (Number(this.seconds) || 0))); }
+
+  async call(method, path, body, done) {
     this.busy = true;
-    try { saved(this, await api("PUT", "mode", view)); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+    try { const r = await api(method, path, body); if (path !== "weather/show" && r) saved(this, r); send(this, "refresh"); if (done) toast(this, done); } catch (e) { toast(this, e.message); }
     this.busy = false;
   }
-  async automatic() {
-    this.busy = true;
-    try { saved(this, await api("DELETE", "mode")); send(this, "refresh"); } catch (e) { toast(this, e.message); }
-    this.busy = false;
-  }
-  async clockShows(patch) {
-    const next = { mode: "clock", color: "#ff1e28", ...this.state?.clock, ...patch };
-    for (const k of Object.keys(next)) if (!next[k]) delete next[k];
-    this.busy = true;
-    try { saved(this, await api("PUT", "settings", { clock: next })); send(this, "refresh"); } catch (e) { toast(this, e.message); }
-    this.busy = false;
+  run(view) { return this.call("PUT", "mode", view); }
+  automatic() { return this.call("DELETE", "mode"); }
+
+  status(a) {
+    const m = this.mode, on = this.showing === a;
+    if (a === "weather") return this.weather?.known ? html`<small>${this.weather.celsius}°</small>` : html`<small></small>`;
+    if (!on) return html`<small></small>`;
+    if (a === "countdown") return html`<small class=${m.running ? "live" : ""}>${mmss(this.left())}</small>`;
+    if (a === "stopwatch") return html`<small class="live">${mmss(this.elapsed())}</small>`;
+    if (a === "scoreboard") return html`<small class="live">${m.red ?? 0} : ${m.blue ?? 0}</small>`;
+    return html`<small class=${m.running ? "live" : ""}>${m.running ? t("On") : t("Off")}</small>`;
   }
 
-  card(mode, title, glyph, body) {
-    const on = this.mode.mode === mode;
-    return html`<section class="card ${on ? "on" : ""}" aria-label=${title}>
-      <div class="head">${glyph}<h2>${title}</h2>${on ? html`<span class="tag on">${t("Showing")}</span>` : nothing}</div>
-      ${body(on)}
-      ${on ? html`<div class="row"><button class="btn small" ?disabled=${this.busy} @click=${() => this.automatic()}>${t("Back to automatic")}</button></div>` : nothing}
-    </section>`;
-  }
-  startStop(mode, on, extra = {}) {
-    const running = on && this.mode.running;
-    return html`<div class="row">
-      <button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode, ...extra, running: true })}>${running ? t("Start again") : t("Start")}</button>
-      ${running ? html`<button class="btn" ?disabled=${this.busy} @click=${() => this.run({ ...this.mode, running: false })}>${t("Stop")}</button>` : nothing}
-    </div>`;
+  back() {
+    return this.showing === this.current ? html`<div class="note"><span>${t("Showing on the Evo now.")}</span>
+      <button class="btn" ?disabled=${this.busy} @click=${() => this.automatic()}>${t("Back to automatic")}</button></div>` : nothing;
   }
 
-  weatherCard() {
-    const w = this.weather, c = this.state?.clock ?? {}, loc = this.state?.location;
+  weatherPanel() {
+    const w = this.weather, loc = this.state?.location;
     const greenwich = loc && Math.abs(loc.latitude - 51.4769) < 0.001 && Math.abs(loc.longitude + 0.0005) < 0.001;
-    return html`<section class="card" aria-labelledby="wx-h">
-      <div class="head">${icon(svg`<path d="M7 18a4 4 0 1 1 .9-7.9A5.5 5.5 0 0 1 18.5 12 3 3 0 0 1 18 18Z"/>`)}<h2 id="wx-h">${t("Weather")}</h2></div>
-      ${w?.known ? html`<div class="row"><span class="big">${w.celsius}°</span><span>${SKIES()[w.sky] ?? ""}</span></div>
-          <p class="small muted">${t("Read at {time} from Open-Meteo, every 15 minutes.", { time: new Date(w.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })}</p>`
-        : html`<p class="muted">${w?.error ? t("Could not read the weather: {error}", { error: w.error }) : t("Reading the weather…")}</p>`}
-      ${greenwich ? html`<p class="banner">${t("The location is still the default, Greenwich. Set yours in Settings so the weather is yours.")}</p>` : nothing}
-      <div class="row"><button class="btn primary" ?disabled=${this.busy || !w?.known} @click=${() => this.showWeather()}>${t("Show on the Evo")}</button></div>
-      <p class="small muted">${t("The Evo shows it for a few seconds and goes back to the time. To have the clock show it now and then by itself, turn on Weather or Temperature in the clock style, under Display.")}</p>
-    </section>`;
+    return html`
+      <div class="lcd">${w?.known
+        ? html`<output>${w.celsius}°</output><span>${SKIES()[w.sky] ?? ""}</span>`
+        : html`<output class="idle">--°</output><span>${w?.error ? t("Could not read the weather") : t("Reading the weather…")}</span>`}</div>
+      <div class="side">
+        <div><h3>${t("Weather")}</h3><p>${t("Shows on the Evo for a few seconds, then it goes back to what it was showing.")}</p></div>
+        <div class="actions">
+          <button class="btn primary" ?disabled=${this.busy || !w?.known} @click=${() => this.call("POST", "weather/show?what=weather", null, t("Showing the weather on the Evo"))}>${t("Show the weather")}</button>
+          <button class="btn" ?disabled=${this.busy || !w?.known} @click=${() => this.call("POST", "weather/show?what=temperature", null, t("Showing the temperature on the Evo"))}>${t("Show the temperature")}</button>
+        </div>
+        <div class="note">
+          <span>${greenwich ? t("The location is still the default, Greenwich.") : w?.at ? t("Updated at {time}, every 15 minutes.", { time: new Date(w.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }) : ""}</span>
+          <button class="link" @click=${() => { location.hash = "#settings"; }}>${greenwich ? t("Set your location") : t("Change location")}</button>
+        </div>
+      </div>`;
   }
+
+  countdownPanel() {
+    const m = this.mode, on = this.showing === "countdown", total = this.total;
+    return html`
+      <div class="lcd"><output class=${on && m.running ? "" : "idle"}>${mmss(on ? this.left() : total)}</output>
+        <span>${on ? (m.running ? t("Counting down") : t("Paused")) : t("Ready")}</span></div>
+      <div class="side">
+        <div>
+          <span class="label">${t("Length")}</span>
+          <div class="presets">${[1, 5, 10, 25].map((n) => html`<button class="choice" aria-pressed=${String(total === n * 60)} @click=${() => { this.minutes = n; this.seconds = 0; }}>${n} min</button>`)}
+            <span class="time" title=${t("Other length")}><input type="number" min="0" max="99" aria-label=${t("Minutes")} .value=${String(this.minutes)} @input=${(e) => { this.minutes = e.target.value; }}>:<input type="number" min="0" max="59" aria-label=${t("Seconds")} .value=${String(this.seconds).padStart(2, "0")} @input=${(e) => { this.seconds = e.target.value; }}></span></div>
+        </div>
+        <div class="actions">
+          ${on && m.running ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "countdown", seconds: Math.max(1, this.left()) })}>${t("Pause")}</button>`
+            : on && m.seconds ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "countdown", seconds: m.seconds, running: true })}>${t("Resume")}</button>` : nothing}
+          <button class="btn ${on ? "" : "primary"}" ?disabled=${this.busy} @click=${() => this.run({ mode: "countdown", seconds: total, running: true })}>${on ? t("Restart with {time}", { time: mmss(total) }) : t("Start")}</button>
+        </div>
+        ${this.back()}
+      </div>`;
+  }
+
+  stopwatchPanel() {
+    const on = this.showing === "stopwatch" && this.mode.running;
+    return html`
+      <div class="lcd"><output class=${on ? "" : "idle"}>${mmss(on ? this.elapsed() : 0)}</output><span>${on ? t("Running") : t("Ready")}</span></div>
+      <div class="side">
+        <div><h3>${t("Stopwatch")}</h3><p>${t("Counts up on the Evo from zero.")}</p></div>
+        <div class="actions">
+          <button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", running: true })}>${on ? t("Restart") : t("Start")}</button>
+          ${on ? html`<button class="btn" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch" })}>${t("Stop and reset")}</button>` : nothing}
+        </div>
+        ${this.back()}
+      </div>`;
+  }
+
+  noisePanel() {
+    const on = this.showing === "noise" && this.mode.running;
+    return html`
+      <div class="lcd"><output class=${on ? "" : "idle"}>${on ? t("On") : t("Off")}</output><span>${t("Microphone")}</span></div>
+      <div class="side">
+        <div><h3>${t("Noise meter")}</h3><p>${t("Shows how loud the room is, with the Evo's microphone.")}</p></div>
+        <div class="actions">${on
+          ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "noise" })}>${t("Stop")}</button>`
+          : html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "noise", running: true })}>${t("Start")}</button>`}</div>
+        ${this.back()}
+      </div>`;
+  }
+
+  scoreboardPanel() {
+    const on = this.showing === "scoreboard", v = on ? this.mode : {};
+    const set = (patch) => this.run({ mode: "scoreboard", red: v.red, blue: v.blue, ...patch });
+    const team = (key, label, colour) => html`<div class="team" style="--team:${colour}">
+      <span>${label}</span><output>${v[key] ?? 0}</output>
+      <div class="pm"><button aria-label=${t("{team} minus one", { team: label })} ?disabled=${this.busy} @click=${() => set({ [key]: Math.max(0, (v[key] ?? 0) - 1) || undefined })}>−</button>
+        <button aria-label=${t("{team} plus one", { team: label })} ?disabled=${this.busy} @click=${() => set({ [key]: Math.min(999, (v[key] ?? 0) + 1) })}>+</button></div></div>`;
+    return html`
+      <div class="score">${team("red", t("Red"), "#ff453a")}${team("blue", t("Blue"), "#0a84ff")}</div>
+      <div class="side">
+        <div><h3>${t("Scoreboard")}</h3><p>${t("Each point shows on the Evo as you add it.")}</p></div>
+        <div class="actions">${on
+          ? html`<button class="btn" ?disabled=${this.busy} @click=${() => set({ red: undefined, blue: undefined })}>${t("Reset to 0")}</button>`
+          : html`<button class="btn primary" ?disabled=${this.busy} @click=${() => set({})}>${t("Show")}</button>`}</div>
+        ${this.back()}
+      </div>`;
+  }
+
+  get current() { return this.picked ?? this.showing ?? "weather"; }
 
   render() {
-    const m = this.mode;
-    const total = Math.min(5999, Math.max(1, (Number(this.minutes) || 0) * 60 + (Number(this.seconds) || 0)));
-    return html`<div class="grid">
-      ${this.weatherCard()}
-      ${this.card("stopwatch", t("Stopwatch"), icon(svg`<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M10 2h4M12 2v3"/>`), (on) => html`
-        ${on && m.running ? html`<div class="row"><span class="big">${mmss(this.elapsed())}</span></div>` : html`<p class="muted">${t("Counts up on the display from zero.")}</p>`}
-        <div class="row">
-          <button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch", running: true })}>${on && m.running ? t("Start again") : t("Start")}</button>
-          ${on && m.running ? html`<button class="btn" ?disabled=${this.busy} @click=${() => this.run({ mode: "stopwatch" })}>${t("Stop and reset")}</button>` : nothing}
-        </div>`)}
-      ${this.card("countdown", t("Countdown"), icon(svg`<path d="M6 2h12M6 22h12M7 2c0 6 10 6 10 10S7 16 7 22M17 2c0 6-10 6-10 10s10 4 10 10"/>`), (on) => html`
-        ${on ? html`<div class="row"><span class="big">${mmss(this.left())}</span>${m.running ? nothing : html`<span class="muted">${t("Paused")}</span>`}</div>
-          <div class="row">${m.running
-            ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode: "countdown", seconds: Math.max(1, this.left()) })}>${t("Pause")}</button>`
-            : html`<button class="btn primary" ?disabled=${this.busy || !m.seconds} @click=${() => this.run({ mode: "countdown", seconds: m.seconds, running: true })}>${t("Resume")}</button>`}</div>` : nothing}
-        <div class="row presets">${[1, 5, 10, 25].map((n) => html`<button class="choice" @click=${() => { this.minutes = n; this.seconds = 0; }}>${n} min</button>`)}</div>
-        <div class="row time">
-          <input type="number" min="0" max="99" aria-label=${t("Minutes")} .value=${String(this.minutes)} @input=${(e) => { this.minutes = e.target.value; }}> :
-          <input type="number" min="0" max="59" aria-label=${t("Seconds")} .value=${String(this.seconds).padStart(2, "0")} @input=${(e) => { this.seconds = e.target.value; }}>
-        </div>
-        <div class="row"><button class="btn ${on ? "" : "primary"}" ?disabled=${this.busy} @click=${() => this.run({ mode: "countdown", seconds: total, running: true })}>${on ? t("Start again with {time}", { time: mmss(total) }) : t("Start")}</button></div>`)}
-      ${this.card("noise", t("Noise meter"), icon(svg`<path d="M3 15v4M7 11v8M11 7v12M15 11v8M19 4v15"/>`), (on) => html`
-        <p class="muted">${t("Shows how loud the room is, with the Evo's microphone.")}</p>${this.startStop("noise", on)}`)}
-      ${this.card("scoreboard", t("Scoreboard"), icon(svg`<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M12 6v12"/>`), (on) => {
-        const v = on ? m : { mode: "scoreboard" };
-        const set = (patch) => this.run({ mode: "scoreboard", red: v.red, blue: v.blue, ...patch });
-        const team = (key, label, colour) => html`<div class="team" style="--team:${colour}">
-          <span class="small">${label}</span><output>${v[key] ?? 0}</output>
-          <div class="pm"><button aria-label=${t("{team} minus one", { team: label })} @click=${() => set({ [key]: Math.max(0, (v[key] ?? 0) - 1) || undefined })}>−</button>
-            <button aria-label=${t("{team} plus one", { team: label })} @click=${() => set({ [key]: Math.min(999, (v[key] ?? 0) + 1) })}>+</button></div></div>`;
-        return html`<div class="score">${team("red", t("Red"), "#ff453a")}${team("blue", t("Blue"), "#0a84ff")}</div>
-          <div class="row">${on ? html`<button class="btn small" @click=${() => set({ red: undefined, blue: undefined })}>${t("Reset to 0")}</button>`
-            : html`<button class="btn primary small" @click=${() => set({})}>${t("Show")}</button>`}</div>`;
-      })}
-    </div>`;
+    const cur = this.current;
+    return html`
+      <div class="apps" role="group" aria-label=${t("Apps")}>${APPS.map((a) => html`
+        <button class="app" aria-pressed=${String(cur === a)} @click=${() => { this.picked = a; }}>${appIcons[a]}<b>${appName(a)}</b>${this.status(a)}</button>`)}</div>
+      <section class="panel" aria-label=${appName(cur)}>${this[`${cur}Panel`]()}</section>`;
   }
 }
 customElements.define("ph-apps", AppsTab);
