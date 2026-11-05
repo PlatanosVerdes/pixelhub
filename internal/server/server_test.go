@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -466,7 +467,8 @@ func (fakeGallery) List(_ context.Context, category int, _ gallery.Sort, page, _
 	if page > 1 {
 		return nil, nil
 	}
-	return []gallery.Item{{Name: "cat", Author: "someone", Likes: 3, FileID: "group1/M00/aa"}}, nil
+	return []gallery.Item{{Name: "cat", Author: "someone", Likes: 3, FileID: "group1/M00/aa"},
+		{Name: "Corazón", Tags: []string{"love"}, Likes: 9, FileID: fmt.Sprintf("group1/M00/heart-%d", category)}}, nil
 }
 
 func (fakeGallery) Download(context.Context, string) ([]byte, error) {
@@ -488,6 +490,12 @@ func TestGallery(t *testing.T) {
 		{"/api/gallery?category=cars", 400, "category"},
 		{"/api/gallery?category=animal&page=0", 400, "page"},
 		{"/api/gallery/gif?file=group1/M00/aa", 422, "not a 16x16"},
+		{"/api/gallery/search?q=corazon", 200, `"name":"Corazón"`},
+		{"/api/gallery/search?q=LOVE", 200, `"name":"Corazón"`},
+		{"/api/gallery/search?q=cat+someone", 200, `"name":"cat"`},
+		{"/api/gallery/search?q=dog", 200, `"items":[]`},
+		{"/api/gallery/search?q=ove", 200, `"items":[]`},
+		{"/api/gallery/search?q=", 400, "q:"},
 	}
 	for _, tt := range tests {
 		rec := httptest.NewRecorder()

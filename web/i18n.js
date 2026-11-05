@@ -263,4 +263,9 @@ const es = {
   "Saved in {channel}": "Guardado en {channel}",
   "Nothing in this category right now.": "Ahora no hay nada en esta categoría.",
   "Load more": "Cargar más",
+  "Search: cat, heart, pumpkin…": "Buscar: cat, heart, pumpkin…",
+  "Search the gallery": "Buscar en la galería",
+  "Search": "Buscar",
+  "Results for “{q}” among the most liked of every category.": "Resultados de «{q}» entre los más gustados de cada categoría.",
+  "Nothing found. Try another word, in English it finds more.": "No hay nada. Prueba otra palabra; en inglés encuentra más.",
 };

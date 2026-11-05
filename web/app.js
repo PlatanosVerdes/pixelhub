@@ -1188,10 +1188,13 @@ const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
 
 class GalleryTab extends LitElement {
   static properties = { state: { attribute: false }, category: { state: true }, sort: { state: true }, items: { state: true }, page: { state: true },
-    more: { state: true }, loading: { state: true }, picked: { state: true }, target: { state: true }, busy: { state: true }, problem: { state: true } };
+    more: { state: true }, loading: { state: true }, picked: { state: true }, target: { state: true }, busy: { state: true }, problem: { state: true },
+    query: { state: true }, searched: { state: true } };
   static styles = [base, css`
     .bar { display: grid; gap: 10px; margin-bottom: 14px; }
-    .cats { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+    .cats { display: flex; gap: 6px; flex-wrap: wrap; }
+    .find { display: flex; gap: 8px; }
+    .find input { flex: 1; min-width: 0; height: 40px; border-radius: 12px; padding: 0 14px; }
     .cat { flex: none; border: 1px solid var(--line); background: none; border-radius: 999px; height: 34px; padding: 0 14px; font-size: 13px; color: var(--muted); cursor: pointer; }
     .cat[aria-pressed=true] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 600; }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; }
@@ -1216,7 +1219,9 @@ class GalleryTab extends LitElement {
     this.problem = "";
     const page = fresh ? 1 : this.page + 1;
     try {
-      const r = await api("GET", `gallery?category=${this.category}&sort=${this.sort}&page=${page}`);
+      const r = this.searched
+        ? await api("GET", `gallery/search?q=${encodeURIComponent(this.searched)}`)
+        : await api("GET", `gallery?category=${this.category}&sort=${this.sort}&page=${page}`);
       const seen = new Set(fresh ? [] : this.items.map((i) => i.file));
       this.items = [...(fresh ? [] : this.items), ...r.items.filter((i) => !seen.has(i.file))];
       this.page = page;
@@ -1224,7 +1229,13 @@ class GalleryTab extends LitElement {
     } catch (e) { this.problem = e.message; }
     this.loading = false;
   }
-  pick(field, value) { this[field] = value; this.picked = null; this.load(true); }
+  pick(field, value) { this[field] = value; this.picked = null; this.searched = ""; this.query = ""; this.load(true); }
+  search(e) {
+    e.preventDefault();
+    this.searched = (this.query ?? "").trim();
+    this.picked = null;
+    this.load(true);
+  }
 
   async show() {
     this.busy = true;
@@ -1245,9 +1256,15 @@ class GalleryTab extends LitElement {
     const channels = this.state?.channels ?? [];
     return html`
       <div class="bar">
+        <form class="find" role="search" @submit=${(e) => this.search(e)}>
+          <input type="search" placeholder=${t("Search: cat, heart, pumpkin…")} aria-label=${t("Search the gallery")} .value=${this.query ?? ""} @input=${(e) => { this.query = e.target.value; }}>
+          <button class="btn primary" type="submit">${t("Search")}</button>
+        </form>
         <div class="cats" role="group" aria-label=${t("Categories")}>${CATEGORIES.map((c) =>
-          html`<button class="cat" aria-pressed=${String(c === this.category)} @click=${() => this.pick("category", c)}>${categoryName(c)}</button>`)}</div>
-        <div>${segmented([["likes", t("Most liked")], ["new", t("Newest")]], this.sort, (v) => this.pick("sort", v))}</div>
+          html`<button class="cat" aria-pressed=${String(!this.searched && c === this.category)} @click=${() => this.pick("category", c)}>${categoryName(c)}</button>`)}</div>
+        ${this.searched
+          ? html`<p class="small muted">${t("Results for “{q}” among the most liked of every category.", { q: this.searched })}</p>`
+          : html`<div>${segmented([["likes", t("Most liked")], ["new", t("Newest")]], this.sort, (v) => this.pick("sort", v))}</div>`}
       </div>
       ${p ? html`<div class="sheet" role="dialog" aria-label=${p.name}>
         <img class="pix" src=${gifURL(p.file)} alt="">
@@ -1260,7 +1277,7 @@ class GalleryTab extends LitElement {
             <button class="icon" aria-label=${t("Close")} @click=${() => { this.picked = null; }}>${icons.close}</button>
           </div></div></div>` : nothing}
       ${this.problem ? html`<p class="err">${this.problem}</p>` : nothing}
-      ${!this.items.length && !this.loading && !this.problem ? html`<p class="empty muted">${t("Nothing in this category right now.")}</p>` : nothing}
+      ${!this.items.length && !this.loading && !this.problem ? html`<p class="empty muted">${this.searched ? t("Nothing found. Try another word, in English it finds more.") : t("Nothing in this category right now.")}</p>` : nothing}
       <div class="grid">${repeat(this.items, (i) => i.file, (i) => html`<button class="item" aria-pressed=${String(p?.file === i.file)} title=${i.name} aria-label=${i.name}
         @click=${() => { this.picked = i; }}><img class="pix" src=${gifURL(i.file)} alt="" loading="lazy"></button>`)}</div>
       <div class="more">${this.loading ? html`<span class="muted small">${t("Loading")}</span>`

@@ -58,6 +58,7 @@ type Server struct {
 	// Gallery, when set, browses the Divoom community gallery under /api/gallery.
 	Gallery Gallery
 	gifs    gifCache
+	lists   listCache
 	// Size is the display's side in pixels, for drawing previews.
 	Size    int
 	Version string

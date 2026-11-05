@@ -11,14 +11,19 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
 	"github.com/PlatanosVerdes/pixelhub/internal/gallery"
 )
 
 const (
+	searchPages   = 3
+	searchWorkers = 6
+	listFresh     = 15 * time.Minute
 	galleryPage   = 24
 	galleryCached = 300
 	defaultShow   = 30 * time.Second
@@ -60,6 +65,106 @@ func (c *gifCache) put(id string, b []byte) {
 	}
 }
 
+// listCache keeps gallery pages for a while, so searching does not refetch every category.
+type listCache struct {
+	mu    sync.Mutex
+	pages map[string]cachedPage
+}
+
+type cachedPage struct {
+	items []gallery.Item
+	at    time.Time
+}
+
+func (s *Server) listPage(ctx context.Context, category int, sort gallery.Sort, page int) ([]gallery.Item, error) {
+	key := fmt.Sprintf("%d/%d/%d", category, sort, page)
+	s.lists.mu.Lock()
+	hit, ok := s.lists.pages[key]
+	s.lists.mu.Unlock()
+	if ok && time.Since(hit.at) < listFresh {
+		return hit.items, nil
+	}
+	items, err := s.Gallery.List(ctx, category, sort, page, galleryPage)
+	if err != nil {
+		return nil, err
+	}
+	s.lists.mu.Lock()
+	if s.lists.pages == nil {
+		s.lists.pages = map[string]cachedPage{}
+	}
+	s.lists.pages[key] = cachedPage{items: items, at: time.Now()}
+	s.lists.mu.Unlock()
+	return items, nil
+}
+
+// gallerySearch looks for words in the names, authors and tags of the most liked pages of every
+// category: the gallery itself offers no search without signing in.
+func (s *Server) gallerySearch(w http.ResponseWriter, r *http.Request) {
+	words := strings.Fields(fold(r.URL.Query().Get("q")))
+	if len(words) == 0 {
+		writeError(w, http.StatusBadRequest, errors.New("q: give some words to look for"))
+		return
+	}
+	type job struct{ category, page int }
+	jobs := make(chan job)
+	var (
+		mu    sync.Mutex
+		found []gallery.Item
+		seen  = map[string]bool{}
+		wg    sync.WaitGroup
+	)
+	for range searchWorkers {
+		wg.Go(func() {
+			for j := range jobs {
+				items, err := s.listPage(r.Context(), j.category, gallery.MostLiked, j.page)
+				if err != nil {
+					continue
+				}
+				mu.Lock()
+				for _, it := range items {
+					if !seen[it.FileID] && matches(it, words) {
+						seen[it.FileID] = true
+						found = append(found, it)
+					}
+				}
+				mu.Unlock()
+			}
+		})
+	}
+	for _, c := range gallery.Categories {
+		for page := 1; page <= searchPages; page++ {
+			jobs <- job{c, page}
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	slices.SortFunc(found, func(a, b gallery.Item) int { return b.Likes - a.Likes })
+	out := make([]galleryItem, 0, len(found))
+	for _, it := range found {
+		out = append(out, galleryItem{File: it.FileID, Name: it.Name, Author: it.Author, Likes: it.Likes})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out, "more": false})
+}
+
+// matches wants every word to start one of the item's words, so "cat" finds "cats" but not "vacation".
+func matches(it gallery.Item, words []string) bool {
+	have := strings.FieldsFunc(fold(it.Name+" "+it.Author+" "+strings.Join(it.Tags, " ")), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	for _, w := range words {
+		if !slices.ContainsFunc(have, func(h string) bool { return strings.HasPrefix(h, w) }) {
+			return false
+		}
+	}
+	return true
+}
+
+var accents = strings.NewReplacer("á", "a", "à", "a", "ä", "a", "â", "a", "é", "e", "è", "e", "ë", "e", "ê", "e",
+	"í", "i", "ì", "i", "ï", "i", "î", "i", "ó", "o", "ò", "o", "ö", "o", "ô", "o", "ú", "u", "ù", "u", "ü", "u", "û", "u", "ñ", "n", "ç", "c")
+
+// fold lowercases and drops accents, so "corazón" finds "Corazon".
+func fold(s string) string { return accents.Replace(strings.ToLower(s)) }
+
 func (s *Server) galleryRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/gallery/categories", func(w http.ResponseWriter, _ *http.Request) {
 		names := make([]string, 0, len(gallery.Categories))
@@ -71,6 +176,7 @@ func (s *Server) galleryRoutes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("GET /api/gallery", s.galleryList)
 	mux.HandleFunc("GET /api/gallery/gif", s.galleryGIF)
+	mux.HandleFunc("GET /api/gallery/search", s.gallerySearch)
 	mux.HandleFunc("POST /api/gallery/show", s.galleryShow)
 	mux.HandleFunc("POST /api/gallery/save", s.gallerySave)
 }
@@ -101,7 +207,7 @@ func (s *Server) galleryList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("page %q: want 1-100", q.Get("page")))
 		return
 	}
-	items, err := s.Gallery.List(r.Context(), category, sort, page, galleryPage)
+	items, err := s.listPage(r.Context(), category, sort, page)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
