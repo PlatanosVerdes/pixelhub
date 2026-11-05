@@ -1189,7 +1189,7 @@ const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
 class GalleryTab extends LitElement {
   static properties = { state: { attribute: false }, category: { state: true }, sort: { state: true }, items: { state: true }, page: { state: true },
     more: { state: true }, loading: { state: true }, picked: { state: true }, target: { state: true }, busy: { state: true }, problem: { state: true },
-    query: { state: true }, searched: { state: true } };
+    query: { state: true }, searched: { state: true }, indexing: { state: true } };
   static styles = [base, css`
     .bar { display: grid; gap: 10px; margin-bottom: 14px; }
     .cats { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -1226,6 +1226,7 @@ class GalleryTab extends LitElement {
       this.items = [...(fresh ? [] : this.items), ...r.items.filter((i) => !seen.has(i.file))];
       this.page = page;
       this.more = r.more;
+      this.indexing = r.of && r.indexed < r.of ? r : null;
     } catch (e) { this.problem = e.message; }
     this.loading = false;
   }
@@ -1263,7 +1264,8 @@ class GalleryTab extends LitElement {
         <div class="cats" role="group" aria-label=${t("Categories")}>${CATEGORIES.map((c) =>
           html`<button class="cat" aria-pressed=${String(!this.searched && c === this.category)} @click=${() => this.pick("category", c)}>${categoryName(c)}</button>`)}</div>
         ${this.searched
-          ? html`<p class="small muted">${t("Results for “{q}” among the most liked of every category.", { q: this.searched })}</p>`
+          ? html`<p class="small muted">${t("Results for “{q}” among the most liked of every category.", { q: this.searched })}
+              ${this.indexing ? html`<br>${t("Still gathering the gallery ({n} of {of} pages); search again in a minute for more.", { n: this.indexing.indexed, of: this.indexing.of })}` : nothing}</p>`
           : html`<div>${segmented([["likes", t("Most liked")], ["new", t("Newest")]], this.sort, (v) => this.pick("sort", v))}</div>`}
       </div>
       ${p ? html`<div class="sheet" role="dialog" aria-label=${p.name}>

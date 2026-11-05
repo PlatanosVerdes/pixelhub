@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image"
 	"image/gif"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -22,7 +23,8 @@ import (
 
 const (
 	searchPages   = 3
-	searchWorkers = 6
+	crawlPace     = 3 * time.Second
+	reindexEvery  = 6 * time.Hour
 	listFresh     = 15 * time.Minute
 	galleryPage   = 24
 	galleryCached = 300
@@ -97,53 +99,69 @@ func (s *Server) listPage(ctx context.Context, category int, sort gallery.Sort, 
 	return items, nil
 }
 
-// gallerySearch looks for words in the names, authors and tags of the most liked pages of every
-// category: the gallery itself offers no search without signing in.
+// galleryIndex is a slowly built list of the most liked pages of every category, to search in:
+// the gallery itself has no search without signing in, and answers 429 to bursts.
+type galleryIndex struct {
+	once  sync.Once
+	mu    sync.Mutex
+	items map[string]gallery.Item
+	done  int
+}
+
+func (s *Server) indexGallery() {
+	s.index.once.Do(func() { go s.crawl(context.Background()) })
+}
+
+func (s *Server) crawl(ctx context.Context) {
+	pace := cmp.Or(s.GalleryPace, crawlPace)
+	categories := slices.Sorted(maps.Values(gallery.Categories))
+	for {
+		for _, c := range categories {
+			for page := 1; page <= searchPages; page++ {
+				items, err := s.listPage(ctx, c, gallery.MostLiked, page)
+				for errors.Is(err, gallery.ErrRateLimited) {
+					time.Sleep(pace * 200)
+					items, err = s.listPage(ctx, c, gallery.MostLiked, page)
+				}
+				s.index.mu.Lock()
+				if s.index.items == nil {
+					s.index.items = map[string]gallery.Item{}
+				}
+				for _, it := range items {
+					s.index.items[it.FileID] = it
+				}
+				s.index.done++
+				s.index.mu.Unlock()
+				time.Sleep(pace)
+			}
+		}
+		time.Sleep(reindexEvery)
+	}
+}
+
 func (s *Server) gallerySearch(w http.ResponseWriter, r *http.Request) {
 	words := strings.Fields(fold(r.URL.Query().Get("q")))
 	if len(words) == 0 {
 		writeError(w, http.StatusBadRequest, errors.New("q: give some words to look for"))
 		return
 	}
-	type job struct{ category, page int }
-	jobs := make(chan job)
-	var (
-		mu    sync.Mutex
-		found []gallery.Item
-		seen  = map[string]bool{}
-		wg    sync.WaitGroup
-	)
-	for range searchWorkers {
-		wg.Go(func() {
-			for j := range jobs {
-				items, err := s.listPage(r.Context(), j.category, gallery.MostLiked, j.page)
-				if err != nil {
-					continue
-				}
-				mu.Lock()
-				for _, it := range items {
-					if !seen[it.FileID] && matches(it, words) {
-						seen[it.FileID] = true
-						found = append(found, it)
-					}
-				}
-				mu.Unlock()
-			}
-		})
-	}
-	for _, c := range gallery.Categories {
-		for page := 1; page <= searchPages; page++ {
-			jobs <- job{c, page}
+	s.indexGallery()
+	total := len(gallery.Categories) * searchPages
+	s.index.mu.Lock()
+	var found []gallery.Item
+	for _, it := range s.index.items {
+		if matches(it, words) {
+			found = append(found, it)
 		}
 	}
-	close(jobs)
-	wg.Wait()
-	slices.SortFunc(found, func(a, b gallery.Item) int { return b.Likes - a.Likes })
+	done := min(s.index.done, total)
+	s.index.mu.Unlock()
+	slices.SortFunc(found, func(a, b gallery.Item) int { return cmp.Or(b.Likes-a.Likes, strings.Compare(a.FileID, b.FileID)) })
 	out := make([]galleryItem, 0, len(found))
 	for _, it := range found {
 		out = append(out, galleryItem{File: it.FileID, Name: it.Name, Author: it.Author, Likes: it.Likes})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out, "more": false})
+	writeJSON(w, http.StatusOK, map[string]any{"items": out, "more": false, "indexed": done, "of": total})
 }
 
 // matches wants every word to start one of the item's words, so "cat" finds "cats" but not "vacation".
@@ -209,7 +227,7 @@ func (s *Server) galleryList(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := s.listPage(r.Context(), category, sort, page)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err)
+		writeError(w, galleryStatus(err), err)
 		return
 	}
 	out := make([]galleryItem, 0, len(items))
@@ -318,6 +336,8 @@ func pictureOf(b []byte, name string) (display.Content, error) {
 
 func galleryStatus(err error) int {
 	switch {
+	case errors.Is(err, gallery.ErrRateLimited):
+		return http.StatusServiceUnavailable
 	case errors.Is(err, gallery.ErrFormat):
 		return http.StatusUnprocessableEntity
 	case errors.Is(err, gallery.ErrBadFile):

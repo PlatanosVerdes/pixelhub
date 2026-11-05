@@ -478,7 +478,24 @@ func (fakeGallery) Download(context.Context, string) ([]byte, error) {
 func TestGallery(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	srv := (&Server{Hub: f.hub, Sprites: nil, Gallery: fakeGallery{}, Size: 16}).Handler()
+	srv := (&Server{Hub: f.hub, Sprites: nil, Gallery: fakeGallery{}, Size: 16, GalleryPace: time.Microsecond}).Handler()
+	search := func(q string) string {
+		for range 200 {
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, httptest.NewRequest("GET", "/api/gallery/search?q="+q, nil))
+			if strings.Contains(rec.Body.String(), `"indexed":48,`) {
+				return rec.Body.String()
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatal("the gallery index never finished")
+		return ""
+	}
+	for q, want := range map[string]string{"corazon": `"name":"Corazón"`, "LOVE": `"name":"Corazón"`, "cat+someone": `"name":"cat"`, "dog": `"items":[]`, "ove": `"items":[]`} {
+		if got := search(q); !strings.Contains(got, want) {
+			t.Errorf("search %s: %s, want %s", q, got, want)
+		}
+	}
 	tests := []struct {
 		path     string
 		code     int
@@ -490,11 +507,6 @@ func TestGallery(t *testing.T) {
 		{"/api/gallery?category=cars", 400, "category"},
 		{"/api/gallery?category=animal&page=0", 400, "page"},
 		{"/api/gallery/gif?file=group1/M00/aa", 422, "not a 16x16"},
-		{"/api/gallery/search?q=corazon", 200, `"name":"Corazón"`},
-		{"/api/gallery/search?q=LOVE", 200, `"name":"Corazón"`},
-		{"/api/gallery/search?q=cat+someone", 200, `"name":"cat"`},
-		{"/api/gallery/search?q=dog", 200, `"items":[]`},
-		{"/api/gallery/search?q=ove", 200, `"items":[]`},
 		{"/api/gallery/search?q=", 400, "q:"},
 	}
 	for _, tt := range tests {

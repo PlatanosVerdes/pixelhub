@@ -87,6 +87,9 @@ func (c *Client) List(ctx context.Context, category int, sort Sort, page, perPag
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, ErrRateLimited
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("gallery list: HTTP %d", resp.StatusCode)
 	}
@@ -127,6 +130,8 @@ func (c *Client) Download(ctx context.Context, fileID string) ([]byte, error) {
 var (
 	ErrFormat  = errors.New("gallery: not a 16x16 animation file")
 	ErrBadFile = errors.New("gallery: bad file id")
+	// ErrRateLimited means the gallery wants fewer requests for a while.
+	ErrRateLimited = errors.New("the Divoom gallery asks to slow down; try again in a few minutes")
 )
 
 // Decode turns a 16x16 gallery file into its frames and the delay between them.
