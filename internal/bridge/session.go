@@ -334,8 +334,11 @@ func (l *link) repaint() error {
 	l.painted = version
 	msgs := [][]byte{divoom.Brightness(content.Brightness)}
 	var err error
-	if content.Kind != display.Picture || !content.SamePicture(l.shown) {
+	// Native modes are sent again to keep the clock right, but a tool sent again would restart.
+	resend := content.Kind != display.Picture && !content.View.Mode.Tool()
+	if resend || !content.SamePicture(l.shown) {
 		msgs, err = divoom.Encode(content)
+		msgs = append(divoom.Leave(l.shown, content), msgs...)
 	}
 	l.shown = content
 	if err != nil {

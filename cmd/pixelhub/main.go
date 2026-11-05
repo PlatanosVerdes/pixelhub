@@ -25,6 +25,7 @@ import (
 	"github.com/PlatanosVerdes/pixelhub/internal/spotify"
 	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
+	"github.com/PlatanosVerdes/pixelhub/internal/weather"
 )
 
 var buildVersion = "local"
@@ -89,6 +90,11 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 		return err
 	}
 	h.Music = music
+	station := weather.New(func() weather.Place {
+		l := h.State().Location
+		return weather.Place{Latitude: l.Latitude, Longitude: l.Longitude}
+	}, log)
+	h.Weather = station
 	kept, err := lists.Open(filepath.Join(cfg.DataDir, "lists"))
 	if err != nil {
 		return err
@@ -96,10 +102,11 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 	go session.Run(ctx)
 	go h.Run(ctx)
 	go music.Run(ctx)
+	go station.Run(ctx)
 
 	srv := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),
-		Handler:           (&server.Server{Hub: h, Sprites: sprites, Spotify: music, Gallery: gallery.NewClient(), Lists: kept, IndexPath: filepath.Join(cfg.DataDir, "gallery-index.json"), Size: divoom.Size, Version: buildVersion}).Handler(),
+		Handler:           (&server.Server{Hub: h, Sprites: sprites, Spotify: music, Weather: station, Gallery: gallery.NewClient(), Lists: kept, IndexPath: filepath.Join(cfg.DataDir, "gallery-index.json"), Size: divoom.Size, Version: buildVersion}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,

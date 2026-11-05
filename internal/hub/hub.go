@@ -46,6 +46,10 @@ type Pictures interface {
 	DeleteChannel(channel string) error
 }
 
+type Weather interface {
+	Current() display.Weather
+}
+
 // Music is what a linked music account plays now, if anything, and on which device.
 type Music interface {
 	Content() (c display.Content, device string, playing bool)
@@ -102,6 +106,8 @@ type Hub struct {
 	ambient  playlist
 	// Music, when set before Run, adds the music layer under a picked mode.
 	Music Music
+	// Weather, when set before Run, feeds the clock's weather and temperature.
+	Weather Weather
 
 	// write serialises every change to the state and the picture folders, so the disk work runs
 	// outside mu and never holds up alerts or the display tick.
@@ -484,6 +490,11 @@ func (h *Hub) update() {
 		layer, content = LayerAmbient, h.ambient.at(now, name, ch.Ambient, stale).WithBrightness(level)
 	}
 
+	var weather display.Weather
+	if h.Weather != nil {
+		weather = h.Weather.Current()
+	}
+
 	h.mu.Lock()
 	if content.Kind == display.Clock {
 		clock := h.st.ClockView().Content().WithBrightness(content.Brightness)
@@ -492,6 +503,9 @@ func (h *Hub) update() {
 	}
 	if content.Kind == display.Native && content.View.Mode == display.ModeClock && content.View.Color == "" {
 		content.View.Color = h.st.ClockView().Color
+	}
+	if content.Kind == display.Native && content.View.Mode == display.ModeClock {
+		content.Weather = weather
 	}
 	changed := !content.SamePicture(h.shown) || content.Brightness != h.shown.Brightness
 	h.layer, h.shown = layer, content

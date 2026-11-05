@@ -14,6 +14,7 @@ import (
 	"github.com/PlatanosVerdes/pixelhub/internal/hub"
 	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
+	"github.com/PlatanosVerdes/pixelhub/internal/weather"
 )
 
 const (
@@ -55,6 +56,8 @@ type Server struct {
 	Sprites Sprites
 	// Spotify, when set, links a Spotify account under /api/spotify.
 	Spotify Spotify
+	// Weather, when set, answers GET /api/weather.
+	Weather interface{ Reading() weather.Reading }
 	// Gallery, when set, browses the Divoom community gallery under /api/gallery.
 	Gallery Gallery
 	// Lists, with Gallery, keeps named lists of gallery pictures under /api/lists.
@@ -77,6 +80,7 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": s.Version})
 	})
 	mux.HandleFunc("GET /api/status", s.status)
+	mux.HandleFunc("GET /api/weather", s.weather)
 	mux.HandleFunc("POST /api/notify", s.notify)
 	mux.HandleFunc("POST /api/channel", s.setChannel)
 	mux.HandleFunc("DELETE /api/channel", s.clearChannel)
@@ -262,4 +266,12 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func (s *Server) weather(w http.ResponseWriter, _ *http.Request) {
+	if s.Weather == nil {
+		writeError(w, http.StatusNotFound, errors.New("weather is not set up"))
+		return
+	}
+	writeJSON(w, http.StatusOK, s.Weather.Reading())
 }

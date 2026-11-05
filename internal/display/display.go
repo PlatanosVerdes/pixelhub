@@ -31,7 +31,27 @@ type Content struct {
 	Fill       color.RGBA
 	View       View
 	Brightness int
+	// Weather feeds the clock's weather and temperature.
+	Weather Weather
 }
+
+// Weather is the outside reading; Sky uses the display's own codes.
+type Weather struct {
+	Known   bool `json:"known"`
+	Celsius int  `json:"celsius"`
+	Sky     Sky  `json:"sky"`
+}
+
+type Sky int
+
+const (
+	SkyClear  Sky = 1
+	SkyCloudy Sky = 3
+	SkyStorm  Sky = 5
+	SkyRain   Sky = 6
+	SkySnow   Sky = 8
+	SkyFog    Sky = 9
+)
 
 func (c Content) WithBrightness(level int) Content {
 	c.Brightness = level
@@ -40,7 +60,7 @@ func (c Content) WithBrightness(level int) Content {
 
 // SamePicture reports whether two contents show the same thing, perhaps at different brightness.
 func (c Content) SamePicture(o Content) bool {
-	return c.Kind == o.Kind && c.Name == o.Name && c.Fill == o.Fill && c.View == o.View
+	return c.Kind == o.Kind && c.Name == o.Name && c.Fill == o.Fill && c.View == o.View && c.Weather == o.Weather
 }
 
 func ClockContent() Content { return Content{Kind: Clock, Name: "clock"} }

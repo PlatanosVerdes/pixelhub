@@ -93,7 +93,8 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `DELETE /api/channel` | Back to the schedule |
 | `POST /api/release`, `POST /api/claim` | Let the phone app have the display, and take it back (it comes back by itself after `release_for`) |
 | `GET /api/state` | Everything that is saved |
-| `PUT /api/settings` | Any of `location`, `brightness`, `release_for`, `default_channel`; fields left out, nested ones too, stay as they are |
+| `PUT /api/settings` | Any of `location`, `brightness`, `release_for`, `default_channel`, `music`, `clock`; fields left out, nested ones too, stay as they are (`music` and `clock` are replaced whole) |
+| `GET /api/weather` | The weather the clock shows: `celsius`, `sky`, when it was read, and an `error` if the last read failed |
 | `GET /api/channels`, `POST /api/channels` | List, create |
 | `PUT /api/channels/{name}` | Replace; a different `name` renames it, its schedule slots, its pictures and an override on it. A missing `name` or `ambient` keeps the channel's own |
 | `DELETE /api/channels/{name}` | Delete with its schedule slots and pictures; not the default or the last one |
@@ -103,7 +104,7 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `DELETE /api/mode` | Back to alerts, scenes and ambient |
 | `GET /api/gallery/categories` | Categories of the Divoom community gallery |
 | `GET /api/gallery?category=&sort=likes\|new&page=` | One page of 16x16 pictures and animations: `file`, `name`, `author`, `likes` |
-| `GET /api/gallery/search?q=` | Words looked for at the start of the names, authors and tags of the 10 most liked pages of every category (about 4,000 pictures), read one page every 3 s from the first search on, again every 6 h, and kept across restarts (the gallery has no search without signing in and answers 429 to bursts); `indexed`/`of` say how far it got |
+| `GET /api/gallery/search?q=&page=` | Words looked for at the start of the names, authors, tags and descriptions of the 16 most liked pages of every category (about 7,500 pictures), read one page every 3 s from the first search on, again every 6 h, and kept across restarts (the gallery has no search without signing in and answers 429 to bursts); `indexed`/`of` say how far it got |
 | `GET /api/gallery/gif?file=` | A gallery file as an animated GIF |
 | `POST /api/gallery/show` | `{"file", "name", "for"}`: show it now, like an alert that every profile accepts (30 s by default) |
 | `POST /api/gallery/save` | `{"file", "name", "channel"}`: keep it among a profile's ambient pictures |
@@ -154,6 +155,16 @@ shows over scenes and ambient and is saved; alerts still show on top. A scene ca
 | `visualizer` | `style` 0-11; it follows what the display plays as a speaker |
 | `animations` | none: plays the list kept on the display from the Divoom app, which pixelhub never writes |
 | `scoreboard` | `red`, `blue`, 0-999 |
+| `stopwatch` | `running` |
+| `countdown` | `seconds` 1-5999, `running` |
+| `noise` | `running`: the noise meter, with the display's microphone |
+
+A running stopwatch, countdown or noise meter is stopped when something else takes the screen.
+
+The clock pixelhub shows between pictures, and any clock without a `color`, takes its look from
+`"clock"` in `PUT /api/settings` (a `clock` view; red until set), so the look kept on the display
+from the Divoom app never shows through. With `weather` or `temperature` on, the clock gets the
+current weather for `location` from [Open-Meteo](https://open-meteo.com) every 15 minutes.
 
 ```sh
 curl -X PUT localhost:8000/api/mode -d '{"mode":"clock","style":1,"calendar":true}'

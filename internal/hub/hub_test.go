@@ -643,6 +643,8 @@ func TestPicturesNeedTheirChannel(t *testing.T) {
 func TestClockLooksAsSet(t *testing.T) {
 	t.Parallel()
 	h, d, now := newHub(t, oneChannel("0s", "1m"), nil)
+	rain := display.Weather{Known: true, Celsius: 14, Sky: display.SkyRain}
+	h.Weather = fakeWeather{rain}
 	*now = friday(10, 0)
 	h.update()
 	last := func() display.Content { d.mu.Lock(); defer d.mu.Unlock(); return d.shown[len(d.shown)-1] }
@@ -654,7 +656,11 @@ func TestClockLooksAsSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.update()
-	if c := last(); c.View != purple {
+	if c := last(); c.View != purple || c.Weather != rain {
 		t.Errorf("after changing the clock: %+v", c.View)
 	}
 }
+
+type fakeWeather struct{ w display.Weather }
+
+func (f fakeWeather) Current() display.Weather { return f.w }

@@ -26,6 +26,8 @@ const (
 	cmdView       = 0x45
 	cmdAnimation  = 0x49
 	cmdBrightness = 0x74
+	cmdWeather    = 0x5f
+	cmdTool       = 0x72
 
 	viewClock      = 0x00
 	viewLight      = 0x01
@@ -98,8 +100,45 @@ func View(v display.View, level int) [][]byte {
 		return [][]byte{Message(cmdView, []byte{viewAnimations})}
 	case display.ModeScoreboard:
 		return [][]byte{scoreboardView(v.Red, v.Blue)}
+	case display.ModeStopwatch, display.ModeCountdown, display.ModeNoise:
+		return [][]byte{tool(v)}
 	}
 	return nil
+}
+
+const (
+	toolStopwatch = 0x00
+	toolNoise     = 0x02
+	toolCountdown = 0x03
+)
+
+func tool(v display.View) []byte {
+	switch v.Mode {
+	case display.ModeStopwatch:
+		return Message(cmdTool, []byte{toolStopwatch, flag(v.Running)})
+	case display.ModeNoise:
+		// The noise meter takes 1 to start and 2 to stop.
+		return Message(cmdTool, []byte{toolNoise, 2 - flag(v.Running)})
+	}
+	return Message(cmdTool, []byte{toolCountdown, flag(v.Running), byte(v.Seconds / 60), byte(v.Seconds % 60)})
+}
+
+// Leave stops a running tool that next no longer shows, so it does not keep going out of sight.
+func Leave(prev, next display.Content) [][]byte {
+	if prev.Kind != display.Native || !prev.View.Mode.Tool() || !prev.View.Running {
+		return nil
+	}
+	if next.Kind == display.Native && next.View.Mode == prev.View.Mode {
+		return nil
+	}
+	stopped := prev.View
+	stopped.Running = false
+	return [][]byte{tool(stopped)}
+}
+
+// Weather sets what the clock shows as weather and temperature.
+func Weather(w display.Weather) []byte {
+	return Message(cmdWeather, []byte{byte(int8(max(-127, min(127, w.Celsius)))), byte(w.Sky)})
 }
 
 func flag(b bool) byte {
@@ -139,7 +178,11 @@ func Encode(c display.Content) ([][]byte, error) {
 		if err := c.View.Validate(); err != nil {
 			return nil, err
 		}
-		return append(View(c.View, c.Brightness), brightness), nil
+		msgs := View(c.View, c.Brightness)
+		if c.View.Mode == display.ModeClock && c.Weather.Known {
+			msgs = append([][]byte{Weather(c.Weather)}, msgs...)
+		}
+		return append(msgs, brightness), nil
 	case c.Kind == display.Color:
 		return [][]byte{Light(c.Fill, c.Brightness), brightness}, nil
 	case len(c.Frames) == 0:

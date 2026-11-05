@@ -951,8 +951,8 @@ class LedMatrix extends LitElement {
 customElements.define("ph-led", LedMatrix);
 
 // The display's own modes, as its side button cycles them. Each tap is sent at once, like the button.
-const MODES = ["clock", "light", "animations", "visualizer", "scoreboard"];
-const modeName = (m) => ({ clock: t("Clock"), light: t("Light"), animations: t("My animations"), visualizer: t("Music"), scoreboard: t("Scoreboard") })[m];
+const MODES = ["clock", "light", "animations", "visualizer"];
+const modeName = (m) => ({ clock: t("Clock"), light: t("Light"), animations: t("My animations"), visualizer: t("Music"), scoreboard: t("Scoreboard"), stopwatch: t("Stopwatch"), countdown: t("Countdown"), noise: t("Noise meter") })[m];
 const modeIcons = {
   clock: icon(svg`<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>`),
   light: icon(svg`<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.8V16h5v-.3c0-.7.4-1.4 1-1.8A6 6 0 0 0 12 3Z"/>`),
@@ -970,7 +970,7 @@ class Modes extends LitElement {
   disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.tick); }
   static styles = [base, css`
     .modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-    @media (min-width: 560px) { .modes { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+    @media (min-width: 560px) { .modes { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
     .mode { border: 1px solid var(--line); background: var(--surface); border-radius: 16px; padding: 12px 6px 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 500; min-width: 0; }
     .mode svg { width: 24px; height: 24px; }
     .mode span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
@@ -1093,7 +1093,8 @@ class Modes extends LitElement {
           ${icon(svg`<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/>`)}<span>${t("Automatic")}</span></button>
         ${MODES.map((m) => html`<button class="mode" aria-pressed=${String(active === m)} ?disabled=${this.busy} @click=${() => this.pick(m)}>${modeIcons[m]}<span>${modeName(m)}</span></button>`)}
       </div>
-      ${active ? html`<div class="panel">${this.options(active)}</div>`
+      ${active && !MODES.includes(active) ? html`<div class="panel"><p>${t("{app} is on. Change it in Apps.", { app: modeName(active) })}</p></div>`
+        : active ? html`<div class="panel">${this.options(active)}</div>`
         : html`<div class="panel"><p class="small muted">${t("Automatic shows alerts, scenes and pictures by the schedule, and this clock between them.")}</p>
           ${this.options("clock", { mode: "clock", color: "#ff1e28", ...this.clock }, (p) => this.setClock(p))}</div>`}`;
   }
@@ -1625,6 +1626,125 @@ class MusicTab extends LitElement {
 }
 customElements.define("ph-music", MusicTab);
 
+const SKIES = () => ({ 1: t("Clear"), 3: t("Cloudy"), 5: t("Storm"), 6: t("Rain"), 8: t("Snow"), 9: t("Fog") });
+const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+// The display's built-in apps, and the weather that its clock shows.
+class AppsTab extends LitElement {
+  static properties = { state: { attribute: false }, weather: { state: true }, busy: { state: true }, minutes: { state: true }, seconds: { state: true } };
+  static styles = [base, css`
+    .grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+    @media (min-width: 760px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
+    .card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .banner { padding: 10px 12px; border-radius: 12px; font-size: 13px; background: color-mix(in srgb, var(--warn) 16%, transparent); margin: 12px 0; }
+    .head { display: flex; align-items: center; gap: 10px; }
+    .head svg { width: 22px; height: 22px; color: var(--accent); }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+    .big { font-family: var(--font-pixel); font-size: 44px; line-height: 1; }
+    .presets { display: flex; gap: 6px; flex-wrap: wrap; }
+    .choice { border: 1px solid var(--line); background: none; border-radius: 999px; height: 34px; padding: 0 14px; font-size: 13px; color: var(--muted); cursor: pointer; }
+    .choice:hover { color: var(--ink); }
+    .time { display: flex; align-items: center; gap: 6px; }
+    .time input { width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
+    .toggles { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; }
+    .toggles label { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+    input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
+    .score { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+    .team { border-radius: 14px; padding: 12px; display: grid; justify-items: center; gap: 8px; background: color-mix(in srgb, var(--team) 16%, transparent); border: 1px solid color-mix(in srgb, var(--team) 45%, transparent); }
+    .team output { font-family: var(--font-pixel); font-size: 40px; line-height: 1; color: var(--team); }
+    .team .pm { display: flex; gap: 8px; }
+    .team button { width: 44px; height: 40px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--team) 45%, transparent); background: var(--surface); font-size: 20px; cursor: pointer; }
+  `];
+  constructor() { super(); this.minutes = 5; this.seconds = 0; }
+  connectedCallback() { super.connectedCallback(); this.load(); this.timer = setInterval(() => { if (!document.hidden) this.load(); }, 60000); }
+  disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.timer); }
+  async load() { try { this.weather = await api("GET", "weather"); } catch { /* the status poll shows outages */ } }
+
+  get mode() { return this.state?.mode ?? {}; }
+  async run(view) {
+    this.busy = true;
+    try { saved(this, await api("PUT", "mode", view)); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+  async automatic() {
+    this.busy = true;
+    try { saved(this, await api("DELETE", "mode")); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+  async clockShows(patch) {
+    const next = { mode: "clock", color: "#ff1e28", ...this.state?.clock, ...patch };
+    for (const k of Object.keys(next)) if (!next[k]) delete next[k];
+    this.busy = true;
+    try { saved(this, await api("PUT", "settings", { clock: next })); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+
+  card(mode, title, glyph, body) {
+    const on = this.mode.mode === mode;
+    return html`<section class="card ${on ? "on" : ""}" aria-label=${title}>
+      <div class="head">${glyph}<h2>${title}</h2>${on ? html`<span class="tag on">${t("Showing")}</span>` : nothing}</div>
+      ${body(on)}
+      ${on ? html`<div class="row"><button class="btn small" ?disabled=${this.busy} @click=${() => this.automatic()}>${t("Back to automatic")}</button></div>` : nothing}
+    </section>`;
+  }
+  startStop(mode, on, extra = {}) {
+    const running = on && this.mode.running;
+    return html`<div class="row">
+      <button class="btn primary" ?disabled=${this.busy} @click=${() => this.run({ mode, ...extra, running: true })}>${running ? t("Start again") : t("Start")}</button>
+      ${running ? html`<button class="btn" ?disabled=${this.busy} @click=${() => this.run({ ...this.mode, running: false })}>${t("Stop")}</button>` : nothing}
+    </div>`;
+  }
+
+  weatherCard() {
+    const w = this.weather, c = this.state?.clock ?? {}, loc = this.state?.location;
+    const greenwich = loc && Math.abs(loc.latitude - 51.4769) < 0.001 && Math.abs(loc.longitude + 0.0005) < 0.001;
+    return html`<section class="card" aria-labelledby="wx-h">
+      <div class="head">${icon(svg`<path d="M7 18a4 4 0 1 1 .9-7.9A5.5 5.5 0 0 1 18.5 12 3 3 0 0 1 18 18Z"/>`)}<h2 id="wx-h">${t("Weather")}</h2></div>
+      ${w?.known ? html`<div class="row"><span class="big">${w.celsius}°</span><span>${SKIES()[w.sky] ?? ""}</span></div>
+          <p class="small muted">${t("Read at {time} from Open-Meteo, every 15 minutes.", { time: new Date(w.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })}</p>`
+        : html`<p class="muted">${w?.error ? t("Could not read the weather: {error}", { error: w.error }) : t("Reading the weather…")}</p>`}
+      ${greenwich ? html`<p class="banner">${t("The location is still the default, Greenwich. Set yours in Settings so the weather is yours.")}</p>` : nothing}
+      <p class="small muted">${t("The Evo's clock shows it when these are on:")}</p>
+      <div class="toggles">
+        <label><input type="checkbox" .checked=${!!c.weather} ?disabled=${this.busy} @change=${(e) => this.clockShows({ weather: e.target.checked })}>${t("Weather")}</label>
+        <label><input type="checkbox" .checked=${!!c.temperature} ?disabled=${this.busy} @change=${(e) => this.clockShows({ temperature: e.target.checked })}>${t("Temperature")}</label>
+      </div>
+    </section>`;
+  }
+
+  render() {
+    const m = this.mode;
+    const total = Math.min(5999, Math.max(1, (Number(this.minutes) || 0) * 60 + (Number(this.seconds) || 0)));
+    return html`<div class="grid">
+      ${this.weatherCard()}
+      ${this.card("stopwatch", t("Stopwatch"), icon(svg`<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M10 2h4M12 2v3"/>`), (on) => html`
+        <p class="muted">${t("Counts up on the display from zero.")}</p>${this.startStop("stopwatch", on)}`)}
+      ${this.card("countdown", t("Countdown"), icon(svg`<path d="M6 2h12M6 22h12M7 2c0 6 10 6 10 10S7 16 7 22M17 2c0 6-10 6-10 10s10 4 10 10"/>`), (on) => html`
+        ${on ? html`<div class="row"><span class="big">${mmss(m.seconds ?? 0)}</span>${m.running ? nothing : html`<span class="muted">${t("Stopped")}</span>`}</div>` : nothing}
+        <div class="row presets">${[1, 5, 10, 25].map((n) => html`<button class="choice" @click=${() => { this.minutes = n; this.seconds = 0; }}>${n} min</button>`)}</div>
+        <div class="row time">
+          <input type="number" min="0" max="99" aria-label=${t("Minutes")} .value=${String(this.minutes)} @input=${(e) => { this.minutes = e.target.value; }}> :
+          <input type="number" min="0" max="59" aria-label=${t("Seconds")} .value=${String(this.seconds).padStart(2, "0")} @input=${(e) => { this.seconds = e.target.value; }}>
+        </div>
+        ${this.startStop("countdown", on, { seconds: total })}`)}
+      ${this.card("noise", t("Noise meter"), icon(svg`<path d="M3 15v4M7 11v8M11 7v12M15 11v8M19 4v15"/>`), (on) => html`
+        <p class="muted">${t("Shows how loud the room is, with the Evo's microphone.")}</p>${this.startStop("noise", on)}`)}
+      ${this.card("scoreboard", t("Scoreboard"), icon(svg`<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M12 6v12"/>`), (on) => {
+        const v = on ? m : { mode: "scoreboard" };
+        const set = (patch) => this.run({ mode: "scoreboard", red: v.red, blue: v.blue, ...patch });
+        const team = (key, label, colour) => html`<div class="team" style="--team:${colour}">
+          <span class="small">${label}</span><output>${v[key] ?? 0}</output>
+          <div class="pm"><button aria-label=${t("{team} minus one", { team: label })} @click=${() => set({ [key]: Math.max(0, (v[key] ?? 0) - 1) || undefined })}>−</button>
+            <button aria-label=${t("{team} plus one", { team: label })} @click=${() => set({ [key]: Math.min(999, (v[key] ?? 0) + 1) })}>+</button></div></div>`;
+        return html`<div class="score">${team("red", t("Red"), "#ff453a")}${team("blue", t("Blue"), "#0a84ff")}</div>
+          <div class="row">${on ? html`<button class="btn small" @click=${() => set({ red: undefined, blue: undefined })}>${t("Reset to 0")}</button>`
+            : html`<button class="btn primary small" @click=${() => set({})}>${t("Show")}</button>`}</div>`;
+      })}
+    </div>`;
+  }
+}
+customElements.define("ph-apps", AppsTab);
+
 class ConnectionCard extends LitElement {
   static properties = { status: { attribute: false }, busy: { state: true } };
   static styles = [base, css`
@@ -1688,6 +1808,7 @@ const TABS = [
   ["display", "Display", icon(svg`<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 8.5h.01M12 8.5h.01M15.5 8.5h.01M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 15.5h.01M12 15.5h.01M15.5 15.5h.01" stroke-width="2.6"/>`)],
   ["gallery", "Gallery", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="m14 20 2.5-3.5 2 2.5 1.5-2"/>`)],
   ["music", "Music", icon(svg`<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>`)],
+  ["apps", "Apps", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M17 13.5v7M13.5 17h7"/>`)],
   ["profiles", "Profiles", icon(svg`<path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="16" r="3"/>`)],
   ["schedule", "Schedule", icon(svg`<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>`)],
   ["settings", "Settings", icon(svg`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>`)],
@@ -1711,7 +1832,7 @@ class PixelhubApp extends LitElement {
     .bottom { display: none; }
     @media (max-width: 759px) {
       .top { display: none; }
-      .bottom { display: grid; grid-template-columns: repeat(6, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
+      .bottom { display: grid; grid-template-columns: repeat(7, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
         padding: 6px 8px max(8px, env(safe-area-inset-bottom, 0px)); background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--line); }
       .bottom button { flex-direction: column; gap: 3px; font-size: 11px; padding: 6px 2px; }
       .bottom button[aria-current=page] { background: none; }
@@ -1814,6 +1935,7 @@ class PixelhubApp extends LitElement {
   page(view) {
     switch (this.tab) {
       case "gallery": return html`<ph-gallery .state=${view}></ph-gallery>`;
+      case "apps": return html`<ph-apps .state=${view}></ph-apps>`;
       case "music": return html`<ph-music .state=${view} .status=${this.status} .styles=${this.modes}></ph-music>`;
       case "profiles": return html`<div class="tab"><ph-switch .state=${view} .status=${this.status}></ph-switch>
         <ph-channels .state=${view} .status=${this.status} .sprites=${this.sprites}></ph-channels></div>`;

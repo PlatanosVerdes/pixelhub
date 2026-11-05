@@ -347,3 +347,44 @@ func TestParseState(t *testing.T) {
 		t.Error("a command is not a state report")
 	}
 }
+
+func TestTools(t *testing.T) {
+	t.Parallel()
+	countdown := display.View{Mode: display.ModeCountdown, Seconds: 90, Running: true}
+	for _, tc := range []struct {
+		v    display.View
+		want string
+	}{
+		{display.View{Mode: display.ModeStopwatch, Running: true}, "720001"},
+		{display.View{Mode: display.ModeStopwatch}, "720000"},
+		{display.View{Mode: display.ModeNoise, Running: true}, "720201"},
+		{display.View{Mode: display.ModeNoise}, "720202"},
+		{countdown, "720301011e"},
+	} {
+		got := View(tc.v, 50)
+		if len(got) != 1 || !bytes.Equal(got[0], Message(got[0][3], mustHex(t, tc.want)[1:])) || got[0][3] != mustHex(t, tc.want)[0] {
+			t.Errorf("%s: %x, want payload %s", tc.v, got, tc.want)
+		}
+	}
+	clock := display.View{Mode: display.ModeClock, Color: "#ffffff"}.Content()
+	if stop := Leave(countdown.Content(), clock); len(stop) != 1 || !bytes.Equal(stop[0], Message(cmdTool, []byte{toolCountdown, 0, 1, 30})) {
+		t.Errorf("leaving a running countdown: %x", stop)
+	}
+	if stop := Leave(countdown.Content(), countdown.Content()); stop != nil {
+		t.Errorf("staying on the countdown sent %x", stop)
+	}
+	clock.Weather = display.Weather{Known: true, Celsius: -3, Sky: display.SkySnow}
+	msgs, err := Encode(clock)
+	if err != nil || !bytes.Equal(msgs[0], Message(cmdWeather, []byte{0xfd, 0x08})) {
+		t.Errorf("a clock with weather starts with it: %x %v", msgs, err)
+	}
+}
+
+func mustHex(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
