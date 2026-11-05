@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -16,8 +17,11 @@ type fakeLink struct {
 	written chan []byte
 }
 
-func (f *fakeLink) Write(p []byte) (int, error) { f.written <- append([]byte(nil), p...); return len(p), nil }
-func (f *fakeLink) Close() error                { return f.w.Close() }
+func (f *fakeLink) Write(p []byte) (int, error) {
+	f.written <- append([]byte(nil), p...)
+	return len(p), nil
+}
+func (f *fakeLink) Close() error { return f.w.Close() }
 
 func TestBridge(t *testing.T) {
 	t.Parallel()
@@ -111,5 +115,38 @@ func TestNewClientDropsTheLink(t *testing.T) {
 	case <-links:
 	case <-time.After(2 * time.Second):
 		t.Fatal("the new client could not connect again")
+	}
+}
+
+func TestBusyDoesNotUseATry(t *testing.T) {
+	t.Parallel()
+	dials := make(chan int, 8)
+	n := 0
+	b := New(func([6]byte, byte) (io.ReadWriteCloser, error) {
+		n++
+		dials <- n
+		if n <= 2 {
+			return nil, syscall.EBUSY
+		}
+		r, w := io.Pipe()
+		return &fakeLink{Reader: r, w: w, written: make(chan []byte, 8)}, nil
+	}, slog.New(slog.DiscardHandler))
+	b.Retry, b.GreetAfter = time.Millisecond, time.Hour
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer ln.Close()
+	go b.Serve(ln)
+
+	c, _ := net.Dial("tcp", ln.Addr().String())
+	defer c.Close()
+	c.Write([]byte{opConnect, 0x01, 0x12, 0x23, 0x45, 0x56, 0x67, 0x01})
+	for want := 1; want <= 3; want++ {
+		select {
+		case got := <-dials:
+			if got != want {
+				t.Fatalf("dial %d, want %d", got, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("dial %d never came: a busy link used up the one try", want)
+		}
 	}
 }

@@ -261,7 +261,8 @@ func (l *link) connect() error {
 func (l *link) hold() error {
 	keepalive := time.NewTicker(l.opt.Keepalive)
 	defer keepalive.Stop()
-	var unanswered <-chan time.Time
+	// A weak Bluetooth signal answers seconds late, so a ping has until the next one to be answered.
+	waiting := false
 	for {
 		if err := l.repaint(); err != nil {
 			return err
@@ -275,12 +276,13 @@ func (l *link) hold() error {
 			}
 		case <-l.paint:
 		case <-keepalive.C:
+			if waiting {
+				return errors.New("no answer to the keepalive")
+			}
 			if err := l.ping(); err != nil {
 				return err
 			}
-			unanswered = time.After(l.opt.ProbeTimeout)
-		case <-unanswered:
-			return errors.New("no answer to the keepalive")
+			waiting = true
 		case ev := <-l.events:
 			if ev.err != nil {
 				return fmt.Errorf("read bridge: %w", ev.err)
@@ -293,7 +295,7 @@ func (l *link) hold() error {
 				continue
 			}
 			l.acked()
-			unanswered = nil
+			waiting = false
 			if v, ok := divoom.ParseState(ev.frame); ok {
 				l.reported(v)
 			}
