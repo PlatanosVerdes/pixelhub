@@ -53,11 +53,11 @@ func TestBridge(t *testing.T) {
 	if got := read(1); got[0] != linkDown {
 		t.Fatalf("a frame without a link: %x", got)
 	}
-	c.Write([]byte{opConnect, 0x11, 0x75, 0x58, 0xf7, 0x2c, 0x35, 0x01})
+	c.Write([]byte{opConnect, 0x01, 0x12, 0x23, 0x45, 0x56, 0x67, 0x01})
 	if got := read(len(greeting)); !bytes.Equal(got, greeting) {
 		t.Fatalf("no greeting from the display, so the bridge greets: %x", got)
 	}
-	if dialed != [6]byte{0x11, 0x75, 0x58, 0xf7, 0x2c, 0x35} {
+	if dialed != [6]byte{0x01, 0x12, 0x23, 0x45, 0x56, 0x67} {
 		t.Errorf("dialed %x", dialed)
 	}
 	c.Write(append([]byte{0x00}, frame...)) // a stray byte, then a frame
