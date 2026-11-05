@@ -410,6 +410,17 @@ func (a *Account) accessToken(ctx context.Context) (string, error) {
 		return "", errors.New("not signed in")
 	}
 	tok, err := a.token(ctx, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh}, "client_id": {clientID}})
+	var grant *grantError
+	if errors.As(err, &grant) {
+		// The refresh token expired or was revoked: drop it so the page offers to connect again.
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		a.log.Warn("spotify sign-in no longer valid, connect again", "err", err)
+		if saveErr := a.saveLocked(saved{ClientID: a.saved.ClientID}); saveErr != nil {
+			return "", saveErr
+		}
+		return "", err
+	}
 	if err != nil {
 		return "", err
 	}
@@ -425,6 +436,10 @@ func (a *Account) accessToken(ctx context.Context) (string, error) {
 	}
 	return a.access, nil
 }
+
+type grantError struct{ detail string }
+
+func (g *grantError) Error() string { return "token: " + g.detail }
 
 type token struct {
 	Access    string `json:"access_token"`
@@ -448,6 +463,9 @@ func (a *Account) token(ctx context.Context, form url.Values) (token, error) {
 	var tok token
 	if err := json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&tok); err != nil {
 		return token{}, fmt.Errorf("token: HTTP %d", res.StatusCode)
+	}
+	if tok.Error == "invalid_grant" {
+		return token{}, &grantError{cmpOr(tok.Detail, tok.Error)}
 	}
 	if res.StatusCode != http.StatusOK || tok.Access == "" {
 		return token{}, fmt.Errorf("token: %s", cmpOr(tok.Detail, tok.Error, res.Status))

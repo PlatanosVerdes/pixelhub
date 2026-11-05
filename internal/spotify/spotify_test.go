@@ -32,6 +32,7 @@ type fakeSpotify struct {
 	challenge string
 	refreshes int
 	limited   bool
+	revoked   bool
 	playing   bool
 }
 
@@ -73,6 +74,11 @@ func (f *fakeSpotify) token(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = io.WriteString(w, `{"access_token":"a1","refresh_token":"r1","expires_in":3600}`)
 	case "refresh_token":
+		if f.revoked {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":"invalid_grant","error_description":"Refresh token revoked"}`)
+			return
+		}
 		f.refreshes++
 		_, _ = io.WriteString(w, `{"access_token":"a2","refresh_token":"r2","expires_in":3600}`)
 	}
@@ -242,5 +248,22 @@ func TestForgetKeepsTheApp(t *testing.T) {
 	s := a.Status()
 	if s.Connected || !s.Configured || s.Now != nil {
 		t.Errorf("after forget: %+v", s)
+	}
+}
+
+func TestRevokedSignInDisconnects(t *testing.T) {
+	t.Parallel()
+	f := newFake(t)
+	a := open(t, f)
+	signIn(t, a, f)
+	a.mu.Lock()
+	a.access = ""
+	a.mu.Unlock()
+	f.mu.Lock()
+	f.revoked = true
+	f.mu.Unlock()
+	a.poll(context.Background())
+	if s := a.Status(); s.Connected || !s.Configured {
+		t.Errorf("after a revoked refresh token: %+v", s)
 	}
 }
