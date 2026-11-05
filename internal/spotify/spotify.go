@@ -2,6 +2,7 @@
 package spotify
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -200,7 +201,7 @@ func (a *Account) Finish(ctx context.Context, state, code string) error {
 	if err := a.get(ctx, "/me", &me); err == nil {
 		a.mu.Lock()
 		next := a.saved
-		next.User = cmpOr(me.DisplayName, me.ID)
+		next.User = cmp.Or(me.DisplayName, me.ID)
 		err = a.saveLocked(next)
 		a.mu.Unlock()
 	}
@@ -492,10 +493,10 @@ func (a *Account) token(ctx context.Context, form url.Values) (token, error) {
 		return token{}, fmt.Errorf("token: HTTP %d", res.StatusCode)
 	}
 	if tok.Error == "invalid_grant" {
-		return token{}, &grantError{cmpOr(tok.Detail, tok.Error)}
+		return token{}, &grantError{cmp.Or(tok.Detail, tok.Error)}
 	}
 	if res.StatusCode != http.StatusOK || tok.Access == "" {
-		return token{}, fmt.Errorf("token: %s", cmpOr(tok.Detail, tok.Error, res.Status))
+		return token{}, fmt.Errorf("token: %s", cmp.Or(tok.Detail, tok.Error, res.Status))
 	}
 	return tok, nil
 }
@@ -519,13 +520,4 @@ func random(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
-}
-
-func cmpOr(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }

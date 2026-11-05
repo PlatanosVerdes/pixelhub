@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
+	"github.com/PlatanosVerdes/pixelhub/internal/gallery"
 	"github.com/PlatanosVerdes/pixelhub/internal/hub"
 	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
@@ -445,6 +446,44 @@ func TestPicturePNG(t *testing.T) {
 	for _, path := range []string{"/api/channels/office/pictures/none.png", "/api/channels/nope/pictures/dot.png", "/api/channels/office/pictures/..%2Fx.png"} {
 		if rec := f.do(t, "GET", path, ""); rec.Code < 400 {
 			t.Errorf("GET %s: code %d, want an error", path, rec.Code)
+		}
+	}
+}
+
+type fakeGallery struct{}
+
+func (fakeGallery) List(_ context.Context, category int, _ gallery.Sort, page, _ int) ([]gallery.Item, error) {
+	if page > 1 {
+		return nil, nil
+	}
+	return []gallery.Item{{Name: "cat", Author: "someone", Likes: 3, FileID: "group1/M00/aa"}}, nil
+}
+
+func (fakeGallery) Download(context.Context, string) ([]byte, error) {
+	return []byte("not a gallery file"), nil
+}
+
+func TestGallery(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	srv := (&Server{Hub: f.hub, Sprites: nil, Gallery: fakeGallery{}, Size: 16}).Handler()
+	tests := []struct {
+		path     string
+		code     int
+		contains string
+	}{
+		{"/api/gallery/categories", 200, `"recommended"`},
+		{"/api/gallery?category=animal", 200, `"file":"group1/M00/aa"`},
+		{"/api/gallery?category=animal&page=2", 200, `"more":false`},
+		{"/api/gallery?category=cars", 400, "category"},
+		{"/api/gallery?category=animal&page=0", 400, "page"},
+		{"/api/gallery/gif?file=group1/M00/aa", 422, "not a 16x16"},
+	}
+	for _, tt := range tests {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest("GET", tt.path, nil))
+		if rec.Code != tt.code || !strings.Contains(rec.Body.String(), tt.contains) {
+			t.Errorf("%s: code %d body %s, want %d with %s", tt.path, rec.Code, rec.Body, tt.code, tt.contains)
 		}
 	}
 }

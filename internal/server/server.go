@@ -27,6 +27,7 @@ const (
 
 type Hub interface {
 	Notify(hub.Alert) (channel string, accepted bool)
+	Show(c display.Content, d time.Duration)
 	SetChannel(name string, d time.Duration) error
 	ClearChannel()
 	Release() time.Time
@@ -54,6 +55,9 @@ type Server struct {
 	Sprites Sprites
 	// Spotify, when set, links a Spotify account under /api/spotify.
 	Spotify Spotify
+	// Gallery, when set, browses the Divoom community gallery under /api/gallery.
+	Gallery Gallery
+	gifs    gifCache
 	// Size is the display's side in pixels, for drawing previews.
 	Size    int
 	Version string
@@ -91,6 +95,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/channels/{name}/pictures/{file}", s.removePicture)
 	if s.Spotify != nil {
 		s.spotifyRoutes(mux)
+	}
+	if s.Gallery != nil {
+		s.galleryRoutes(mux)
 	}
 	return s.withWeb(mux)
 }

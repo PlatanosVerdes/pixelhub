@@ -18,6 +18,7 @@ import (
 	"github.com/PlatanosVerdes/pixelhub/internal/config"
 	"github.com/PlatanosVerdes/pixelhub/internal/demo"
 	"github.com/PlatanosVerdes/pixelhub/internal/divoom"
+	"github.com/PlatanosVerdes/pixelhub/internal/gallery"
 	"github.com/PlatanosVerdes/pixelhub/internal/hub"
 	"github.com/PlatanosVerdes/pixelhub/internal/server"
 	"github.com/PlatanosVerdes/pixelhub/internal/spotify"
@@ -93,7 +94,7 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 
 	srv := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),
-		Handler:           (&server.Server{Hub: h, Sprites: sprites, Spotify: music, Size: divoom.Size, Version: buildVersion}).Handler(),
+		Handler:           (&server.Server{Hub: h, Sprites: sprites, Spotify: music, Gallery: gallery.NewClient(), Size: divoom.Size, Version: buildVersion}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,

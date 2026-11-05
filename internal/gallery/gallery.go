@@ -107,7 +107,7 @@ func (c *Client) List(ctx context.Context, category int, sort Sort, page, perPag
 // Download fetches a gallery file as stored, still encrypted.
 func (c *Client) Download(ctx context.Context, fileID string) ([]byte, error) {
 	if fileID == "" || strings.Contains(fileID, "..") {
-		return nil, fmt.Errorf("gallery download: bad file id %q", fileID)
+		return nil, fmt.Errorf("%w %q", ErrBadFile, fileID)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.Files+"/"+strings.TrimPrefix(fileID, "/"), nil)
 	if err != nil {
@@ -124,7 +124,10 @@ func (c *Client) Download(ctx context.Context, fileID string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, maxFile))
 }
 
-var ErrFormat = errors.New("gallery: not a 16x16 animation file")
+var (
+	ErrFormat  = errors.New("gallery: not a 16x16 animation file")
+	ErrBadFile = errors.New("gallery: bad file id")
+)
 
 // Decode turns a 16x16 gallery file into its frames and the delay between them.
 func Decode(file []byte) ([]*image.RGBA, time.Duration, error) {

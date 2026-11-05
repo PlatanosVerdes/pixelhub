@@ -1178,6 +1178,97 @@ class DisplayTab extends LitElement {
 customElements.define("ph-display", DisplayTab);
 
 
+
+// The Divoom community gallery: browse by category, show a picture now or keep it in a profile.
+const CATEGORIES = ["recommended", "top", "new", "animal", "food", "character", "emoji", "nature", "plant", "person", "festival", "pattern", "symbol", "creative", "daily"];
+const categoryName = (c) => ({ recommended: t("Recommended"), top: t("Top"), new: t("New"), animal: t("Animals"), food: t("Food"), character: t("Characters"),
+  emoji: t("Emoji"), nature: t("Nature"), plant: t("Plants"), person: t("People"), festival: t("Festivals"), pattern: t("Patterns"), symbol: t("Symbols"),
+  creative: t("Creative"), daily: t("Everyday") })[c] ?? c;
+const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
+
+class GalleryTab extends LitElement {
+  static properties = { state: { attribute: false }, category: { state: true }, sort: { state: true }, items: { state: true }, page: { state: true },
+    more: { state: true }, loading: { state: true }, picked: { state: true }, target: { state: true }, busy: { state: true }, problem: { state: true } };
+  static styles = [base, css`
+    .bar { display: grid; gap: 10px; margin-bottom: 14px; }
+    .cats { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+    .cat { flex: none; border: 1px solid var(--line); background: none; border-radius: 999px; height: 34px; padding: 0 14px; font-size: 13px; color: var(--muted); cursor: pointer; }
+    .cat[aria-pressed=true] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; }
+    .item { aspect-ratio: 1; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: #000; overflow: hidden; cursor: pointer; }
+    .item img { width: 100%; height: 100%; display: block; }
+    .item[aria-pressed=true] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+    .more { display: flex; justify-content: center; margin-top: 16px; }
+    .sheet { position: sticky; top: 64px; z-index: 3; margin-bottom: 14px; background: var(--surface); border: 1px solid var(--accent); border-radius: 18px; padding: 14px;
+      display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px; align-items: center; box-shadow: 0 14px 40px -12px rgba(0, 0, 0, .6); }
+    .sheet img { width: 96px; height: 96px; border-radius: 10px; background: #000; }
+    .sheet h3 { margin: 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sheet .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+    .sheet select { max-width: 150px; }
+    .meta { display: flex; gap: 12px; flex-wrap: wrap; }
+    .empty { padding: 30px 0; text-align: center; }
+  `];
+  constructor() { super(); this.category = "recommended"; this.sort = "likes"; this.items = []; this.page = 1; }
+  connectedCallback() { super.connectedCallback(); if (!this.items.length) this.load(true); }
+
+  async load(fresh) {
+    this.loading = true;
+    this.problem = "";
+    const page = fresh ? 1 : this.page + 1;
+    try {
+      const r = await api("GET", `gallery?category=${this.category}&sort=${this.sort}&page=${page}`);
+      const seen = new Set(fresh ? [] : this.items.map((i) => i.file));
+      this.items = [...(fresh ? [] : this.items), ...r.items.filter((i) => !seen.has(i.file))];
+      this.page = page;
+      this.more = r.more;
+    } catch (e) { this.problem = e.message; }
+    this.loading = false;
+  }
+  pick(field, value) { this[field] = value; this.picked = null; this.load(true); }
+
+  async show() {
+    this.busy = true;
+    try { await api("POST", "gallery/show", { file: this.picked.file, name: this.picked.name, for: "30s" }); send(this, "refresh"); toast(this, t("Showing {name} for 30 s", { name: this.picked.name })); }
+    catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+  async save() {
+    const channel = this.target ?? this.state?.channels?.[0]?.name;
+    this.busy = true;
+    try { await api("POST", "gallery/save", { file: this.picked.file, name: this.picked.name, channel }); toast(this, t("Saved in {channel}", { channel })); }
+    catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+
+  render() {
+    const p = this.picked;
+    const channels = this.state?.channels ?? [];
+    return html`
+      <div class="bar">
+        <div class="cats" role="group" aria-label=${t("Categories")}>${CATEGORIES.map((c) =>
+          html`<button class="cat" aria-pressed=${String(c === this.category)} @click=${() => this.pick("category", c)}>${categoryName(c)}</button>`)}</div>
+        <div>${segmented([["likes", t("Most liked")], ["new", t("Newest")]], this.sort, (v) => this.pick("sort", v))}</div>
+      </div>
+      ${p ? html`<div class="sheet" role="dialog" aria-label=${p.name}>
+        <img class="pix" src=${gifURL(p.file)} alt="">
+        <div><h3>${p.name}</h3><span class="small muted meta"><span>${p.author}</span><span>${p.likes} ♥</span></span>
+          <div class="acts">
+            <button class="btn primary small" ?disabled=${this.busy} @click=${() => this.show()}>${t("Show now")}</button>
+            ${channels.length ? html`<select aria-label=${t("Profile")} @change=${(e) => { this.target = e.target.value; }}>
+                ${channels.map((c) => html`<option value=${c.name} ?selected=${c.name === (this.target ?? channels[0].name)}>${c.name}</option>`)}</select>
+              <button class="btn small" ?disabled=${this.busy} @click=${() => this.save()}>${t("Save in profile")}</button>` : nothing}
+            <button class="icon" aria-label=${t("Close")} @click=${() => { this.picked = null; }}>${icons.close}</button>
+          </div></div></div>` : nothing}
+      ${this.problem ? html`<p class="err">${this.problem}</p>` : nothing}
+      ${!this.items.length && !this.loading && !this.problem ? html`<p class="empty muted">${t("Nothing in this category right now.")}</p>` : nothing}
+      <div class="grid">${repeat(this.items, (i) => i.file, (i) => html`<button class="item" aria-pressed=${String(p?.file === i.file)} title=${i.name} aria-label=${i.name}
+        @click=${() => { this.picked = i; }}><img class="pix" src=${gifURL(i.file)} alt="" loading="lazy"></button>`)}</div>
+      <div class="more">${this.loading ? html`<span class="muted small">${t("Loading")}</span>`
+        : this.more ? html`<button class="btn" @click=${() => this.load(false)}>${t("Load more")}</button>` : nothing}</div>`;
+  }
+}
+customElements.define("ph-gallery", GalleryTab);
+
 // Links a Spotify account; what it plays can then show on the display, over scenes and pictures.
 class SpotifyCard extends LitElement {
   static properties = { state: { attribute: false }, info: { state: true }, draft: { state: true }, busy: { state: true } };
@@ -1308,6 +1399,7 @@ class Toasts {
 
 const TABS = [
   ["display", "Display", icon(svg`<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 8.5h.01M12 8.5h.01M15.5 8.5h.01M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 15.5h.01M12 15.5h.01M15.5 15.5h.01" stroke-width="2.6"/>`)],
+  ["gallery", "Gallery", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="m14 20 2.5-3.5 2 2.5 1.5-2"/>`)],
   ["profiles", "Profiles", icon(svg`<path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="16" r="3"/>`)],
   ["schedule", "Schedule", icon(svg`<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>`)],
   ["settings", "Settings", icon(svg`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>`)],
@@ -1331,14 +1423,14 @@ class PixelhubApp extends LitElement {
     .bottom { display: none; }
     @media (max-width: 759px) {
       .top { display: none; }
-      .bottom { display: grid; grid-template-columns: repeat(4, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
+      .bottom { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
         padding: 6px 8px max(8px, env(safe-area-inset-bottom, 0px)); background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--line); }
       .bottom button { flex-direction: column; gap: 3px; font-size: 11px; padding: 6px 2px; }
       .bottom button[aria-current=page] { background: none; }
       main { padding-bottom: 96px !important; }
     }
     main { max-width: 1120px; margin: 0 auto; padding: 8px 16px 48px; }
-    .tab { display: grid; gap: 18px; min-width: 0; }
+    .tab { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; min-width: 0; }
     .tab.two { grid-template-columns: minmax(0, 1fr); }
     @media (min-width: 900px) { .tab.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
     footer { max-width: 1120px; margin: 0 auto; padding: 0 16px 32px; font-size: 12px; color: var(--muted); }
@@ -1433,6 +1525,7 @@ class PixelhubApp extends LitElement {
 
   page(view) {
     switch (this.tab) {
+      case "gallery": return html`<ph-gallery .state=${view}></ph-gallery>`;
       case "profiles": return html`<div class="tab"><ph-switch .state=${view} .status=${this.status}></ph-switch>
         <ph-channels .state=${view} .status=${this.status} .sprites=${this.sprites}></ph-channels></div>`;
       case "schedule": return html`<div class="tab">${view ? html`<ph-schedule .base=${view}></ph-schedule>` : nothing}</div>`;

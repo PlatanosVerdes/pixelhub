@@ -27,6 +27,8 @@ const (
 	ReasonSchedule = "schedule"
 
 	tick = time.Second
+	// showPriority puts something picked by hand over routine alerts but under urgent ones.
+	showPriority = 5
 )
 
 type Sprites interface {
@@ -366,6 +368,14 @@ func (h *Hub) Notify(a Alert) (string, bool) {
 		h.poke()
 	}
 	return name, accepted
+}
+
+// Show puts c on screen for d like an alert, whatever sources the active channel takes.
+func (h *Hub) Show(c display.Content, d time.Duration) {
+	h.mu.Lock()
+	h.alerts.push(Alert{Content: c, Priority: showPriority, Duration: d, Source: "ui"}, h.now())
+	h.mu.Unlock()
+	h.poke()
 }
 
 // SetChannel pins a channel for d, or until the schedule changes when d is zero.
