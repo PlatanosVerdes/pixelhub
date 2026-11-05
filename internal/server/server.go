@@ -30,6 +30,7 @@ const (
 type Hub interface {
 	Notify(hub.Alert) (channel string, accepted bool)
 	Show(c display.Content, d time.Duration)
+	Sense(light *int, sound bool)
 	SetChannel(name string, d time.Duration) error
 	ClearChannel()
 	Release() time.Time
@@ -83,6 +84,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("GET /api/weather", s.weather)
 	mux.HandleFunc("POST /api/weather/show", s.showWeather)
+	mux.HandleFunc("POST /api/sensors", s.sense)
 	mux.HandleFunc("POST /api/notify", s.notify)
 	mux.HandleFunc("POST /api/channel", s.setChannel)
 	mux.HandleFunc("DELETE /api/channel", s.clearChannel)
@@ -276,4 +278,21 @@ func (s *Server) weather(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.Weather.Reading())
+}
+
+// sense takes readings from room sensors that are not on the bridge: {"light": 0-255, "sound": true}.
+func (s *Server) sense(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Light *int `json:"light"`
+		Sound bool `json:"sound"`
+	}
+	if !decode(w, r, &req, smallBody) {
+		return
+	}
+	if req.Light != nil && (*req.Light < 0 || *req.Light > 255) {
+		writeError(w, http.StatusBadRequest, errors.New("light: want 0-255"))
+		return
+	}
+	s.Hub.Sense(req.Light, req.Sound)
+	w.WriteHeader(http.StatusNoContent)
 }

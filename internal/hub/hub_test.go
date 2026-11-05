@@ -28,8 +28,8 @@ func (d *fakeDisplay) Show(c display.Content) {
 	defer d.mu.Unlock()
 	d.shown = append(d.shown, c)
 }
-func (d *fakeDisplay) Release()               { d.released = true }
-func (d *fakeDisplay) Claim()                 { d.released = false }
+func (d *fakeDisplay) Release() { d.released = true }
+func (d *fakeDisplay) Claim()   { d.released = false }
 func (d *fakeDisplay) Status() display.Status {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -796,5 +796,50 @@ func TestBatteryAlerts(t *testing.T) {
 	*now = now.Add(time.Hour)
 	if got := report(0); got != "battery-low" {
 		t.Errorf("still low an hour later: %q", got)
+	}
+}
+
+func TestSensors(t *testing.T) {
+	t.Parallel()
+	h, _, now := newHub(t, oneChannel("0s", "1m"), nil)
+	*now = friday(13, 0)
+	if _, err := h.Update(func(s *state.State) error {
+		off := state.Level(0)
+		s.Channels[0].Scenes = []state.Scene{{Name: "night", Window: state.Window{From: 0, To: 7 * 60}, View: display.View{Mode: display.ModeClock}, Brightness: &off}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dim := 0
+	h.Sense(&dim, false)
+	h.update()
+	if b := h.Status().Brightness; b != h.State().Brightness.Night {
+		t.Errorf("a dark room: brightness %d, want the night level", b)
+	}
+	h.Sense(nil, true)
+	h.update()
+	if st := h.Status(); st.Layer == LayerAlert {
+		t.Errorf("a sound by day while the display is on wakes nothing: %s", st.Showing)
+	}
+
+	*now = now.Add(14 * time.Hour) // 03:00 the next day
+	h.update()
+	if st := h.Status(); st.Brightness != 0 {
+		t.Fatalf("the night scene keeps it off: %d", st.Brightness)
+	}
+	h.Sense(nil, true)
+	h.update()
+	if st := h.Status(); st.Showing != "sleepy clock" || st.Brightness != wakeLevel {
+		t.Errorf("a sound at night shows the dim clock: %s %d", st.Showing, st.Brightness)
+	}
+	*now = now.Add(11 * time.Second)
+	h.update()
+	if st := h.Status(); st.Brightness != 0 {
+		t.Errorf("back off after the wake: %s %d", st.Showing, st.Brightness)
+	}
+	h.Sense(nil, true)
+	h.update()
+	if st := h.Status(); st.Layer == LayerAlert {
+		t.Errorf("woken again within %s: %s", wakeEvery, st.Showing)
 	}
 }

@@ -159,6 +159,8 @@ func TestEndpoints(t *testing.T) {
 		{"PUT", "/api/mode", `{"mode":"countdown","seconds":0}`, 400, "1-5999"},
 		{"POST", "/api/weather/show?what=temperature", "", 202, `"showing":"temperature"`},
 		{"POST", "/api/weather/show?what=rain", "", 400, "want weather or temperature"},
+		{"POST", "/api/sensors", `{"light":300}`, 400, "0-255"},
+		{"POST", "/api/sensors", `{"light":40,"sound":true}`, 204, ""},
 		{"PUT", "/api/mode", `{"mode":"vj","style":1}`, 400, "mode"},
 		{"PUT", "/api/mode", `{"mode":"visualizer","style":12}`, 400, "outside 0-11"},
 		{"PUT", "/api/mode", `{"mode":"light","color":"red"}`, 400, "#rrggbb"},

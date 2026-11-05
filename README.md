@@ -153,6 +153,15 @@ macOS bridge cannot, an ESP32 bridge with hands-free can. pixelhub shows it in t
 (`battery`, `battery_at`) and on the display: a full battery once when it gets there, a low one
 (1 or 0) at once and every hour while it stays low.
 
+### Room sensors
+
+A light sensor and a sound sensor, on the bridge (`0x4c` and the light 0-255, `0x53` and any byte
+for a sound) or anywhere else (`POST /api/sensors` with `{"light": 0-255, "sound": true}`), make
+the room count. While a light reading is under two minutes old, brightness goes from the night
+level in the dark to the day level in full light, instead of following the sun. A sound while a
+schedule exception keeps the display off shows the time with a "zz", at brightness 5 for 10 s, at
+most every 30 s.
+
 ### Display modes
 
 The display's own modes, the ones its side button cycles through. A mode set with `PUT /api/mode`

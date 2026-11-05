@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
+	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
 	"github.com/PlatanosVerdes/pixelhub/internal/sun"
 )
@@ -30,6 +31,10 @@ const (
 	// A tool left at zero this long gives the screen back.
 	idleTool    = time.Minute
 	shownSource = "shown"
+	// A light reading older than this no longer sets the brightness, the sun does again.
+	lightFresh = 2 * time.Minute
+	// A sound while the display is off shows the time this dim, this long, at most this often.
+	wakeLevel, wakeFor, wakeEvery = 5, 10 * time.Second, 30 * time.Second
 	// batteryPriority is above anything picked by hand: a dying display is worth knowing.
 	batteryPriority = 8
 	// The battery is full at the top of the 0-9 scale the display reports, and low at 1 or 0.
@@ -68,6 +73,8 @@ type Alert struct {
 	Priority int
 	Duration time.Duration
 	Source   string
+	// Brightness, when set, is used instead of the one for the time of day.
+	Brightness int
 }
 
 type Saver interface {
@@ -122,6 +129,11 @@ type Hub struct {
 	// write serialises every change to the state and the picture folders, so the disk work runs
 	// outside mu and never holds up alerts or the display tick.
 	write sync.Mutex
+
+	// The room as the bridge's sensors or the API report it; guarded by mu.
+	light               int
+	lightAt, soundAt    time.Time
+	wokeAt, soundSeenAt time.Time
 
 	// battery is the last level seen and when the low one was last announced; only update uses it.
 	battery    int
@@ -493,6 +505,8 @@ func (h *Hub) activeChannel(now time.Time) (name, reason string) {
 func (h *Hub) update() {
 	now := h.now()
 	h.watchBattery(now)
+	h.pullSensors()
+	h.wakeOnSound(now)
 	if h.toolDone(now) {
 		if _, err := h.Update(func(s *state.State) error { s.Mode = display.View{}; return nil }); err != nil {
 			h.log.Warn("idle tool not cleared", "err", err)
@@ -570,6 +584,9 @@ func (h *Hub) update() {
 // so pictures are only read from disk when they will be seen, and never under h.mu.
 func (h *Hub) aboveAmbient(now time.Time, ch channel, level int) (string, display.Content, bool, *state.Scene) {
 	if a, ok := h.alerts.head(now); ok {
+		if a.Brightness > 0 {
+			level = a.Brightness
+		}
 		return LayerAlert, a.Content.WithBrightness(level), true, nil
 	}
 	if !h.st.Mode.IsZero() {
@@ -599,6 +616,11 @@ func (h *Hub) aboveAmbient(now time.Time, ch channel, level int) (string, displa
 }
 
 func (h *Hub) sunLevel(now time.Time) int {
+	if !h.lightAt.IsZero() && now.Sub(h.lightAt) < lightFresh {
+		// with a light sensor, the room decides between the night and the day level
+		b := h.st.Brightness
+		return b.Night + (b.Day-b.Night)*h.light/255
+	}
 	switch sun.PhaseAt(now, h.st.Location.Latitude, h.st.Location.Longitude) {
 	case sun.Day:
 		return h.st.Brightness.Day
@@ -665,4 +687,59 @@ func (h *Hub) watchBattery(now time.Time) {
 	h.mu.Lock()
 	h.alerts.push(Alert{Content: c, Priority: batteryPriority, Duration: 10 * time.Second, Source: "battery"}, now)
 	h.mu.Unlock()
+}
+
+// Sense records what the room's sensors report: light from 0 (dark) to 255, or a sound.
+func (h *Hub) Sense(light *int, sound bool) {
+	h.mu.Lock()
+	now := h.now()
+	if light != nil {
+		h.light, h.lightAt = max(0, min(255, *light)), now
+	}
+	if sound {
+		h.soundAt = now
+	}
+	h.mu.Unlock()
+	h.poke()
+}
+
+// pullSensors takes newer readings from the bridge, which may carry the sensors itself.
+func (h *Hub) pullSensors() {
+	st := h.display.Status()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if st.Light != nil && st.LightAt.After(h.lightAt) {
+		h.light, h.lightAt = *st.Light, st.LightAt
+	}
+	if st.SoundAt.After(h.soundAt) {
+		h.soundAt = st.SoundAt
+	}
+}
+
+// wakeOnSound shows the time, dim, when a sound comes while a scene keeps the display off.
+func (h *Hub) wakeOnSound(now time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.soundAt.IsZero() || !h.soundAt.After(h.soundSeenAt) {
+		return
+	}
+	h.soundSeenAt = h.soundAt
+	if now.Sub(h.wokeAt) < wakeEvery || !h.dark(now) {
+		return
+	}
+	h.wokeAt = now
+	c := sprite.SleepyClock(now, h.st.ClockView().RGB())
+	h.alerts.push(Alert{Content: c, Priority: 1, Duration: wakeFor, Source: "sound", Brightness: wakeLevel}, now)
+	h.log.Info("woken by a sound")
+}
+
+// dark reports a scene keeping the display off right now; it needs h.mu held.
+func (h *Hub) dark(now time.Time) bool {
+	name, _ := h.activeChannel(now)
+	for _, s := range h.channels[name].scenes {
+		if s.ActiveAt(now) {
+			return s.Brightness != nil && *s.Brightness == 0
+		}
+	}
+	return false
 }

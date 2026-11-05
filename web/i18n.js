@@ -374,6 +374,7 @@ const es = {
   "Battery": "Batería",
   "This bridge cannot read it": "Este puente no puede leerla",
   "Display off": "Pantalla apagada",
+  "Room light": "Luz de la habitación",
   "Page {n}": "Página {n}",
   "Previous page": "Página anterior",
   "Next page": "Página siguiente",

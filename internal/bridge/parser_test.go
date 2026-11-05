@@ -69,3 +69,12 @@ func TestParserBattery(t *testing.T) {
 		t.Errorf("a battery level split over reads, a bad level skipped, then link down: %+v", got)
 	}
 }
+
+func TestParserSensors(t *testing.T) {
+	t.Parallel()
+	var p parser
+	got := p.feed([]byte{0x4c, 0x00, 0x53, 0x01, 0x4c, 0xff})
+	if len(got) != 3 || got[0].light != 1 || !got[1].sound || got[2].light != 256 {
+		t.Errorf("light 0, a sound, light 255: %+v", got)
+	}
+}

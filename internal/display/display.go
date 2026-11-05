@@ -81,6 +81,10 @@ type Status struct {
 	// Battery is the last level the display reported, 0 (empty) to 9 (full), when the bridge can read it.
 	Battery   *int      `json:"battery,omitempty"`
 	BatteryAt time.Time `json:"battery_at,omitzero"`
+	// Light (0 dark to 255 bright) and the last sound come from sensors on the bridge, when it has them.
+	Light   *int      `json:"light,omitempty"`
+	LightAt time.Time `json:"light_at,omitzero"`
+	SoundAt time.Time `json:"sound_at,omitzero"`
 }
 
 // Display drives a physical screen. Show only records what should be on screen: the driver

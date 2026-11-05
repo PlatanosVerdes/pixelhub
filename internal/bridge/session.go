@@ -288,8 +288,8 @@ func (l *link) hold() error {
 			if ev.lost {
 				return errLinkLost
 			}
-			if ev.battery > 0 {
-				l.batteryReported(ev.battery - 1)
+			if ev.battery > 0 || ev.light > 0 || ev.sound {
+				l.sensed(ev)
 				continue
 			}
 			l.acked()
@@ -322,8 +322,8 @@ func (l *link) next(deadline time.Time) (event, error) {
 			if ev.err != nil {
 				return event{}, fmt.Errorf("read bridge: %w", ev.err)
 			}
-			if ev.battery > 0 {
-				l.batteryReported(ev.battery - 1)
+			if ev.battery > 0 || ev.light > 0 || ev.sound {
+				l.sensed(ev)
 				continue
 			}
 			if !ev.lost {
@@ -442,6 +442,22 @@ func (s *Session) setConnected(up bool) {
 		s.status.Device = nil
 	}
 	s.mu.Unlock()
+}
+
+func (s *Session) sensed(ev event) {
+	if ev.battery > 0 {
+		s.batteryReported(ev.battery - 1)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ev.light > 0 {
+		light := ev.light - 1
+		s.status.Light, s.status.LightAt = &light, time.Now()
+	}
+	if ev.sound {
+		s.status.SoundAt = time.Now()
+	}
 }
 
 func (s *Session) batteryReported(level int) {

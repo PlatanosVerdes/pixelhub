@@ -1437,6 +1437,7 @@ class ConnectionCard extends LitElement {
         <dt>${t("Last answer")}</dt><dd>${ago(s.last_ack)}</dd>
         <dt>${t("Battery")}</dt><dd>${s.battery === undefined ? html`<span class="muted small">${t("This bridge cannot read it")}</span>`
           : html`${Math.min(100, (s.battery + 1) * 10)} %<span class="muted small">${ago(s.battery_at)}</span>`}</dd>
+        ${s.light !== undefined ? html`<dt>${t("Room light")}</dt><dd>${Math.round(s.light / 2.55)} %<span class="muted small">${ago(s.light_at)}</span></dd>` : nothing}
         <dt>${t("Bridge")}</dt><dd class="mono small">${s.address}</dd>
       </dl>
       <div class="actions">
