@@ -1454,7 +1454,7 @@ class SpotifyCard extends LitElement {
             <span class="small muted">${i.now.playing ? t("Playing on {device}", { device: i.now.device || "?" }) : t("Paused")}</span></div>`
             : html`<p class="small muted">${t("Nothing is playing.")}</p>`}
           <label class="toggle"><input type="checkbox" .checked=${!!m.enabled} @change=${(e) => this.music({ enabled: e.target.checked })}>${t("Show on the display while it plays")}</label>
-          <div><span class="label">${t("What to show")}</span>${segmented([["cover", t("Album cover")], ["visualizer", t("Music")], ["animations", t("My animations")]], show,
+          <div><span class="label">${t("What to show")}</span>${segmented([["cover", t("Album cover")], ["visualizer", t("Visualiser")], ["animations", t("My animations")]], show,
             (v) => this.music({ view: v === "cover" ? undefined : { mode: v } }))}</div>
           ${i.devices?.length ? html`<div><span class="label">${t("Only when it plays on")}</span>
             <div class="devices">${i.devices.map((d) => html`<label class="toggle"><input type="checkbox" .checked=${(m.devices ?? []).includes(d)}
