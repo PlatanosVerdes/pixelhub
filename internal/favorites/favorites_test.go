@@ -12,6 +12,9 @@ func TestAddListRemove(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if s.List() == nil {
+		t.Error("an empty list should be [], not nil")
+	}
 	if err := s.Add(Favorite{File: "group1/M00/a", Name: "cat"}, []byte("GIF89a-cat")); err != nil {
 		t.Fatal(err)
 	}

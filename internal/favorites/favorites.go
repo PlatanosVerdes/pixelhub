@@ -49,11 +49,11 @@ func Open(dir string) (*Store, error) {
 	return s, nil
 }
 
-// List is newest first.
+// List is newest first, and never nil so it encodes as [].
 func (s *Store) List() []Favorite {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return slices.Clone(s.list)
+	return append([]Favorite{}, s.list...)
 }
 
 func (s *Store) Has(file string) bool {
