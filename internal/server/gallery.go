@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
 	"image/gif"
+	"log/slog"
 	"maps"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,9 +20,10 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/PlatanosVerdes/pixelhub/internal/atomicfile"
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
-	"github.com/PlatanosVerdes/pixelhub/internal/favorites"
 	"github.com/PlatanosVerdes/pixelhub/internal/gallery"
+	"github.com/PlatanosVerdes/pixelhub/internal/lists"
 )
 
 const (
@@ -110,13 +114,63 @@ type galleryIndex struct {
 }
 
 func (s *Server) indexGallery() {
-	s.index.once.Do(func() { go s.crawl(context.Background()) })
+	s.index.once.Do(func() {
+		wait := s.loadIndex()
+		go func() {
+			time.Sleep(wait)
+			s.crawl(context.Background())
+		}()
+	})
+}
+
+type savedIndex struct {
+	At    time.Time      `json:"at"`
+	Items []gallery.Item `json:"items"`
+}
+
+// loadIndex starts from the index saved last time, and says how long it stays fresh.
+func (s *Server) loadIndex() time.Duration {
+	if s.IndexPath == "" {
+		return 0
+	}
+	data, err := os.ReadFile(s.IndexPath)
+	var saved savedIndex
+	if err != nil || json.Unmarshal(data, &saved) != nil {
+		return 0
+	}
+	s.index.mu.Lock()
+	defer s.index.mu.Unlock()
+	s.index.items = map[string]gallery.Item{}
+	for _, it := range saved.Items {
+		s.index.items[it.FileID] = it
+	}
+	s.index.done = len(gallery.Categories) * searchPages
+	return max(reindexEvery-time.Since(saved.At), 0)
+}
+
+func (s *Server) saveIndex() {
+	if s.IndexPath == "" {
+		return
+	}
+	s.index.mu.Lock()
+	saved := savedIndex{At: time.Now(), Items: slices.Collect(maps.Values(s.index.items))}
+	s.index.mu.Unlock()
+	data, err := json.Marshal(saved)
+	if err == nil {
+		err = atomicfile.Write(s.IndexPath, data)
+	}
+	if err != nil {
+		slog.Warn("gallery index not saved", "err", err)
+	}
 }
 
 func (s *Server) crawl(ctx context.Context) {
 	pace := cmp.Or(s.GalleryPace, crawlPace)
 	categories := slices.Sorted(maps.Values(gallery.Categories))
 	for {
+		s.index.mu.Lock()
+		rebuilding := s.index.done >= len(categories)*searchPages
+		s.index.mu.Unlock()
 		for _, c := range categories {
 			for page := 1; page <= searchPages; page++ {
 				items, err := s.listPage(ctx, c, gallery.MostLiked, page)
@@ -131,11 +185,17 @@ func (s *Server) crawl(ctx context.Context) {
 				for _, it := range items {
 					s.index.items[it.FileID] = it
 				}
-				s.index.done++
+				if !rebuilding {
+					s.index.done++
+				}
 				s.index.mu.Unlock()
 				time.Sleep(pace)
 			}
 		}
+		s.index.mu.Lock()
+		s.index.done = len(categories) * searchPages
+		s.index.mu.Unlock()
+		s.saveIndex()
 		time.Sleep(reindexEvery)
 	}
 }
@@ -202,10 +262,8 @@ func (s *Server) galleryRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/gallery/search", s.gallerySearch)
 	mux.HandleFunc("POST /api/gallery/show", s.galleryShow)
 	mux.HandleFunc("POST /api/gallery/save", s.gallerySave)
-	if s.Favorites != nil {
-		mux.HandleFunc("GET /api/favorites", s.listFavorites)
-		mux.HandleFunc("POST /api/favorites", s.addFavorite)
-		mux.HandleFunc("DELETE /api/favorites", s.removeFavorite)
+	if s.Lists != nil {
+		s.listRoutes(mux)
 	}
 }
 
@@ -247,11 +305,11 @@ func (s *Server) galleryList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": out, "more": len(items) > 0})
 }
 
-// gifOf fetches and decodes a gallery file once, then serves it from memory; a favourite comes from
-// its own copy, so it works without the gallery.
+// gifOf fetches and decodes a gallery file once, then serves it from memory; a picture kept in a list
+// comes from its own copy, so it works without the gallery.
 func (s *Server) gifOf(ctx context.Context, file string) ([]byte, error) {
-	if s.Favorites != nil {
-		if b, err := s.Favorites.GIF(file); err == nil {
+	if s.Lists != nil {
+		if b, err := s.Lists.GIF(file); err == nil {
 			return b, nil
 		}
 	}
@@ -362,43 +420,66 @@ func galleryStatus(err error) int {
 	return http.StatusBadGateway
 }
 
-type Favorites interface {
-	List() []favorites.Favorite
-	Add(f favorites.Favorite, gif []byte) error
-	Remove(file string) error
+type Lists interface {
+	Lists() []lists.List
+	Create(name string) error
+	Rename(from, to string) error
+	Delete(name string) error
+	Add(list string, p lists.Picture, gif []byte) error
+	Remove(list, file string) error
 	GIF(file string) ([]byte, error)
 }
 
-func (s *Server) listFavorites(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"items": s.Favorites.List()})
-}
-
-func (s *Server) addFavorite(w http.ResponseWriter, r *http.Request) {
-	var req galleryItem
-	if !decode(w, r, &req, smallBody) {
-		return
-	}
-	b, err := s.gifOf(r.Context(), req.File)
-	if err != nil {
-		writeError(w, galleryStatus(err), err)
-		return
-	}
-	f := favorites.Favorite{File: req.File, Name: req.Name, Author: req.Author, Likes: req.Likes}
-	if err := s.Favorites.Add(f, b); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"items": s.Favorites.List()})
-}
-
-func (s *Server) removeFavorite(w http.ResponseWriter, r *http.Request) {
-	if err := s.Favorites.Remove(r.URL.Query().Get("file")); err != nil {
-		code := http.StatusInternalServerError
-		if errors.Is(err, favorites.ErrNotFound) {
-			code = http.StatusNotFound
+func (s *Server) listRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/lists", func(w http.ResponseWriter, _ *http.Request) { s.replyLists(w, http.StatusOK, nil) })
+	mux.HandleFunc("POST /api/lists", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Name string `json:"name"`
 		}
-		writeError(w, code, err)
-		return
+		if decode(w, r, &req, smallBody) {
+			s.replyLists(w, http.StatusCreated, s.Lists.Create(req.Name))
+		}
+	})
+	mux.HandleFunc("PUT /api/lists/{name}", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Name string `json:"name"`
+		}
+		if decode(w, r, &req, smallBody) {
+			s.replyLists(w, http.StatusOK, s.Lists.Rename(r.PathValue("name"), req.Name))
+		}
+	})
+	mux.HandleFunc("DELETE /api/lists/{name}", func(w http.ResponseWriter, r *http.Request) {
+		s.replyLists(w, http.StatusOK, s.Lists.Delete(r.PathValue("name")))
+	})
+	mux.HandleFunc("POST /api/lists/{name}/items", func(w http.ResponseWriter, r *http.Request) {
+		var req galleryItem
+		if !decode(w, r, &req, smallBody) {
+			return
+		}
+		b, err := s.gifOf(r.Context(), req.File)
+		if err != nil {
+			writeError(w, galleryStatus(err), err)
+			return
+		}
+		p := lists.Picture{File: req.File, Name: req.Name, Author: req.Author, Likes: req.Likes}
+		s.replyLists(w, http.StatusCreated, s.Lists.Add(r.PathValue("name"), p, b))
+	})
+	mux.HandleFunc("DELETE /api/lists/{name}/items", func(w http.ResponseWriter, r *http.Request) {
+		s.replyLists(w, http.StatusOK, s.Lists.Remove(r.PathValue("name"), r.URL.Query().Get("file")))
+	})
+}
+
+func (s *Server) replyLists(w http.ResponseWriter, code int, err error) {
+	switch {
+	case errors.Is(err, lists.ErrNotFound):
+		writeError(w, http.StatusNotFound, err)
+	case errors.Is(err, lists.ErrExists):
+		writeError(w, http.StatusConflict, err)
+	case errors.Is(err, lists.ErrInvalid):
+		writeError(w, http.StatusBadRequest, err)
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, err)
+	default:
+		writeJSON(w, code, map[string]any{"lists": s.Lists.Lists()})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": s.Favorites.List()})
 }

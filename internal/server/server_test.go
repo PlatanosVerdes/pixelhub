@@ -20,9 +20,9 @@ import (
 	"time"
 
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
-	"github.com/PlatanosVerdes/pixelhub/internal/favorites"
 	"github.com/PlatanosVerdes/pixelhub/internal/gallery"
 	"github.com/PlatanosVerdes/pixelhub/internal/hub"
+	"github.com/PlatanosVerdes/pixelhub/internal/lists"
 	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
 )
@@ -481,33 +481,37 @@ func (fakeGallery) Download(_ context.Context, file string) ([]byte, error) {
 	return gallery.Encode([]*image.RGBA{frame}, 100*time.Millisecond), nil
 }
 
-func TestFavorites(t *testing.T) {
+func TestLists(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	liked, err := favorites.Open(t.TempDir())
+	kept, err := lists.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := (&Server{Hub: f.hub, Gallery: fakeGallery{}, Favorites: liked, Size: 16}).Handler()
-	do := func(method, path, body string) *httptest.ResponseRecorder {
+	srv := (&Server{Hub: f.hub, Gallery: fakeGallery{}, Lists: kept, Size: 16}).Handler()
+	tests := []struct {
+		method, path, body string
+		code               int
+		contains           string
+	}{
+		{"POST", "/api/lists", `{"name":"Games"}`, 201, `"name":"Games"`},
+		{"POST", "/api/lists", `{"name":"games"}`, 409, "already"},
+		{"POST", "/api/lists", `{"name":" "}`, 400, "1 to 40"},
+		{"POST", "/api/lists/Games/items", `{"file":"group1/M00/mario","name":"Mario","likes":4}`, 201, `"name":"Mario"`},
+		{"POST", "/api/lists/Games/items", `{"file":"group1/M00/aa","name":"broken"}`, 422, "not a 16x16"},
+		{"POST", "/api/lists/Nope/items", `{"file":"group1/M00/mario"}`, 404, "no list"},
+		{"GET", "/api/gallery/gif?file=group1/M00/mario", "", 200, "GIF"},
+		{"PUT", "/api/lists/Games", `{"name":"Retro games"}`, 200, `"name":"Retro games"`},
+		{"DELETE", "/api/lists/Retro%20games/items?file=group1/M00/mario", "", 200, `"items":[]`},
+		{"DELETE", "/api/lists/Retro%20games/items?file=group1/M00/mario", "", 404, "not in"},
+		{"DELETE", "/api/lists/Retro%20games", "", 200, `"lists":[]`},
+	}
+	for _, tt := range tests {
 		rec := httptest.NewRecorder()
-		srv.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
-		return rec
-	}
-	if rec := do("POST", "/api/favorites", `{"file":"group1/M00/mario","name":"Mario","likes":4}`); rec.Code != 201 || !strings.Contains(rec.Body.String(), `"name":"Mario"`) {
-		t.Fatalf("add: %d %s", rec.Code, rec.Body)
-	}
-	if rec := do("POST", "/api/favorites", `{"file":"group1/M00/aa","name":"broken"}`); rec.Code != 422 {
-		t.Errorf("adding an unreadable file: %d %s", rec.Code, rec.Body)
-	}
-	if rec := do("GET", "/api/gallery/gif?file=group1/M00/mario", ""); rec.Code != 200 || rec.Header().Get("Content-Type") != "image/gif" {
-		t.Errorf("a favourite's gif: %d", rec.Code)
-	}
-	if rec := do("DELETE", "/api/favorites?file=group1/M00/mario", ""); rec.Code != 200 || strings.Contains(rec.Body.String(), "Mario") {
-		t.Errorf("remove: %d %s", rec.Code, rec.Body)
-	}
-	if rec := do("DELETE", "/api/favorites?file=group1/M00/mario", ""); rec.Code != 404 {
-		t.Errorf("remove twice: %d", rec.Code)
+		srv.ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body)))
+		if rec.Code != tt.code || !strings.Contains(rec.Body.String(), tt.contains) {
+			t.Errorf("%s %s %s: %d %s, want %d with %s", tt.method, tt.path, tt.body, rec.Code, rec.Body, tt.code, tt.contains)
+		}
 	}
 }
 

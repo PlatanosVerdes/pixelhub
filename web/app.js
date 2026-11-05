@@ -123,6 +123,8 @@ const icons = {
   close: icon(svg`<path d="M6 6l12 12M18 6 6 18"/>`),
   upload: icon(svg`<path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>`),
   locate: icon(svg`<circle cx="12" cy="12" r="3.5"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>`),
+  bookmark: icon(svg`<path d="M6 3.5h12v17l-6-4-6 4z"/>`),
+  back: icon(svg`<path d="m15 18-6-6 6-6"/>`),
 };
 
 const base = css`
@@ -1181,7 +1183,7 @@ customElements.define("ph-display", DisplayTab);
 
 // The Divoom community gallery: browse by category, show a picture now or keep it in a profile.
 const CATEGORIES = ["recommended", "top", "new", "animal", "food", "character", "emoji", "nature", "plant", "person", "festival", "pattern", "symbol", "creative", "daily"];
-const categoryName = (c) => ({ favorites: `♥ ${t("Favourites")}`, recommended: t("Recommended"), top: t("Top"), new: t("New"), animal: t("Animals"), food: t("Food"), character: t("Characters"),
+const categoryName = (c) => ({ recommended: t("Recommended"), top: t("Top"), new: t("New"), animal: t("Animals"), food: t("Food"), character: t("Characters"),
   emoji: t("Emoji"), nature: t("Nature"), plant: t("Plants"), person: t("People"), festival: t("Festivals"), pattern: t("Patterns"), symbol: t("Symbols"),
   creative: t("Creative"), daily: t("Everyday") })[c] ?? c;
 const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
@@ -1189,7 +1191,8 @@ const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
 class GalleryTab extends LitElement {
   static properties = { state: { attribute: false }, category: { state: true }, sort: { state: true }, items: { state: true }, page: { state: true },
     more: { state: true }, loading: { state: true }, picked: { state: true }, target: { state: true }, busy: { state: true }, problem: { state: true },
-    query: { state: true }, searched: { state: true }, indexing: { state: true }, favs: { state: true } };
+    query: { state: true }, searched: { state: true }, indexing: { state: true }, lists: { state: true }, open: { state: true },
+    saving: { state: true }, newList: { state: true }, renaming: { state: true } };
   static styles = [base, css`
     .bar { display: grid; gap: 10px; margin-bottom: 14px; }
     .cats { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -1197,55 +1200,75 @@ class GalleryTab extends LitElement {
     .find input { flex: 1; min-width: 0; height: 40px; border-radius: 12px; padding: 0 14px; }
     .cat { flex: none; border: 1px solid var(--line); background: none; border-radius: 999px; height: 34px; padding: 0 14px; font-size: 13px; color: var(--muted); cursor: pointer; }
     .cat[aria-pressed=true] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+    .cat.mine { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; }
-    .item { aspect-ratio: 1; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: #000; overflow: hidden; cursor: pointer; }
-    .item { position: relative; }
+    .item { position: relative; aspect-ratio: 1; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: #000; overflow: hidden; cursor: pointer; }
     .item img { width: 100%; height: 100%; display: block; }
-    .heart { position: absolute; right: 5px; top: 3px; color: #ff375f; font-size: 15px; text-shadow: 0 0 4px #000; }
-    .fav[aria-pressed=true] { color: #ff375f; border-color: color-mix(in srgb, #ff375f 50%, var(--line)); }
     .item[aria-pressed=true] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+    .kept { position: absolute; right: 4px; top: 4px; width: 16px; height: 16px; color: var(--accent); filter: drop-shadow(0 0 3px #000); }
+    .kept svg { width: 16px; height: 16px; }
     .more { display: flex; justify-content: center; margin-top: 16px; }
     .sheet { position: sticky; top: 64px; z-index: 3; margin-bottom: 14px; background: var(--surface); border: 1px solid var(--accent); border-radius: 18px; padding: 14px;
-      display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px; align-items: center; box-shadow: 0 14px 40px -12px rgba(0, 0, 0, .6); }
+      display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px; align-items: start; box-shadow: 0 14px 40px -12px rgba(0, 0, 0, .6); }
     .sheet img { width: 96px; height: 96px; border-radius: 10px; background: #000; }
     .sheet h3 { margin: 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sheet .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
     .sheet select { max-width: 150px; }
     .meta { display: flex; gap: 12px; flex-wrap: wrap; }
+    .save[aria-expanded=true] { border-color: var(--accent); color: var(--accent); }
+    .saveto { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 12px; display: grid; gap: 8px; }
+    .saveto label { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
+    .saveto input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
+    .make { display: flex; gap: 8px; }
+    .make input { flex: 1; min-width: 0; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+    .card-list { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); padding: 10px; cursor: pointer; text-align: left; display: grid; gap: 8px; color: inherit; }
+    .card-list:hover { border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); }
+    .thumbs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px; aspect-ratio: 1; background: #000; border-radius: 10px; overflow: hidden; }
+    .thumbs img { width: 100%; height: 100%; display: block; }
+    .card-list b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .head-list { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .head-list h2 { margin: 0; font-size: 18px; flex: 1; min-width: 0; color: var(--ink); }
     .empty { padding: 30px 0; text-align: center; }
   `];
-  constructor() { super(); this.category = "recommended"; this.sort = "likes"; this.items = []; this.page = 1; }
-  connectedCallback() { super.connectedCallback(); this.loadFavs(); if (!this.items.length) this.load(true); }
+  constructor() { super(); this.category = "recommended"; this.sort = "likes"; this.items = []; this.page = 1; this.lists = []; }
+  connectedCallback() { super.connectedCallback(); this.loadLists(); if (!this.items.length) this.load(true); }
 
-  async loadFavs() {
-    try { this.favs = (await api("GET", "favorites")).items; } catch { this.favs = []; }
-  }
-  isFav(file) { return (this.favs ?? []).some((f) => f.file === file); }
-  async toggleFav(item) {
+  async loadLists() { try { this.lists = (await api("GET", "lists")).lists; } catch { /* the status poll shows outages */ } }
+  listsWith(file) { return this.lists.filter((l) => l.items.some((i) => i.file === file)).map((l) => l.name); }
+  get current() { return this.lists.find((l) => l.name === this.open); }
+
+  async listCall(method, path, body) {
     this.busy = true;
-    try {
-      const r = this.isFav(item.file)
-        ? await api("DELETE", `favorites?file=${encodeURIComponent(item.file)}`)
-        : await api("POST", "favorites", { file: item.file, name: item.name, author: item.author, likes: item.likes });
-      this.favs = r.items;
-      if (this.category === "favorites" && !this.searched) { this.items = this.favs; if (!this.isFav(item.file)) this.picked = null; }
-    } catch (e) { toast(this, e.message); }
-    this.busy = false;
+    try { this.lists = (await api(method, path, body)).lists; return true; } catch (e) { toast(this, e.message); return false; } finally { this.busy = false; }
+  }
+  async keep(list, item, on) {
+    const path = `lists/${encodeURIComponent(list)}/items`;
+    await (on ? this.listCall("POST", path, { file: item.file, name: item.name, author: item.author, likes: item.likes })
+      : this.listCall("DELETE", `${path}?file=${encodeURIComponent(item.file)}`));
+    if (this.open === list && !on) this.picked = null;
+  }
+  async makeList(item) {
+    const name = (this.newList ?? "").trim();
+    if (!name || !(await this.listCall("POST", "lists", { name }))) return;
+    this.newList = "";
+    if (item) await this.keep(this.lists.at(-1).name, item, true);
+  }
+  async renameList() {
+    const name = (this.renaming ?? "").trim();
+    if (name && (await this.listCall("PUT", `lists/${encodeURIComponent(this.open)}`, { name }))) { this.open = this.lists.find((l) => l.name.toLowerCase() === name.toLowerCase())?.name; this.renaming = null; }
+  }
+  async deleteList() {
+    if (!confirm(t("Delete the list {name}? Its drawings stay in the gallery.", { name: this.open }))) return;
+    if (await this.listCall("DELETE", `lists/${encodeURIComponent(this.open)}`)) { this.open = null; this.picked = null; }
   }
 
   async load(fresh) {
+    if (this.category === "lists") return;
     this.loading = true;
     this.problem = "";
     const page = fresh ? 1 : this.page + 1;
     try {
-      if (this.category === "favorites" && !this.searched) {
-        await this.loadFavs();
-        this.items = this.favs;
-        this.more = false;
-        this.indexing = null;
-        this.loading = false;
-        return;
-      }
       const r = this.searched
         ? await api("GET", `gallery/search?q=${encodeURIComponent(this.searched)}`)
         : await api("GET", `gallery?category=${this.category}&sort=${this.sort}&page=${page}`);
@@ -1257,11 +1280,16 @@ class GalleryTab extends LitElement {
     } catch (e) { this.problem = e.message; }
     this.loading = false;
   }
-  pick(field, value) { this[field] = value; this.picked = null; this.searched = ""; this.query = ""; this.load(true); }
+  pick(field, value) {
+    this[field] = value;
+    Object.assign(this, { picked: null, searched: "", query: "", open: null, saving: false, renaming: null });
+    this.load(true);
+  }
   search(e) {
     e.preventDefault();
     this.searched = (this.query ?? "").trim();
-    this.picked = null;
+    if (this.category === "lists") this.category = "recommended";
+    Object.assign(this, { picked: null, open: null });
     this.load(true);
   }
 
@@ -1279,41 +1307,89 @@ class GalleryTab extends LitElement {
     this.busy = false;
   }
 
-  render() {
-    const p = this.picked;
+  sheet(p) {
     const channels = this.state?.channels ?? [];
+    const inLists = this.listsWith(p.file);
+    return html`<div class="sheet" role="dialog" aria-label=${p.name}>
+      <img class="pix" src=${gifURL(p.file)} alt="">
+      <div><h3>${p.name}</h3><span class="small muted meta"><span>${p.author}</span><span>${p.likes} ♥</span></span>
+        <div class="acts">
+          <button class="btn small save" aria-expanded=${String(!!this.saving)} @click=${() => { this.saving = !this.saving; }}>
+            ${icons.bookmark}${inLists.length ? t("Saved in {n}", { n: inLists.length }) : t("Save")}</button>
+          <button class="btn primary small" ?disabled=${this.busy} @click=${() => this.show()}>${t("Show now")}</button>
+          ${channels.length ? html`<select aria-label=${t("Profile")} @change=${(e) => { this.target = e.target.value; }}>
+              ${channels.map((c) => html`<option value=${c.name} ?selected=${c.name === (this.target ?? channels[0].name)}>${c.name}</option>`)}</select>
+            <button class="btn small" ?disabled=${this.busy} @click=${() => this.save()}>${t("Add to profile")}</button>` : nothing}
+          <button class="icon" aria-label=${t("Close")} @click=${() => { this.picked = null; this.saving = false; }}>${icons.close}</button>
+        </div></div>
+      ${this.saving ? html`<div class="saveto">
+        ${this.lists.map((l) => html`<label><input type="checkbox" .checked=${inLists.includes(l.name)} ?disabled=${this.busy}
+          @change=${(e) => this.keep(l.name, p, e.target.checked)}>${l.name}<span class="small muted">${l.items.length}</span></label>`)}
+        <form class="make" @submit=${(e) => { e.preventDefault(); this.makeList(p); }}>
+          <input placeholder=${t("New list")} aria-label=${t("New list")} maxlength="40" .value=${this.newList ?? ""} @input=${(e) => { this.newList = e.target.value; }}>
+          <button class="btn small" type="submit" ?disabled=${this.busy || !(this.newList ?? "").trim()}>${t("Create and save")}</button>
+        </form></div>` : nothing}
+    </div>`;
+  }
+
+  grid(items) {
+    const p = this.picked;
+    const kept = new Set(this.lists.flatMap((l) => l.items.map((i) => i.file)));
+    return html`<div class="grid">${repeat(items, (i) => i.file, (i) => html`<button class="item" aria-pressed=${String(p?.file === i.file)} title=${i.name} aria-label=${i.name}
+      @click=${() => { this.picked = i; this.saving = false; }}><img class="pix" src=${gifURL(i.file)} alt="" loading="lazy">${kept.has(i.file) ? html`<span class="kept" aria-label=${t("Saved")}>${icons.bookmark}</span>` : nothing}</button>`)}</div>`;
+  }
+
+  myLists() {
+    const l = this.current;
+    if (l) {
+      return html`<div class="head-list">
+          <button class="icon" aria-label=${t("All my lists")} @click=${() => { this.open = null; this.picked = null; }}>${icons.back}</button>
+          ${this.renaming !== null && this.renaming !== undefined
+            ? html`<form class="make" style="flex:1" @submit=${(e) => { e.preventDefault(); this.renameList(); }}>
+                <input aria-label=${t("List name")} maxlength="40" .value=${this.renaming} @input=${(e) => { this.renaming = e.target.value; }}>
+                <button class="btn small" type="submit">${t("Rename")}</button><button class="btn small" type="button" @click=${() => { this.renaming = null; }}>${t("Cancel")}</button></form>`
+            : html`<h2>${l.name}</h2><span class="small muted">${t("{n} drawings", { n: l.items.length })}</span>
+                <button class="btn small" @click=${() => { this.renaming = l.name; }}>${t("Rename")}</button>
+                <button class="icon trash" aria-label=${t("Delete list")} @click=${() => this.deleteList()}>${icons.trash}</button>`}
+        </div>
+        ${this.picked ? this.sheet(this.picked) : nothing}
+        ${l.items.length ? this.grid(l.items) : html`<p class="empty muted">${t("This list is empty. Open a drawing in the gallery and tap Save.")}</p>`}`;
+    }
+    return html`
+      <form class="make" style="margin-bottom:14px" @submit=${(e) => { e.preventDefault(); this.makeList(); }}>
+        <input placeholder=${t("New list")} aria-label=${t("New list")} maxlength="40" .value=${this.newList ?? ""} @input=${(e) => { this.newList = e.target.value; }}>
+        <button class="btn" type="submit" ?disabled=${this.busy || !(this.newList ?? "").trim()}>${t("Create list")}</button>
+      </form>
+      ${this.lists.length ? html`<div class="cards">${this.lists.map((x) => html`<button class="card-list" @click=${() => { this.open = x.name; this.picked = null; }}>
+          <div class="thumbs">${[0, 1, 2, 3].map((k) => x.items[k] ? html`<img class="pix" src=${gifURL(x.items[k].file)} alt="" loading="lazy">` : html`<span></span>`)}</div>
+          <b>${x.name}</b><span class="small muted">${t("{n} drawings", { n: x.items.length })}</span></button>`)}</div>`
+        : html`<p class="empty muted">${t("No lists yet. Create one here, or open a drawing and tap Save.")}</p>`}`;
+  }
+
+  render() {
+    const mine = this.category === "lists" && !this.searched;
     return html`
       <div class="bar">
         <form class="find" role="search" @submit=${(e) => this.search(e)}>
           <input type="search" placeholder=${t("Search: cat, heart, pumpkin…")} aria-label=${t("Search the gallery")} .value=${this.query ?? ""} @input=${(e) => { this.query = e.target.value; }}>
           <button class="btn primary" type="submit">${t("Search")}</button>
         </form>
-        <div class="cats" role="group" aria-label=${t("Categories")}>${["favorites", ...CATEGORIES].map((c) =>
-          html`<button class="cat" aria-pressed=${String(!this.searched && c === this.category)} @click=${() => this.pick("category", c)}>${categoryName(c)}</button>`)}</div>
+        <div class="cats" role="group" aria-label=${t("Categories")}>
+          <button class="cat mine" aria-pressed=${String(mine)} @click=${() => this.pick("category", "lists")}>${t("My lists")}</button>
+          ${CATEGORIES.map((c) => html`<button class="cat" aria-pressed=${String(!this.searched && c === this.category)} @click=${() => this.pick("category", c)}>${categoryName(c)}</button>`)}</div>
         ${this.searched
           ? html`<p class="small muted">${t("Results for “{q}” among the most liked of every category.", { q: this.searched })}
               ${this.indexing ? html`<br>${t("Still gathering the gallery ({n} of {of} pages); search again in a minute for more.", { n: this.indexing.indexed, of: this.indexing.of })}` : nothing}</p>`
-          : this.category === "favorites" ? nothing
+          : mine ? nothing
           : html`<div>${segmented([["likes", t("Most liked")], ["new", t("Newest")]], this.sort, (v) => this.pick("sort", v))}</div>`}
       </div>
-      ${p ? html`<div class="sheet" role="dialog" aria-label=${p.name}>
-        <img class="pix" src=${gifURL(p.file)} alt="">
-        <div><h3>${p.name}</h3><span class="small muted meta"><span>${p.author}</span><span>${p.likes} ♥</span></span>
-          <div class="acts">
-            <button class="btn small fav" aria-pressed=${String(this.isFav(p.file))} ?disabled=${this.busy} @click=${() => this.toggleFav(p)}>${this.isFav(p.file) ? `♥ ${t("Saved")}` : `♡ ${t("Save")}`}</button>
-            <button class="btn primary small" ?disabled=${this.busy} @click=${() => this.show()}>${t("Show now")}</button>
-            ${channels.length ? html`<select aria-label=${t("Profile")} @change=${(e) => { this.target = e.target.value; }}>
-                ${channels.map((c) => html`<option value=${c.name} ?selected=${c.name === (this.target ?? channels[0].name)}>${c.name}</option>`)}</select>
-              <button class="btn small" ?disabled=${this.busy} @click=${() => this.save()}>${t("Save in profile")}</button>` : nothing}
-            <button class="icon" aria-label=${t("Close")} @click=${() => { this.picked = null; }}>${icons.close}</button>
-          </div></div></div>` : nothing}
-      ${this.problem ? html`<p class="err">${this.problem}</p>` : nothing}
-      ${!this.items.length && !this.loading && !this.problem ? html`<p class="empty muted">${this.searched ? t("Nothing found. Try another word, in English it finds more.")
-        : this.category === "favorites" ? t("No favourites yet. Open a drawing and tap ♡ Save.") : t("Nothing in this category right now.")}</p>` : nothing}
-      <div class="grid">${repeat(this.items, (i) => i.file, (i) => html`<button class="item" aria-pressed=${String(p?.file === i.file)} title=${i.name} aria-label=${i.name}
-        @click=${() => { this.picked = i; }}><img class="pix" src=${gifURL(i.file)} alt="" loading="lazy">${this.isFav(i.file) ? html`<span class="heart" aria-label=${t("Favourite")}>♥</span>` : nothing}</button>`)}</div>
-      <div class="more">${this.loading ? html`<span class="muted small">${t("Loading")}</span>`
-        : this.more ? html`<button class="btn" @click=${() => this.load(false)}>${t("Load more")}</button>` : nothing}</div>`;
+      ${mine ? this.myLists() : html`
+        ${this.picked ? this.sheet(this.picked) : nothing}
+        ${this.problem ? html`<p class="err">${this.problem}</p>` : nothing}
+        ${!this.items.length && !this.loading && !this.problem ? html`<p class="empty muted">${this.searched ? t("Nothing found. Try another word, in English it finds more.") : t("Nothing in this category right now.")}</p>` : nothing}
+        ${this.grid(this.items)}
+        <div class="more">${this.loading ? html`<span class="muted small">${t("Loading")}</span>`
+          : this.more ? html`<button class="btn" @click=${() => this.load(false)}>${t("Load more")}</button>` : nothing}</div>`}`;
   }
 }
 customElements.define("ph-gallery", GalleryTab);

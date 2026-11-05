@@ -70,7 +70,7 @@ The environment only says where the hardware is; everything else is state, edite
 | `PIXELHUB_DEVICE_MAC` | required | The display's Bluetooth address |
 | `PIXELHUB_CHANNEL` | `1` | The display's RFCOMM channel |
 | `PIXELHUB_PORT` | `8000` | HTTP port |
-| `PIXELHUB_DATA_DIR` | `/data` | Holds `state.json`, `spotify.json`, `favorites/`, `sprites/` and `ambient/` |
+| `PIXELHUB_DATA_DIR` | `/data` | Holds `state.json`, `spotify.json`, `lists/`, `gallery-index.json`, `sprites/` and `ambient/` |
 | `PIXELHUB_LOG_JSON` | | `1` logs JSON (set in the image) |
 | `TZ` | | Time zone for scenes, the schedule and the sun, e.g. `Europe/London` |
 
@@ -103,11 +103,13 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `DELETE /api/mode` | Back to alerts, scenes and ambient |
 | `GET /api/gallery/categories` | Categories of the Divoom community gallery |
 | `GET /api/gallery?category=&sort=likes\|new&page=` | One page of 16x16 pictures and animations: `file`, `name`, `author`, `likes` |
-| `GET /api/gallery/search?q=` | Words looked for at the start of the names, authors and tags of the 3 most liked pages of every category, read one page every 3 s from the first search on and again every 6 h (the gallery has no search without signing in and answers 429 to bursts); `indexed`/`of` say how far it got |
+| `GET /api/gallery/search?q=` | Words looked for at the start of the names, authors and tags of the 3 most liked pages of every category, read one page every 3 s from the first search on, again every 6 h, and kept across restarts (the gallery has no search without signing in and answers 429 to bursts); `indexed`/`of` say how far it got |
 | `GET /api/gallery/gif?file=` | A gallery file as an animated GIF |
 | `POST /api/gallery/show` | `{"file", "name", "for"}`: show it now, like an alert that every profile accepts (30 s by default) |
 | `POST /api/gallery/save` | `{"file", "name", "channel"}`: keep it among a profile's ambient pictures |
-| `GET/POST /api/favorites`, `DELETE /api/favorites?file=` | Gallery pictures kept as favourites, GIF included in `/data/favorites/`, so they stay if the gallery drops them |
+| `GET /api/lists`, `POST /api/lists` | Your lists of gallery pictures, and a new one (`{"name"}`); GIFs are kept in `/data/lists/`, so they stay if the gallery drops them |
+| `PUT /api/lists/{name}`, `DELETE /api/lists/{name}` | Rename (`{"name"}`), delete |
+| `POST /api/lists/{name}/items`, `DELETE /api/lists/{name}/items?file=` | Add a gallery picture (`{"file", "name", "author", "likes"}`), remove one |
 | `GET /api/spotify` | Whether a Spotify app and account are linked, and what plays now |
 | `PUT /api/spotify` | `{"client_id": ...}` of your Spotify app; a new one forgets the signed-in account |
 | `GET /api/spotify/login` | Sends the browser to Spotify to sign in; it comes back to `/api/spotify/callback` on the same host |
