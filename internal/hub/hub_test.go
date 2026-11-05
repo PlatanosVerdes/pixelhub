@@ -20,6 +20,7 @@ type fakeDisplay struct {
 	mu       sync.Mutex
 	shown    []display.Content
 	released bool
+	battery  *int
 }
 
 func (d *fakeDisplay) Show(c display.Content) {
@@ -29,7 +30,11 @@ func (d *fakeDisplay) Show(c display.Content) {
 }
 func (d *fakeDisplay) Release()               { d.released = true }
 func (d *fakeDisplay) Claim()                 { d.released = false }
-func (d *fakeDisplay) Status() display.Status { return display.Status{} }
+func (d *fakeDisplay) Status() display.Status {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return display.Status{Battery: d.battery}
+}
 
 type sprites map[string]bool
 
@@ -116,7 +121,7 @@ func newHub(t *testing.T, stateJSON string, ambient ambientDir) (*Hub, *fakeDisp
 		}
 	}
 	d := &fakeDisplay{}
-	h := New(d, st, &memorySaver{}, sprites{"zzz": true, "lunch": true, "heart": true}, ambient, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := New(d, st, &memorySaver{}, sprites{"zzz": true, "lunch": true, "heart": true, "battery-full": true, "battery-low": true}, ambient, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	now := friday(12, 0)
 	h.now = func() time.Time { return now }
 	return h, d, &now
@@ -755,5 +760,41 @@ func TestShowReplacesTheLastShown(t *testing.T) {
 	h.update()
 	if st := h.Status(); st.Layer == LayerAlert {
 		t.Errorf("the first picture came back after the second: %s", st.Showing)
+	}
+}
+
+func TestBatteryAlerts(t *testing.T) {
+	t.Parallel()
+	h, d, now := newHub(t, oneChannel("0s", "1m"), nil)
+	*now = friday(10, 0)
+	report := func(level int) string {
+		d.mu.Lock()
+		d.battery = &level
+		d.mu.Unlock()
+		*now = now.Add(20 * time.Second)
+		h.update()
+		if st := h.Status(); st.Layer == LayerAlert {
+			return st.Showing
+		}
+		return ""
+	}
+	if got := report(9); got != "" {
+		t.Errorf("full when first seen is not news: %s", got)
+	}
+	if got := report(8); got != "" {
+		t.Errorf("draining: %s", got)
+	}
+	if got := report(9); got != "battery-full" {
+		t.Errorf("charged back to full: %q", got)
+	}
+	if got := report(1); got != "battery-low" {
+		t.Errorf("low: %q", got)
+	}
+	if got := report(1); got != "" {
+		t.Errorf("still low 20 s later shows again: %q", got)
+	}
+	*now = now.Add(time.Hour)
+	if got := report(0); got != "battery-low" {
+		t.Errorf("still low an hour later: %q", got)
 	}
 }

@@ -288,6 +288,10 @@ func (l *link) hold() error {
 			if ev.lost {
 				return errLinkLost
 			}
+			if ev.battery > 0 {
+				l.batteryReported(ev.battery - 1)
+				continue
+			}
 			l.acked()
 			unanswered = nil
 			if v, ok := divoom.ParseState(ev.frame); ok {
@@ -317,6 +321,10 @@ func (l *link) next(deadline time.Time) (event, error) {
 		case ev := <-l.events:
 			if ev.err != nil {
 				return event{}, fmt.Errorf("read bridge: %w", ev.err)
+			}
+			if ev.battery > 0 {
+				l.batteryReported(ev.battery - 1)
+				continue
 			}
 			if !ev.lost {
 				l.acked()
@@ -434,6 +442,13 @@ func (s *Session) setConnected(up bool) {
 		s.status.Device = nil
 	}
 	s.mu.Unlock()
+}
+
+func (s *Session) batteryReported(level int) {
+	s.mu.Lock()
+	s.status.Battery, s.status.BatteryAt = &level, time.Now()
+	s.mu.Unlock()
+	s.log.Info("battery reported", "level", level)
 }
 
 func (s *Session) reported(v display.View) {

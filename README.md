@@ -145,6 +145,14 @@ only shows on channels that accept `*`, and a channel with no sources is a quiet
 alert answers 200 with `"dropped": true`. A channel created without `ambient` alternates 2 minutes of
 pictures with 3 of the clock.
 
+### Battery
+
+A bridge that can read the display's battery sends `0x42` and the level, 0 (empty) to 9 (full).
+The display only reports it over hands-free, to a gateway that answers `AT+XAPL` as an iPhone; the
+macOS bridge cannot, an ESP32 bridge with hands-free can. pixelhub shows it in the status
+(`battery`, `battery_at`) and on the display: a full battery once when it gets there, a low one
+(1 or 0) at once and every hour while it stays low.
+
 ### Display modes
 
 The display's own modes, the ones its side button cycles through. A mode set with `PUT /api/mode`

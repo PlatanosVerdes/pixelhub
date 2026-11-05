@@ -7,10 +7,14 @@ import (
 )
 
 type event struct {
-	frame []byte
-	lost  bool
-	err   error
+	frame   []byte
+	lost    bool
+	battery int // 1-10 when the bridge reported a battery level of battery-1
+	err     error
 }
+
+// opBattery is followed by the display's battery level, 0-9, read by the bridge over hands-free.
+const opBattery = 0x42
 
 // parser splits the bridge's byte stream into Evo frames and link-down bytes, whatever the read boundaries.
 type parser struct {
@@ -21,6 +25,16 @@ func (p *parser) feed(data []byte) []event {
 	p.buf = append(p.buf, data...)
 	var out []event
 	for len(p.buf) > 0 {
+		if p.buf[0] == opBattery {
+			if len(p.buf) < 2 {
+				break
+			}
+			if p.buf[1] <= 9 {
+				out = append(out, event{battery: int(p.buf[1]) + 1})
+			}
+			p.buf = p.buf[2:]
+			continue
+		}
 		if p.buf[0] == opLinkDown {
 			out = append(out, event{lost: true})
 			p.buf = p.buf[1:]

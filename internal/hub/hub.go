@@ -30,6 +30,11 @@ const (
 	// A tool left at zero this long gives the screen back.
 	idleTool    = time.Minute
 	shownSource = "shown"
+	// batteryPriority is above anything picked by hand: a dying display is worth knowing.
+	batteryPriority = 8
+	// The battery is full at the top of the 0-9 scale the display reports, and low at 1 or 0.
+	batteryFull, batteryLowLevel = 9, 1
+	batteryEvery                 = time.Hour
 	// showPriority puts something picked by hand over routine alerts but under urgent ones.
 	showPriority = 5
 )
@@ -117,6 +122,10 @@ type Hub struct {
 	// write serialises every change to the state and the picture folders, so the disk work runs
 	// outside mu and never holds up alerts or the display tick.
 	write sync.Mutex
+
+	// battery is the last level seen and when the low one was last announced; only update uses it.
+	battery    int
+	batteryLow time.Time
 
 	// idle is when the picked tool was first seen at zero, and which tool that was.
 	idle     time.Time
@@ -483,6 +492,7 @@ func (h *Hub) activeChannel(now time.Time) (name, reason string) {
 
 func (h *Hub) update() {
 	now := h.now()
+	h.watchBattery(now)
 	if h.toolDone(now) {
 		if _, err := h.Update(func(s *state.State) error { s.Mode = display.View{}; return nil }); err != nil {
 			h.log.Warn("idle tool not cleared", "err", err)
@@ -623,4 +633,36 @@ func (h *Hub) toolDone(now time.Time) bool {
 		return false
 	}
 	return now.Sub(since) >= idleTool
+}
+
+// watchBattery puts a battery picture on screen when the level reaches full, and when it gets low,
+// again every hour while it stays low. A level already full at start is not news.
+func (h *Hub) watchBattery(now time.Time) {
+	reported := h.display.Status().Battery
+	if reported == nil {
+		return
+	}
+	level, last := *reported, h.battery
+	h.battery = level + 1 // 0 means none seen yet
+	sprite := ""
+	switch {
+	case level >= batteryFull && last != 0 && last-1 < batteryFull:
+		sprite = "battery-full"
+	case level <= batteryLowLevel && (h.batteryLow.IsZero() || now.Sub(h.batteryLow) >= batteryEvery):
+		sprite = "battery-low"
+		h.batteryLow = now
+	case level > batteryLowLevel:
+		h.batteryLow = time.Time{}
+	}
+	if sprite == "" {
+		return
+	}
+	c, ok := h.sprites.Get(sprite)
+	if !ok {
+		return
+	}
+	h.log.Info("battery alert", "level", level, "sprite", sprite)
+	h.mu.Lock()
+	h.alerts.push(Alert{Content: c, Priority: batteryPriority, Duration: 10 * time.Second, Source: "battery"}, now)
+	h.mu.Unlock()
 }

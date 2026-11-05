@@ -78,6 +78,9 @@ type Status struct {
 	LastAck   time.Time `json:"last_ack,omitzero"`
 	// Device is the mode the display last reported, with the colour and style it keeps for it.
 	Device *View `json:"device,omitempty"`
+	// Battery is the last level the display reported, 0 (empty) to 9 (full), when the bridge can read it.
+	Battery   *int      `json:"battery,omitempty"`
+	BatteryAt time.Time `json:"battery_at,omitzero"`
 }
 
 // Display drives a physical screen. Show only records what should be on screen: the driver

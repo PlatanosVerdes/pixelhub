@@ -25,11 +25,11 @@ func TestBuiltins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"alert", "check", "coffee", "heart", "heartbeat", "lunch", "moon", "sun", "sunrise", "zzz"}
+	want := []string{"alert", "battery-full", "battery-low", "check", "coffee", "heart", "heartbeat", "lunch", "moon", "sun", "sunrise", "zzz"}
 	if got := lib.Names(); !slices.Equal(got, want) {
 		t.Errorf("names %v, want %v", got, want)
 	}
-	frames := map[string]int{"heartbeat": 2, "zzz": 3, "moon": 1}
+	frames := map[string]int{"heartbeat": 2, "zzz": 3, "moon": 1, "battery-low": 2}
 	for name, n := range frames {
 		c, _ := lib.Get(name)
 		if len(c.Frames) != n {

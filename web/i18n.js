@@ -371,6 +371,8 @@ const es = {
   "Custom": "Personalizado",
   "Amount": "Cantidad",
   "seconds": "segundos",
+  "Battery": "Batería",
+  "This bridge cannot read it": "Este puente no puede leerla",
   "Page {n}": "Página {n}",
   "Previous page": "Página anterior",
   "Next page": "Página siguiente",
