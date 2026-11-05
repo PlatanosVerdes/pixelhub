@@ -19,6 +19,7 @@ import (
 const (
 	LayerAlert   = "alert"
 	LayerMode    = "mode"
+	LayerMusic   = "music"
 	LayerScene   = "scene"
 	LayerAmbient = "ambient"
 
@@ -41,6 +42,11 @@ type Pictures interface {
 	Remove(channel, file string) error
 	RenameChannel(from, to string) error
 	DeleteChannel(channel string) error
+}
+
+// Music is what a linked music account plays now, if anything.
+type Music interface {
+	Content() (display.Content, bool)
 }
 
 type Alert struct {
@@ -92,6 +98,8 @@ type Hub struct {
 	now      func() time.Time
 	wake     chan struct{}
 	ambient  playlist
+	// Music, when set before Run, adds the music layer under a picked mode.
+	Music Music
 
 	// write serialises every change to the state and the picture folders, so the disk work runs
 	// outside mu and never holds up alerts or the display tick.
@@ -484,7 +492,7 @@ func (h *Hub) update() {
 	}
 }
 
-// aboveAmbient returns the alert, mode or scene to show, if any; the ambient layer is left to the caller
+// aboveAmbient returns the alert, mode, music or scene to show, if any; the ambient layer is left to the caller
 // so pictures are only read from disk when they will be seen, and never under h.mu.
 func (h *Hub) aboveAmbient(now time.Time, ch channel, level int) (string, display.Content, bool) {
 	if a, ok := h.alerts.head(now); ok {
@@ -492,6 +500,14 @@ func (h *Hub) aboveAmbient(now time.Time, ch channel, level int) (string, displa
 	}
 	if !h.st.Mode.IsZero() {
 		return LayerMode, h.st.Mode.Content().WithBrightness(level), true
+	}
+	if h.st.Music.Enabled && h.Music != nil {
+		if c, ok := h.Music.Content(); ok {
+			if !h.st.Music.View.IsZero() {
+				c = h.st.Music.View.Content()
+			}
+			return LayerMusic, c.WithBrightness(level), true
+		}
 	}
 	for _, s := range ch.scenes {
 		if s.ActiveAt(now) {

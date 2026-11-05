@@ -70,7 +70,7 @@ The environment only says where the hardware is; everything else is state, edite
 | `PIXELHUB_DEVICE_MAC` | required | The display's Bluetooth address |
 | `PIXELHUB_CHANNEL` | `1` | The display's RFCOMM channel |
 | `PIXELHUB_PORT` | `8000` | HTTP port |
-| `PIXELHUB_DATA_DIR` | `/data` | Holds `state.json`, `sprites/` and `ambient/` |
+| `PIXELHUB_DATA_DIR` | `/data` | Holds `state.json`, `spotify.json`, `sprites/` and `ambient/` |
 | `PIXELHUB_LOG_JSON` | | `1` logs JSON (set in the image) |
 | `TZ` | | Time zone for scenes, the schedule and the sun, e.g. `Europe/London` |
 
@@ -101,6 +101,10 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `GET /api/modes` | How many styles each display mode has |
 | `PUT /api/mode` | Show one of the display's own modes until cleared: `{"mode": ...}` plus its options (below) |
 | `DELETE /api/mode` | Back to alerts, scenes and ambient |
+| `GET /api/spotify` | Whether a Spotify app and account are linked, and what plays now |
+| `PUT /api/spotify` | `{"client_id": ...}` of your Spotify app; a new one forgets the signed-in account |
+| `GET /api/spotify/login` | Sends the browser to Spotify to sign in; it comes back to `/api/spotify/callback` on the same host |
+| `DELETE /api/spotify` | Forget the signed-in account |
 | `GET /api/channels/{name}/pictures/{file}` | A picture's first frame, drawn 10x like a sprite |
 | `GET/POST /api/channels/{name}/pictures` | List, upload (multipart field `file`, GIF or PNG, up to 1 MB and 512x512; the name is cleaned up and must be new) |
 | `DELETE /api/channels/{name}/pictures/{file}` | Delete a picture |
@@ -146,6 +150,17 @@ shows over scenes and ambient and is saved; alerts still show on top. A scene ca
 curl -X PUT localhost:8000/api/mode -d '{"mode":"clock","style":1,"calendar":true}'
 curl -X DELETE localhost:8000/api/mode
 ```
+
+### Spotify
+
+pixelhub can follow what a Spotify account plays on any of its devices and show the album cover, or
+a display mode, while it plays (`"music": {"enabled": true, "view": {...}}` in `PUT /api/settings`).
+It sits under alerts and a picked mode, over scenes and ambient. Create an app at
+developer.spotify.com/dashboard with the Web API, add `<pixelhub URL>/api/spotify/callback` as a
+redirect URI (Spotify takes `http://127.0.0.1:<port>` but not `localhost`, and otherwise wants
+HTTPS), and paste its client ID in Settings. Sign-in uses PKCE, so no client secret is stored; the
+refresh token is kept in `/data/spotify.json` (mode 0600). Development-mode apps need a Premium
+account. Spotify no longer gives beat or tempo data to new apps.
 
 ## Sprites
 

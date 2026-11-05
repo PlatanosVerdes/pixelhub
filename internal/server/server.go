@@ -52,6 +52,8 @@ type Sprites interface {
 type Server struct {
 	Hub     Hub
 	Sprites Sprites
+	// Spotify, when set, links a Spotify account under /api/spotify.
+	Spotify Spotify
 	// Size is the display's side in pixels, for drawing previews.
 	Size    int
 	Version string
@@ -87,6 +89,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/channels/{name}/pictures", s.addPicture)
 	mux.HandleFunc("GET /api/channels/{name}/pictures/{file}", s.picturePNG)
 	mux.HandleFunc("DELETE /api/channels/{name}/pictures/{file}", s.removePicture)
+	if s.Spotify != nil {
+		s.spotifyRoutes(mux)
+	}
 	return s.withWeb(mux)
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/PlatanosVerdes/pixelhub/internal/divoom"
 	"github.com/PlatanosVerdes/pixelhub/internal/hub"
 	"github.com/PlatanosVerdes/pixelhub/internal/server"
+	"github.com/PlatanosVerdes/pixelhub/internal/spotify"
 	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
 )
@@ -81,12 +82,18 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 	session := bridge.New(bridge.DefaultOptions(cfg.Bridge, cfg.DeviceMAC, cfg.Channel), log)
 	pictures := sprite.Ambient{Dir: filepath.Join(cfg.DataDir, "ambient"), Size: divoom.Size}
 	h := hub.New(session, st, store, sprites, pictures, log)
+	music, err := spotify.Open(filepath.Join(cfg.DataDir, "spotify.json"), log)
+	if err != nil {
+		return err
+	}
+	h.Music = music
 	go session.Run(ctx)
 	go h.Run(ctx)
+	go music.Run(ctx)
 
 	srv := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),
-		Handler:           (&server.Server{Hub: h, Sprites: sprites, Size: divoom.Size, Version: buildVersion}).Handler(),
+		Handler:           (&server.Server{Hub: h, Sprites: sprites, Spotify: music, Size: divoom.Size, Version: buildVersion}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,

@@ -31,6 +31,13 @@ type State struct {
 	// Mode, when set, is one of the display's own modes picked by hand; it shows over scenes and
 	// ambient until cleared, alerts still go on top.
 	Mode display.View `json:"mode,omitzero"`
+	// Music shows what a linked music account plays, when it plays: its cover, or View instead.
+	Music Music `json:"music,omitzero"`
+}
+
+type Music struct {
+	Enabled bool         `json:"enabled"`
+	View    display.View `json:"view,omitzero"`
 }
 
 type Location struct {
@@ -177,7 +184,8 @@ func (s *State) ApplySettings(data []byte) error {
 		Brightness     *Levels   `json:"brightness"`
 		ReleaseFor     *Duration `json:"release_for"`
 		DefaultChannel *string   `json:"default_channel"`
-	}{&s.Location, &s.Brightness, &s.ReleaseFor, &s.DefaultChannel}
+		Music          *Music    `json:"music"`
+	}{&s.Location, &s.Brightness, &s.ReleaseFor, &s.DefaultChannel, &s.Music}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&settings); err != nil {
@@ -219,6 +227,11 @@ func (s State) Validate() error {
 	if !s.Mode.IsZero() {
 		if err := s.Mode.Validate(); err != nil {
 			errs = append(errs, fmt.Errorf("mode: %w", err))
+		}
+	}
+	if !s.Music.View.IsZero() {
+		if err := s.Music.View.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("music.view: %w", err))
 		}
 	}
 	for i, slot := range s.Schedule {

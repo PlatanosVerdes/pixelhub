@@ -156,6 +156,9 @@ func TestEndpoints(t *testing.T) {
 		{"PUT", "/api/mode", `{"mode":"light","color":"red"}`, 400, "#rrggbb"},
 		{"PUT", "/api/mode", `{"mode":"animations","list":1}`, 400, "unknown field"},
 		{"DELETE", "/api/mode", "", 200, `"default_channel"`},
+		{"PUT", "/api/settings", `{"music":{"enabled":true}}`, 200, `"music":{"enabled":true}`},
+		{"PUT", "/api/settings", `{"music":{"enabled":true,"view":{"mode":"visualizer","style":40}}}`, 400, "music.view"},
+		{"GET", "/api/spotify", "", 404, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.method+" "+tt.path+" "+tt.body, func(t *testing.T) {
@@ -165,6 +168,28 @@ func TestEndpoints(t *testing.T) {
 				t.Errorf("code %d body %s, want %d with %s", rec.Code, rec.Body, tt.code, tt.contains)
 			}
 		})
+	}
+}
+
+func TestCallbackURL(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		host, proto, want string
+	}{
+		{"localhost:8765", "", "http://127.0.0.1:8765/api/spotify/callback"},
+		{"127.0.0.1:8765", "", "http://127.0.0.1:8765/api/spotify/callback"},
+		{"pixelhub.example.com", "https", "https://pixelhub.example.com/api/spotify/callback"},
+		{"pixelhub.pi", "", "http://pixelhub.pi/api/spotify/callback"},
+	}
+	for _, tt := range tests {
+		r := httptest.NewRequest("GET", "/api/spotify/login", nil)
+		r.Host = tt.host
+		if tt.proto != "" {
+			r.Header.Set("X-Forwarded-Proto", tt.proto)
+		}
+		if got := callbackURL(r); got != tt.want {
+			t.Errorf("%s %s: %s, want %s", tt.proto, tt.host, got, tt.want)
+		}
 	}
 }
 

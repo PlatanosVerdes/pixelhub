@@ -1128,6 +1128,7 @@ class DisplayTab extends LitElement {
   what(s) {
     if (s.layer === "alert") return t("Alert");
     if (s.layer === "mode") return t("Chosen by you");
+    if (s.layer === "music") return t("Playing on Spotify");
     if (s.layer === "scene") return t("Scene of {channel}", { channel: s.channel });
     return t("Automatic, {channel}", { channel: s.channel });
   }
@@ -1175,6 +1176,76 @@ class DisplayTab extends LitElement {
   }
 }
 customElements.define("ph-display", DisplayTab);
+
+
+// Links a Spotify account; what it plays can then show on the display, over scenes and pictures.
+class SpotifyCard extends LitElement {
+  static properties = { state: { attribute: false }, info: { state: true }, draft: { state: true }, busy: { state: true } };
+  static styles = [base, css`
+    .grid { display: grid; gap: 14px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .row input { flex: 1 1 260px; font-family: var(--font-data); }
+    ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; }
+    code { font-family: var(--font-data); font-size: 12px; background: var(--chip); padding: 2px 6px; border-radius: 6px; overflow-wrap: anywhere; }
+    a { color: var(--accent); }
+    .now { display: grid; gap: 2px; padding: 12px; border-radius: 12px; background: var(--chip); }
+    .now b { font-weight: 600; }
+    .toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+    input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
+  `];
+  connectedCallback() { super.connectedCallback(); this.load(); this.timer = setInterval(() => { if (!document.hidden) this.load(); }, 5000); }
+  disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.timer); }
+  async load() { try { this.info = await api("GET", "spotify"); } catch { /* the status poll shows outages */ } }
+  async call(method, body) {
+    this.busy = true;
+    try { this.info = await api(method, "spotify", body); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+  async music(patch) {
+    const next = { ...(this.state?.music ?? { enabled: false }), ...patch };
+    if (!next.view) delete next.view;
+    try { saved(this, await api("PUT", "settings", { music: next })); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+  }
+  callback() {
+    const host = location.hostname === "localhost" ? "127.0.0.1" : location.hostname;
+    return `${location.protocol}//${host}${location.port ? `:${location.port}` : ""}/api/spotify/callback`;
+  }
+
+  render() {
+    const i = this.info;
+    if (!i) return nothing;
+    const m = this.state?.music ?? {};
+    const show = m.view?.mode ?? "cover";
+    return html`<section class="card" aria-labelledby="sp-h">
+      <div class="head"><h2 id="sp-h">Spotify</h2>${i.connected ? html`<span class="tag on">${t("Connected")}</span>` : nothing}</div>
+      <div class="grid">
+        ${!i.configured ? html`
+          <ol>
+            <li>${t("Create an app at")} <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">developer.spotify.com/dashboard</a> ${t("with the Web API.")}</li>
+            <li>${t("Add this redirect URI to it:")} <code>${this.callback()}</code></li>
+            <li>${t("Paste its client ID here.")}</li>
+          </ol>
+          <div class="row"><input placeholder=${t("Client ID")} aria-label=${t("Client ID")} .value=${this.draft ?? ""} @input=${(e) => { this.draft = e.target.value; }}>
+            <button class="btn primary" ?disabled=${this.busy || !this.draft} @click=${() => this.call("PUT", { client_id: this.draft })}>${t("Save")}</button></div>`
+        : !i.connected ? html`
+          <p class="small muted">${t("The Spotify app must list this redirect URI:")} <code>${this.callback()}</code></p>
+          <div class="row"><a class="btn primary" href="api/spotify/login">${t("Connect Spotify")}</a></div>`
+        : html`
+          <p class="small muted">${t("Signed in as {user}.", { user: i.user ?? "?" })}</p>
+          ${i.now ? html`<div class="now"><b>${i.now.track}</b><span class="small">${i.now.artists}</span>
+            <span class="small muted">${i.now.playing ? t("Playing on {device}", { device: i.now.device || "?" }) : t("Paused")}</span></div>`
+            : html`<p class="small muted">${t("Nothing is playing.")}</p>`}
+          <label class="toggle"><input type="checkbox" .checked=${!!m.enabled} @change=${(e) => this.music({ enabled: e.target.checked })}>${t("Show on the display while it plays")}</label>
+          <div><span class="label">${t("What to show")}</span>${segmented([["cover", t("Album cover")], ["visualizer", t("Music")], ["animations", t("My animations")]], show,
+            (v) => this.music({ view: v === "cover" ? undefined : { mode: v } }))}</div>
+          <p class="small muted">${t("Alerts and a mode picked by hand stay on top.")}</p>
+          ${i.error ? html`<p class="err">${i.error}</p>` : nothing}
+          <div class="row"><button class="btn small" ?disabled=${this.busy} @click=${() => this.call("DELETE")}>${t("Disconnect")}</button></div>`}
+      </div>
+    </section>`;
+  }
+}
+customElements.define("ph-spotify", SpotifyCard);
 
 class ConnectionCard extends LitElement {
   static properties = { status: { attribute: false }, busy: { state: true } };
@@ -1301,6 +1372,11 @@ class PixelhubApp extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    const problem = new URLSearchParams(location.search).get("spotify_error");
+    if (problem) {
+      this.toasts.show({ text: t("Spotify did not connect: {reason}", { reason: problem }) });
+      history.replaceState(null, "", location.pathname + location.hash);
+    }
     this.pollStatus();
     this.loadState();
     api("GET", "sprites").then((r) => { this.sprites = r.sprites; }).catch(() => {});
@@ -1360,7 +1436,7 @@ class PixelhubApp extends LitElement {
       case "profiles": return html`<div class="tab"><ph-switch .state=${view} .status=${this.status}></ph-switch>
         <ph-channels .state=${view} .status=${this.status} .sprites=${this.sprites}></ph-channels></div>`;
       case "schedule": return html`<div class="tab">${view ? html`<ph-schedule .base=${view}></ph-schedule>` : nothing}</div>`;
-      case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<ph-connection .status=${this.status}></ph-connection></div>`;
+      case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<div class="tab"><ph-spotify .state=${view}></ph-spotify><ph-connection .status=${this.status}></ph-connection></div></div>`;
       default: return html`<ph-display .status=${this.status} .state=${view} .sprites=${this.sprites} .styles=${this.modes} ?offline=${this.offline}></ph-display>`;
     }
   }

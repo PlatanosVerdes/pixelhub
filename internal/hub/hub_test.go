@@ -194,6 +194,52 @@ func TestModeLayer(t *testing.T) {
 	}
 }
 
+type fakeMusic struct{ playing bool }
+
+func (m fakeMusic) Content() (display.Content, bool) {
+	return display.Content{Kind: display.Picture, Name: "♪ song"}, m.playing
+}
+
+func TestMusicLayer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		music   state.Music
+		playing bool
+		mode    bool
+		layer   string
+		showing string
+	}{
+		{"cover over a scene", state.Music{Enabled: true}, true, false, LayerMusic, "♪ song"},
+		{"a view instead of the cover", state.Music{Enabled: true, View: display.View{Mode: display.ModeVisualizer, Style: 2}}, true, false, LayerMusic, "visualizer 2"},
+		{"nothing playing", state.Music{Enabled: true}, false, false, LayerScene, "lunch"},
+		{"switched off", state.Music{}, true, false, LayerScene, "lunch"},
+		{"a picked mode wins", state.Music{Enabled: true}, true, true, LayerMode, "animations"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h, _, now := newHub(t, twoChannels, nil)
+			*now = time.Date(2026, 11, 7, 14, 0, 0, 0, madrid)
+			h.Music = fakeMusic{tt.playing}
+			_, err := h.Update(func(s *state.State) error {
+				s.Music = tt.music
+				if tt.mode {
+					s.Mode = display.View{Mode: display.ModeAnimations}
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.update()
+			if st := h.Status(); st.Layer != tt.layer || st.Showing != tt.showing {
+				t.Errorf("showing %s %s, want %s %s", st.Layer, st.Showing, tt.layer, tt.showing)
+			}
+		})
+	}
+}
+
 func TestSceneWithAView(t *testing.T) {
 	t.Parallel()
 	h, _, now := newHub(t, oneChannel("1m", "1m"), nil)
