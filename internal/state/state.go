@@ -57,6 +57,8 @@ type Music struct {
 type Location struct {
 	Latitude  float64 `json:"latitude"`
 	Longitude float64 `json:"longitude"`
+	// Name is the place as the user picked it, only for showing.
+	Name string `json:"name,omitempty"`
 }
 
 type Levels struct {

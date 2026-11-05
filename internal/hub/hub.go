@@ -513,8 +513,9 @@ func (h *Hub) update() {
 		clock.Name = content.Name
 		content = clock
 	}
+	// A clock without a colour of its own is the clock: it takes the one look set for it.
 	if content.Kind == display.Native && content.View.Mode == display.ModeClock && content.View.Color == "" {
-		content.View.Color = h.st.ClockView().Color
+		content.View = h.st.ClockView()
 	}
 	if content.Kind == display.Native && content.View.Mode == display.ModeClock {
 		content.Weather = weather

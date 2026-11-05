@@ -161,6 +161,7 @@ const base = css`
   .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
   .btn.primary:hover { filter: brightness(1.08); }
   .btn:disabled { opacity: .45; cursor: default; filter: none; }
+  .btn.primary:disabled { background: var(--chip); border-color: var(--line); color: var(--muted); opacity: 1; }
   .btn.small { height: 32px; padding: 0 11px; font-size: 13px; }
   .btn svg { width: 16px; height: 16px; }
   @media (min-width: 700px) { .btn { height: 34px; } .btn.small { height: 30px; } }
@@ -365,96 +366,90 @@ class NotifyCard extends LitElement {
 }
 customElements.define("ph-notify", NotifyCard);
 
-const releaseDraft = (d) => { const s = seconds(d); return s % 3600 === 0 ? { n: s / 3600, unit: "h" } : { n: Math.round((s / 60) * 100) / 100, unit: "m" }; };
-const settingsDraft = (st) => ({
-  latitude: String(st.location.latitude), longitude: String(st.location.longitude),
-  day: st.brightness.day, dusk: st.brightness.dusk, night: st.brightness.night,
-  release: releaseDraft(st.release_for), def: st.default_channel,
-});
-
+// Every change saves at once; there is nothing to save or undo by hand.
 class SettingsCard extends LitElement {
-  static properties = { base: { attribute: false }, draft: { state: true }, errors: { state: true }, busy: { state: true } };
+  static properties = { base: { attribute: false }, levels: { state: true }, query: { state: true }, places: { state: true }, busy: { state: true } };
   static styles = [base, css`
-    .grid { display: grid; gap: 18px; }
-    .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .pair input { width: 100%; }
-    .level { display: grid; grid-template-columns: 52px 1fr 36px; align-items: center; gap: 10px; }
-    .level span:first-child { font-size: 13px; color: var(--muted); }
+    .grid { display: grid; gap: 22px; }
+    h3 { font-size: 15px; margin: 0 0 4px; font-weight: 600; }
+    .hint { margin: 0 0 10px; }
+    .here { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 15px; margin-bottom: 10px; }
+    .here b { font-weight: 600; }
+    .find { display: flex; gap: 8px; }
+    .find input { flex: 1; min-width: 0; }
+    .places { list-style: none; margin: 6px 0 0; padding: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+    .places button { width: 100%; text-align: left; border: 0; border-top: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 10px 12px; font: inherit; font-size: 14px; cursor: pointer; }
+    .places li:first-child button { border-top: 0; }
+    .places button:hover { background: var(--chip); }
+    .places small { color: var(--muted); margin-left: 6px; }
+    .level { display: grid; grid-template-columns: 84px 1fr 36px; align-items: center; gap: 10px; }
+    .level span { font-size: 14px; color: var(--muted); }
     .level output { font-family: var(--font-data); font-size: 13px; text-align: right; }
-    .unit { display: flex; gap: 8px; }
-    .unit input { width: 90px; }
-    .foot { display: flex; gap: 8px; margin-top: 18px; align-items: center; }
-    .where { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
-    h3 { font-size: 13px; margin: 0 0 8px; font-weight: 600; }
   `];
-  willUpdate(c) {
-    if (c.has("base") && this.base && (!this.draft || same(this.draft, c.get("base") ? settingsDraft(c.get("base")) : null))) this.draft = settingsDraft(this.base);
-  }
-  get dirty() { return this.draft && this.base && !same(this.draft, settingsDraft(this.base)); }
-  set(key, value) { this.draft = { ...this.draft, [key]: value }; }
 
+  async put(body, done) {
+    this.busy = true;
+    try { saved(this, await api("PUT", "settings", body)); send(this, "refresh"); if (done) toast(this, done); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+
+  async search(e) {
+    e.preventDefault();
+    const q = (this.query ?? "").trim();
+    if (!q) return;
+    try {
+      const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=6&language=${lang}&name=${encodeURIComponent(q)}`).then((x) => x.json());
+      this.places = r.results ?? [];
+      if (!this.places.length) toast(this, t("No place called {q}", { q }));
+    } catch { toast(this, t("Could not look the place up")); }
+  }
+  async pickPlace(p) {
+    this.places = null;
+    this.query = "";
+    await this.put({ location: { latitude: Math.round(p.latitude * 1e4) / 1e4, longitude: Math.round(p.longitude * 1e4) / 1e4, name: p.name } }, t("Location set to {name}", { name: p.name }));
+  }
   locate() {
     if (!navigator.geolocation || !window.isSecureContext) { toast(this, t("The browser only gives the location to pages served over HTTPS.")); return; }
     navigator.geolocation.getCurrentPosition(
-      (p) => { this.draft = { ...this.draft, latitude: p.coords.latitude.toFixed(4), longitude: p.coords.longitude.toFixed(4) }; },
+      (p) => this.put({ location: { latitude: Number(p.coords.latitude.toFixed(4)), longitude: Number(p.coords.longitude.toFixed(4)), name: t("This device's location") } }, t("Location saved")),
       (e) => toast(this, t("Could not get this device's location: {reason}", { reason: e.message })),
       { timeout: 15000 });
   }
 
-  async save() {
-    const d = this.draft;
-    this.busy = true;
-    this.errors = [];
-    try {
-      const st = await api("PUT", "settings", {
-        location: { latitude: Number(d.latitude), longitude: Number(d.longitude) },
-        brightness: { day: Number(d.day), dusk: Number(d.dusk), night: Number(d.night) },
-        release_for: `${d.release.n}${d.release.unit}`,
-        default_channel: d.def,
-      });
-      this.draft = settingsDraft(st);
-      saved(this, st);
-      toast(this, t("Settings saved"));
-    } catch (e) {
-      this.errors = errorLines(e);
-      toast(this, this.errors[0]);
-    }
-    this.busy = false;
-  }
-
   render() {
-    const d = this.draft;
-    if (!d) return nothing;
-    const { by, rest } = route(this.errors ?? [], { location: /^location/, brightness: /^brightness/, release: /^release_for/, def: /^default_channel/ });
-    const level = (key, label) => html`<div class="level"><span>${label}</span>
-      <input type="range" min="0" max="100" .value=${String(d[key])} aria-label=${label} @input=${(e) => this.set(key, Number(e.target.value))}><output>${d[key]}</output></div>`;
+    const st = this.base;
+    if (!st) return nothing;
+    const loc = st.location, b = { ...st.brightness, ...this.levels };
+    const placeName = loc.name || `${loc.latitude}, ${loc.longitude}`;
+    const level = (key, label) => html`<label class="level"><span>${label}</span>
+      <input type="range" min="0" max="100" .value=${String(b[key])} ?disabled=${this.busy}
+        @input=${(e) => { this.levels = { ...this.levels, [key]: Number(e.target.value) }; }}
+        @change=${() => { this.put({ brightness: { ...st.brightness, ...this.levels } }); this.levels = undefined; }}><output>${b[key]}</output></label>`;
     return html`<section class="card" aria-labelledby="se-h">
       <div class="head"><h2 id="se-h">${t("Settings")}</h2></div>
       <div class="grid">
-        <div><h3>${t("Location")}</h3>
-          <div class="pair">
-            <div><label class="label" for="lat">${t("Latitude")}</label><input id="lat" type="number" step="any" class=${by.location ? "bad" : ""} .value=${d.latitude} @input=${(e) => this.set("latitude", e.target.value)}></div>
-            <div><label class="label" for="lon">${t("Longitude")}</label><input id="lon" type="number" step="any" class=${by.location ? "bad" : ""} .value=${d.longitude} @input=${(e) => this.set("longitude", e.target.value)}></div>
-          </div>
-          <div class="where"><button class="btn small" @click=${() => this.locate()}>${icons.locate}${t("Use this device's location")}</button></div>
-          <p class="hint">${t("The sun at this place decides between day, dusk and night brightness.")}</p>
-          ${fieldErr(by.location)}</div>
-        <div><h3>${t("Brightness")}</h3>${level("day", t("Day"))}${level("dusk", t("Dusk"))}${level("night", t("Night"))}${fieldErr(by.brightness)}</div>
-        <div class="pair">
-          <div><label class="label" for="rel">${t("Release duration")}</label>
-            <div class="unit"><input id="rel" type="number" min="1" step="any" class=${by.release ? "bad" : ""} .value=${String(d.release.n)} @input=${(e) => this.set("release", { ...d.release, n: e.target.value })}>
-              <select aria-label=${t("Unit")} .value=${d.release.unit} @change=${(e) => this.set("release", { ...d.release, unit: e.target.value })}>
-                <option value="m" ?selected=${d.release.unit === "m"}>${t("minutes")}</option><option value="h" ?selected=${d.release.unit === "h"}>${t("hours")}</option></select></div>
-            ${fieldErr(by.release)}</div>
-          <div><label class="label" for="def">${t("Default profile")}</label>
-            <select id="def" class=${by.def ? "bad" : ""} .value=${d.def} @change=${(e) => this.set("def", e.target.value)}>
-              ${this.base.channels.map((c) => html`<option value=${c.name} ?selected=${c.name === d.def}>${c.name}</option>`)}</select>
-            ${fieldErr(by.def)}</div>
+        <div>
+          <h3>${t("Location")}</h3>
+          <p class="hint">${t("Used for the weather and to know when it is day, dusk or night.")}</p>
+          <div class="here">${icons.locate}<b>${placeName}</b></div>
+          <form class="find" @submit=${(e) => this.search(e)}>
+            <input type="search" placeholder=${t("Search a city")} aria-label=${t("Search a city")} .value=${this.query ?? ""} @input=${(e) => { this.query = e.target.value; }}>
+            <button class="btn" type="submit">${t("Search")}</button>
+            <button class="btn" type="button" title=${t("Use this device's location")} aria-label=${t("Use this device's location")} @click=${() => this.locate()}>${icons.locate}</button>
+          </form>
+          ${this.places?.length ? html`<ul class="places">${this.places.map((p) => html`<li><button @click=${() => this.pickPlace(p)}>${p.name}<small>${[p.admin1, p.country].filter(Boolean).join(", ")}</small></button></li>`)}</ul>` : nothing}
         </div>
+        <div>
+          <h3>${t("Brightness")}</h3>
+          <p class="hint">${t("It changes by itself with the sun.")}</p>
+          ${level("day", t("Day"))}${level("dusk", t("Dusk"))}${level("night", t("Night"))}
+        </div>
+        ${st.channels.length > 1 ? html`<div>
+          <h3>${t("Default profile")}</h3>
+          <select aria-label=${t("Default profile")} .value=${st.default_channel} ?disabled=${this.busy} @change=${(e) => this.put({ default_channel: e.target.value })}>
+            ${st.channels.map((c) => html`<option value=${c.name} ?selected=${c.name === st.default_channel}>${c.name}</option>`)}</select>
+        </div>` : nothing}
       </div>
-      ${rest.length ? html`<ul class="errors">${rest.map((l) => html`<li class="err">${l}</li>`)}</ul>` : nothing}
-      <div class="foot"><button class="btn primary" ?disabled=${!this.dirty || this.busy} @click=${() => this.save()}>${t("Save settings")}</button>
-        <button class="btn" ?disabled=${!this.dirty || this.busy} @click=${() => { this.draft = settingsDraft(this.base); this.errors = []; }}>${t("Revert")}</button></div>
     </section>`;
   }
 }
@@ -951,7 +946,7 @@ class LedMatrix extends LitElement {
 customElements.define("ph-led", LedMatrix);
 
 // The display's own modes, as its side button cycles them. Each tap is sent at once, like the button.
-const MODES = ["clock", "light", "animations", "visualizer"];
+const MODES = ["clock", "light", "animations"];
 const modeName = (m) => ({ clock: t("Clock"), light: t("Light"), animations: t("My animations"), visualizer: t("Music"), scoreboard: t("Scoreboard"), stopwatch: t("Stopwatch"), countdown: t("Countdown"), noise: t("Noise meter") })[m];
 const modeIcons = {
   clock: icon(svg`<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>`),
@@ -969,11 +964,11 @@ class Modes extends LitElement {
   connectedCallback() { super.connectedCallback(); this.now = new Date(); this.tick = setInterval(() => { this.now = new Date(); }, 15000); }
   disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.tick); }
   static styles = [base, css`
-    .modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-    @media (min-width: 560px) { .modes { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+    .modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    @media (min-width: 560px) { .modes { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
     .mode { border: 1px solid var(--line); background: var(--surface); border-radius: 16px; padding: 12px 6px 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 500; min-width: 0; }
     .mode svg { width: 24px; height: 24px; }
-    .mode span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+    .mode span { text-align: center; line-height: 1.25; max-width: 100%; }
     .mode:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); }
     .mode[aria-pressed=true] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
     .mode[aria-pressed=true] svg { color: var(--accent); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 70%, transparent)); }
@@ -990,15 +985,18 @@ class Modes extends LitElement {
     @media (min-width: 560px) { .faces { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
     .face { border: 1px solid var(--line); background: none; border-radius: 14px; padding: 8px 6px; display: grid; justify-items: center; gap: 6px; cursor: pointer; color: var(--muted); font-size: 12px; min-width: 0; }
     .face img { width: 100%; max-width: 72px; aspect-ratio: 1; border-radius: 6px; background: #000; }
-    .face span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+    .face span { text-align: center; line-height: 1.25; max-width: 100%; }
     .face:hover { color: var(--ink); }
     .face[aria-pressed=true] { border-color: var(--accent); color: var(--ink); box-shadow: 0 0 0 1px var(--accent); }
     .toggles { display: flex; flex-wrap: wrap; gap: 16px; }
     .toggles label { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
     input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
-    .colour { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .colour { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
-    .swatch { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+    .swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+    .colour input[type=color] { width: 28px; height: 28px; padding: 0; border: 2px dashed var(--line); border-radius: 50%; background: none; cursor: pointer; overflow: hidden; }
+    .colour input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+    .colour input[type=color]::-webkit-color-swatch { border: 0; border-radius: 50%; }
     .swatch[aria-pressed=true] { border-color: var(--ink); }
     .score { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .team { border-radius: 14px; padding: 12px; display: grid; justify-items: center; gap: 8px; background: color-mix(in srgb, var(--team) 16%, transparent); border: 1px solid color-mix(in srgb, var(--team) 45%, transparent); }
@@ -1028,7 +1026,8 @@ class Modes extends LitElement {
     this.busy = false;
   }
 
-  pick(mode) { this.apply(this.viewFor(mode)); }
+  // The clock has one look, the same in Automatic and when picked by hand.
+  pick(mode) { this.apply(mode === "clock" ? { mode } : this.viewFor(mode)); }
 
   change(patch) { this.apply({ ...this.viewFor(this.current.mode), ...patch }); }
 
@@ -1042,7 +1041,7 @@ class Modes extends LitElement {
   }
 
   colour(v, change = (p) => this.change(p)) {
-    const presets = ["#ffffff", "#ff3b30", "#ff9f0a", "#ffd60a", "#30d158", "#40c8e0", "#0a84ff", "#bf5af2", "#ff375f"];
+    const presets = ["#ffffff", "#ff3b30", "#ff9f0a", "#ffd60a", "#30d158", "#40c8e0", "#0a84ff", "#bf5af2"];
     return html`<div class="colour">
       <div class="swatches" role="group" aria-label=${t("Colour")}>
         ${presets.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c} aria-pressed=${String(v.color?.toLowerCase() === c)} @click=${() => change({ color: c })}></button>`)}
@@ -1093,9 +1092,9 @@ class Modes extends LitElement {
           ${icon(svg`<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/>`)}<span>${t("Automatic")}</span></button>
         ${MODES.map((m) => html`<button class="mode" aria-pressed=${String(active === m)} ?disabled=${this.busy} @click=${() => this.pick(m)}>${modeIcons[m]}<span>${modeName(m)}</span></button>`)}
       </div>
-      ${active && !MODES.includes(active) ? html`<div class="panel"><p>${t("{app} is on. Change it in Apps.", { app: modeName(active) })}</p></div>`
-        : active ? html`<div class="panel">${this.options(active)}</div>`
-        : html`<div class="panel"><p class="small muted">${t("Automatic shows alerts, scenes and pictures by the schedule, and this clock between them.")}</p>
+      ${active && !MODES.includes(active) ? html`<div class="panel"><p>${t("{app} is on. Change it in Apps or Music.", { app: modeName(active) })}</p></div>`
+        : active && active !== "clock" ? html`<div class="panel">${this.options(active)}</div>`
+        : html`<div class="panel"><p class="small muted">${active ? t("Only the clock, until you pick something else.") : t("Pictures and what you scheduled, with this clock between them.")}</p>
           ${this.options("clock", { mode: "clock", color: "#ff1e28", ...this.clock }, (p) => this.setClock(p))}</div>`}`;
   }
 }
@@ -1141,15 +1140,16 @@ class DisplayTab extends LitElement {
   `];
 
   what(s) {
-    if (s.layer === "alert") return t("Alert");
+    if (s.layer === "alert") return t("For a moment");
     if (s.layer === "mode") return t("Chosen by you");
     if (s.layer === "music") return t("Playing on Spotify");
-    if (s.layer === "scene") return t("Scene of {channel}", { channel: s.channel });
-    return t("Automatic, {channel}", { channel: s.channel });
+    if (s.layer === "scene") return t("Scheduled");
+    return t("Automatic");
   }
   shownName(s) {
     if (s.layer === "mode" && this.state?.mode) return modeName(this.state.mode.mode);
-    return s.showing;
+    const own = { clock: t("Clock"), weather: t("Weather"), temperature: t("Temperature") }[s.showing];
+    return own ?? s.showing.replace(/^gallery /, "");
   }
 
   async setLevel(value) {
@@ -1180,12 +1180,12 @@ class DisplayTab extends LitElement {
           ${icon(svg`<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>`)}
           <input type="range" min="0" max="100" .value=${String(level)} aria-label=${t("Brightness")} ?disabled=${this.busy}
             @input=${(e) => { this.level = Number(e.target.value); }} @change=${(e) => this.setLevel(Number(e.target.value))}>
-          <output>${level}</output></label>` : nothing}
+          <output>${level}</output></label>
+        <span class="small muted">${t("Brightness for the {phase}, as in Settings", { phase: t(phase) })}</span>` : nothing}
       </div>
       <div class="stack">
         <section><h2 class="muted">${t("What the display shows")}</h2>
           <ph-modes .current=${this.state?.mode} .clock=${this.state?.clock} .styles=${this.styles}></ph-modes></section>
-        <ph-notify .sprites=${this.sprites}></ph-notify>
       </div>
     </div>`;
   }
@@ -1398,7 +1398,7 @@ class GalleryTab extends LitElement {
         <div class="acts">
           <button class="btn small save" aria-expanded=${String(!!this.saving)} @click=${() => { this.saving = !this.saving; }}>
             ${icons.bookmark}${inLists.length ? t("Saved in {n}", { n: inLists.length }) : t("Save")}</button>
-          <button class="btn primary small" ?disabled=${this.busy} @click=${() => this.show()}>${t("Show now")}</button>
+          <button class="btn primary small" ?disabled=${this.busy} @click=${() => this.show()}>${t("Show for 30 s")}</button>
           ${channels.length ? html`<select aria-label=${t("Profile")} @change=${(e) => { this.target = e.target.value; }}>
               ${channels.map((c) => html`<option value=${c.name} ?selected=${c.name === (this.target ?? channels[0].name)}>${c.name}</option>`)}</select>
             <button class="btn small" ?disabled=${this.busy} @click=${() => this.save()}>${t("Add to profile")}</button>` : nothing}
@@ -1531,9 +1531,6 @@ class SpotifyCard extends LitElement {
           <div class="row"><a class="btn primary" href="api/spotify/login">${t("Connect Spotify")}</a></div>`
         : html`
           <p class="small muted">${t("Signed in as {user}.", { user: i.user ?? "?" })}</p>
-          ${i.now ? html`<div class="now"><b>${i.now.track}</b><span class="small">${i.now.artists}</span>
-            <span class="small muted">${i.now.playing ? t("Playing on {device}", { device: i.now.device || "?" }) : t("Paused")}</span></div>`
-            : html`<p class="small muted">${t("Nothing is playing.")}</p>`}
           <label class="toggle"><input type="checkbox" .checked=${!!m.enabled} @change=${(e) => this.music({ enabled: e.target.checked })}>${t("Show on the display while it plays")}</label>
           <div><span class="label">${t("What to show")}</span>${segmented([["cover", t("Album cover")], ["visualizer", t("Visualiser")], ["animations", t("My animations")]], show,
             (v) => this.music({ view: v === "cover" ? undefined : { mode: v } }))}</div>
@@ -1541,7 +1538,6 @@ class SpotifyCard extends LitElement {
             <div class="devices">${i.devices.map((d) => html`<label class="toggle"><input type="checkbox" .checked=${(m.devices ?? []).includes(d)}
               @change=${(e) => this.music({ devices: e.target.checked ? [...(m.devices ?? []), d] : (m.devices ?? []).filter((x) => x !== d) })}>${d}</label>`)}</div>
             <p class="small muted">${(m.devices ?? []).length ? t("Music on any other device is left alone.") : t("None ticked: music on any device shows, also away from home.")}</p></div>` : nothing}
-          <p class="small muted">${t("Alerts and a mode picked by hand stay on top.")}</p>
           ${i.error ? html`<p class="err">${i.error}</p>` : nothing}
           <div class="row"><button class="btn small" ?disabled=${this.busy} @click=${() => this.call("DELETE")}>${t("Disconnect")}</button></div>`}
       </div>
@@ -1821,7 +1817,7 @@ class AppsTab extends LitElement {
 customElements.define("ph-apps", AppsTab);
 
 class ConnectionCard extends LitElement {
-  static properties = { status: { attribute: false }, busy: { state: true } };
+  static properties = { status: { attribute: false }, state: { attribute: false }, busy: { state: true } };
   static styles = [base, css`
     dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; }
     dt, dd { margin: 0; padding: 8px 0; border-top: 1px solid var(--line); min-width: 0; }
@@ -1832,6 +1828,11 @@ class ConnectionCard extends LitElement {
   async call(path) {
     this.busy = true;
     try { await api("POST", path); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+  async setFor(v) {
+    this.busy = true;
+    try { saved(this, await api("PUT", "settings", { release_for: v })); } catch (e) { toast(this, e.message); }
     this.busy = false;
   }
   render() {
@@ -1849,7 +1850,10 @@ class ConnectionCard extends LitElement {
       <div class="actions">
         ${released
           ? html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.call("claim")}>${t("Take back")}</button><span class="small muted">${t("Released until {time}", { time: until(s.released_until) })}</span>`
-          : html`<button class="btn" ?disabled=${this.busy} @click=${() => this.call("release")}>${t("Lend to the phone")}</button><span class="small muted">${t("Lets the Divoom app use the display for a while.")}</span>`}
+          : html`<button class="btn" ?disabled=${this.busy} @click=${() => this.call("release")}>${t("Lend to the phone")}</button>
+            <label class="small muted">${t("for")} <select aria-label=${t("How long")} ?disabled=${this.busy} @change=${(e) => this.setFor(e.target.value)}>
+              ${["30m", "1h", "3h", "8h"].map((v) => html`<option value=${v} ?selected=${seconds(this.state?.release_for) === seconds(v)}>${v.replace("m", " min").replace("h", " h")}</option>`)}</select></label>
+            <p class="small muted" style="flex-basis:100%;margin:0">${t("Lets the Divoom app use the display for a while; then pixelhub takes it back.")}</p>`}
       </div>
     </section>`;
   }
@@ -2012,10 +2016,10 @@ class PixelhubApp extends LitElement {
       case "gallery": return html`<ph-gallery .state=${view}></ph-gallery>`;
       case "apps": return html`<ph-apps .state=${view}></ph-apps>`;
       case "music": return html`<ph-music .state=${view} .status=${this.status} .styles=${this.modes}></ph-music>`;
-      case "profiles": return html`<div class="tab"><ph-switch .state=${view} .status=${this.status}></ph-switch>
+      case "profiles": return html`<div class="tab">${view?.channels?.length > 1 ? html`<ph-switch .state=${view} .status=${this.status}></ph-switch>` : nothing}
         <ph-channels .state=${view} .status=${this.status} .sprites=${this.sprites}></ph-channels></div>`;
       case "schedule": return html`<div class="tab">${view ? html`<ph-schedule .base=${view}></ph-schedule>` : nothing}</div>`;
-      case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<ph-connection .status=${this.status}></ph-connection></div>`;
+      case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<ph-connection .status=${this.status} .state=${view}></ph-connection></div>`;
       default: return html`<ph-display .status=${this.status} .state=${view} .sprites=${this.sprites} .styles=${this.modes} ?offline=${this.offline}></ph-display>`;
     }
   }
