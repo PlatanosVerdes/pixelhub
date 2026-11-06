@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/PlatanosVerdes/pixelhub/internal/bridge"
+	"github.com/PlatanosVerdes/pixelhub/internal/calendar"
 	"github.com/PlatanosVerdes/pixelhub/internal/config"
 	"github.com/PlatanosVerdes/pixelhub/internal/demo"
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
@@ -30,6 +31,11 @@ import (
 )
 
 var buildVersion = "local"
+
+const (
+	calendarPriority = 5
+	calendarAlert    = 30 * time.Second
+)
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -101,12 +107,20 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 		return err
 	}
 	h.Lists = hub.ListFunc(func(list string, turn int) (display.Content, bool, error) { return kept.Pick(list, turn, divoom.Size) })
+	cal, err := calendar.Open(filepath.Join(cfg.DataDir, "calendar.json"), log)
+	if err != nil {
+		return err
+	}
+	cal.Warn = func(_ calendar.Event, left time.Duration) {
+		h.Notify(hub.Alert{Content: calendar.Picture(left, divoom.Size), Priority: calendarPriority, Duration: calendarAlert, Source: "calendar"})
+	}
 	go session.Run(ctx)
 	go h.Run(ctx)
 	go music.Run(ctx)
 	go station.Run(ctx)
+	go cal.Run(ctx)
 
-	api := &server.Server{Hub: h, Sprites: sprites, Spotify: music, Weather: station, Gallery: gallery.NewClient(), Lists: kept, IndexPath: filepath.Join(cfg.DataDir, "gallery-index.json"), Size: divoom.Size, Version: buildVersion}
+	api := &server.Server{Hub: h, Sprites: sprites, Spotify: music, Calendar: cal, Weather: station, Gallery: gallery.NewClient(), Lists: kept, IndexPath: filepath.Join(cfg.DataDir, "gallery-index.json"), Size: divoom.Size, Version: buildVersion}
 	go api.WarmGallery(ctx)
 	srv := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),

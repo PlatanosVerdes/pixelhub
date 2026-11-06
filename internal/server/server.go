@@ -59,6 +59,8 @@ type Server struct {
 	Sprites Sprites
 	// Spotify, when set, links a Spotify account under /api/spotify.
 	Spotify Spotify
+	// Calendar, when set, follows a calendar under /api/calendar.
+	Calendar Calendar
 	// Weather, when set, answers GET /api/weather.
 	Weather interface{ Reading() weather.Reading }
 	// Gallery, when set, browses the Divoom community gallery under /api/gallery.
@@ -116,6 +118,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/channels/{name}/pictures/{file}", s.removePicture)
 	if s.Spotify != nil {
 		s.spotifyRoutes(mux)
+	}
+	if s.Calendar != nil {
+		s.calendarRoutes(mux)
 	}
 	if s.Gallery != nil {
 		s.galleryRoutes(mux)

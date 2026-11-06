@@ -1459,6 +1459,69 @@ class ConnectionCard extends LitElement {
 }
 customElements.define("ph-connection", ConnectionCard);
 
+const lead = (m) => (m % 1440 === 0 ? t("{n} d before", { n: m / 1440 }) : m % 60 === 0 ? t("{n} h before", { n: m / 60 }) : t("{n} min before", { n: m }));
+
+// Follows a calendar through its secret iCal address and warns on the display before each event.
+class CalendarCard extends LitElement {
+  static properties = { info: { state: true }, draft: { state: true }, busy: { state: true } };
+  static styles = [base, css`
+    .grid { display: grid; gap: 14px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .row input { flex: 1 1 260px; font-family: var(--font-data); }
+    ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; }
+    ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+    ul li { display: flex; gap: 12px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; min-width: 0; }
+    ul li .when { color: var(--muted); font-family: var(--font-data); font-size: 12px; flex: none; min-width: 72px; }
+    ul li span:last-child { overflow-wrap: anywhere; }
+    .alarms { display: block; color: var(--muted); font-size: 12px; }
+  `];
+  connectedCallback() { super.connectedCallback(); this.load(); this.timer = setInterval(() => { if (!document.hidden) this.load(); }, 60000); }
+  disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.timer); }
+  async load() { try { this.info = await api("GET", "calendar"); } catch { /* the status poll shows outages */ } }
+  async call(method, body) {
+    this.busy = true;
+    try { this.info = await api(method, "calendar", body); this.draft = ""; } catch (e) { toast(this, e.message); }
+    this.busy = false;
+  }
+  async show() {
+    try { await api("POST", "calendar/show"); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+  }
+
+  render() {
+    const i = this.info;
+    if (!i) return nothing;
+    return html`<section class="card" aria-labelledby="ca-h">
+      <div class="head"><h2 id="ca-h">${t("Calendar")}</h2>${i.configured ? html`<span class="tag on">${t("Connected")}</span>` : nothing}</div>
+      <div class="grid">
+        ${!i.configured ? html`
+          <ol>
+            <li>${t("In Google Calendar on the web, open the calendar's Settings and sharing.")}</li>
+            <li>${t("Under Integrate calendar, copy the Secret address in iCal format.")}</li>
+            <li>${t("Paste it here. Anyone with it can read the calendar, so it stays on pixelhub and is never shown again.")}</li>
+          </ol>
+          <div class="row"><input type="password" autocomplete="off" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" aria-label=${t("iCal address")}
+            .value=${this.draft ?? ""} @input=${(e) => { this.draft = e.target.value; }}>
+            <button class="btn primary" ?disabled=${this.busy || !this.draft} @click=${() => this.call("PUT", { url: this.draft })}>${this.busy ? t("Checking") : t("Save")}</button></div>`
+        : html`
+          ${i.account ? html`<p class="small muted" style="margin:0">${i.account}</p>` : nothing}
+          <div><span class="label">${t("Events without reminders warn")}</span>${segmented([[5, "5 min"], [10, "10 min"], [15, "15 min"], [30, "30 min"]], i.lead_minutes,
+            (v) => this.call("PUT", { lead_minutes: v }))}</div>
+          <div><span class="label">${t("Coming up")}</span>${i.next?.length
+            ? html`<ul>${i.next.map((e) => html`<li><span class="when">${until(e.start)}</span><span>${e.title || t("(no title)")}<span class="alarms">${
+              (e.alarms?.length ? e.alarms : [i.lead_minutes]).map(lead).join(" · ")}${e.alarms?.length ? "" : ` (${t("default")})`}</span></span></li>`)}</ul>`
+            : html`<p class="small muted" style="margin:0">${t("Nothing in the next 7 days.")}</p>`}</div>
+          <p class="hint" style="margin:0">${t("Each event warns at the reminders set on it in the calendar, and again when it starts. All-day, cancelled and declined events are left out.")}</p>
+          ${i.error ? html`<p class="err">${i.error}</p>` : nothing}
+          <div class="row">
+            <button class="btn small" @click=${() => this.show()}>${t("Show on the display")}</button>
+            <button class="btn small" ?disabled=${this.busy} @click=${() => this.call("DELETE")}>${t("Disconnect")}</button>
+          </div>`}
+      </div>
+    </section>`;
+  }
+}
+customElements.define("ph-calendar", CalendarCard);
+
 // A toast hides by itself, but not while the pointer or focus is on it, so its action stays reachable.
 // `expire` is the work an Undo cancels: it runs when the toast goes away any other way.
 class Toasts {
@@ -1521,6 +1584,7 @@ class PixelhubApp extends LitElement {
     main { max-width: 1120px; margin: 0 auto; padding: 8px 16px 48px; }
     .tab { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; min-width: 0; }
     .tab.two { grid-template-columns: minmax(0, 1fr); }
+    .tab .stack { display: grid; gap: 18px; min-width: 0; }
     @media (min-width: 900px) { .tab.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
     footer { max-width: 1120px; margin: 0 auto; padding: 0 16px 32px; font-size: 12px; color: var(--muted); }
     @media (max-width: 759px) { footer { padding-bottom: 96px; } }
@@ -1626,7 +1690,7 @@ class PixelhubApp extends LitElement {
       case "gallery": return gallery;
       case "apps": return html`<ph-apps .state=${view}></ph-apps>${gallery}`;
       case "music": return html`<ph-music .state=${view} .status=${this.status} .styles=${this.modes}></ph-music>${gallery}`;
-      case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<ph-connection .status=${this.status} .state=${view}></ph-connection></div>${gallery}`;
+      case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<div class="stack"><ph-connection .status=${this.status} .state=${view}></ph-connection><ph-calendar></ph-calendar></div></div>${gallery}`;
       default: return html`<ph-display .status=${this.status} .state=${view} .sprites=${this.sprites} .styles=${this.modes} ?offline=${this.offline}></ph-display>${gallery}`;
     }
   }
