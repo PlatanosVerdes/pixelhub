@@ -32,6 +32,12 @@ func TestBridge(t *testing.T) {
 	b.GreetAfter = 50 * time.Millisecond
 	chimed := make(chan [6]byte, 2)
 	b.Chime = func(mac [6]byte) { chimed <- mac }
+	type sound struct {
+		wav   []byte
+		after time.Duration
+	}
+	said := make(chan sound, 1)
+	b.Say = func(_ [6]byte, wav []byte, after time.Duration) { said <- sound{wav, after} }
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -81,6 +87,21 @@ func TestBridge(t *testing.T) {
 	}
 	if len(chimed) != 0 {
 		t.Error("the chime sent before the link played")
+	}
+	wav := bytes.Repeat([]byte{0xaa}, 5000)
+	say := append([]byte{opSay, 0xfa, 0x00, 0x88, 0x13, 0x00, 0x00}, wav...)
+	c.Write(say[:3000]) // a sound split across reads, then a frame behind it
+	c.Write(append(say[3000:], frame...))
+	select {
+	case got := <-said:
+		if !bytes.Equal(got.wav, wav) || got.after != 250*time.Millisecond {
+			t.Errorf("said %d bytes after %s, want 5000 after 250ms", len(got.wav), got.after)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("the sound did not play")
+	}
+	if got := <-link.written; !bytes.Equal(got, frame) {
+		t.Errorf("the frame after the sound: %x", got)
 	}
 	answer := []byte{0x01, 0x06, 0x00, 0x04, 0x32, 0x55, 0x50, 0xe1, 0x00, 0x02}
 	go w.Write(answer)

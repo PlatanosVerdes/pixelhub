@@ -3,6 +3,7 @@ package hub
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"log/slog"
@@ -42,6 +43,9 @@ const (
 	batteryEvery                 = time.Hour
 	// showPriority puts something picked by hand over routine alerts but under urgent ones.
 	showPriority = 5
+	// talkPriority speaks over what was picked by hand, which would otherwise hold it back for minutes.
+	talkPriority = showPriority + 1
+	talkSource   = "talk"
 )
 
 type Sprites interface {
@@ -415,6 +419,24 @@ func (h *Hub) Show(c display.Content, d time.Duration) {
 	h.alerts.push(Alert{Content: c, Priority: showPriority, Duration: d, Source: shownSource}, now)
 	h.mu.Unlock()
 	h.poke()
+}
+
+// ErrLent is a request the display cannot take while the phone app has it.
+var ErrLent = errors.New("the display is lent to the phone app")
+
+// Say puts a talking clip on screen for d, cutting short the one before.
+func (h *Hub) Say(c display.Content, d time.Duration) error {
+	h.mu.Lock()
+	if !h.releasedUntil.IsZero() {
+		h.mu.Unlock()
+		return ErrLent
+	}
+	now := h.now()
+	h.alerts.drop(talkSource, now)
+	h.alerts.push(Alert{Content: c, Priority: talkPriority, Duration: d, Source: talkSource}, now)
+	h.mu.Unlock()
+	h.poke()
+	return nil
 }
 
 // SetChannel pins a channel for d, or until the schedule changes when d is zero.

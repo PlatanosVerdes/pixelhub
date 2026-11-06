@@ -35,6 +35,23 @@ type State struct {
 	Music Music `json:"music,omitzero"`
 	// Clock is how the clock looks wherever pixelhub shows it, so the display's stored look never leaks in.
 	Clock display.View `json:"clock,omitzero"`
+	// Talk is how Mosko speaks.
+	Talk Talk `json:"talk,omitzero"`
+}
+
+// Talk tunes Mosko. LagMS is how much later the speaker sounds than the display moves, measured by
+// ear; Pitch is the voice's pitch in percent, 100 as recorded or spoken.
+type Talk struct {
+	LagMS int `json:"lag_ms"`
+	Pitch int `json:"pitch,omitempty"`
+}
+
+// PitchRatio is Pitch as a factor, 1 when unset.
+func (t Talk) PitchRatio() float64 {
+	if t.Pitch == 0 {
+		return 1
+	}
+	return float64(t.Pitch) / 100
 }
 
 var defaultClock = display.View{Mode: display.ModeClock, Color: "#ff1e28"}
@@ -207,7 +224,8 @@ func (s *State) ApplySettings(data []byte) error {
 		// Music is replaced whole: leaving out its view means the cover.
 		Music *Music        `json:"music"`
 		Clock *display.View `json:"clock"`
-	}{Location: &s.Location, Brightness: &s.Brightness, ReleaseFor: &s.ReleaseFor, DefaultChannel: &s.DefaultChannel}
+		Talk  *Talk         `json:"talk"`
+	}{Talk: &s.Talk, Location: &s.Location, Brightness: &s.Brightness, ReleaseFor: &s.ReleaseFor, DefaultChannel: &s.DefaultChannel}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&settings); err != nil {
@@ -234,6 +252,12 @@ func (s State) Validate() error {
 		if v < 0 || v > 100 {
 			errs = append(errs, fmt.Errorf("brightness.%s: %d is outside 0-100", name, v))
 		}
+	}
+	if s.Talk.LagMS < -2000 || s.Talk.LagMS > 2000 {
+		errs = append(errs, fmt.Errorf("talk.lag_ms: %d is outside -2000 to 2000", s.Talk.LagMS))
+	}
+	if s.Talk.Pitch != 0 && (s.Talk.Pitch < 50 || s.Talk.Pitch > 200) {
+		errs = append(errs, fmt.Errorf("talk.pitch: %d is outside 50-200", s.Talk.Pitch))
 	}
 	if time.Duration(s.ReleaseFor) < time.Minute {
 		errs = append(errs, fmt.Errorf("release_for: %s is under a minute", time.Duration(s.ReleaseFor)))

@@ -35,6 +35,9 @@ type Content struct {
 	Brightness int
 	// Weather feeds the clock's weather and temperature.
 	Weather Weather
+	// Sound is a WAV the display's speaker plays once the frames are on it, SoundAfter later.
+	Sound      []byte
+	SoundAfter time.Duration
 }
 
 // Weather is the outside reading; Sky uses the display's own codes.

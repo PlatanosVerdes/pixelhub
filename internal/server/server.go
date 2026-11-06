@@ -47,6 +47,7 @@ type Hub interface {
 	AddPicture(channel, name string, data []byte) (string, error)
 	RemovePicture(channel, file string) error
 	Preview() (display.Content, int)
+	Say(c display.Content, d time.Duration) error
 }
 
 type Sprites interface {
@@ -74,6 +75,10 @@ type Server struct {
 	gifs        gifCache
 	lists       listCache
 	index       galleryIndex
+	// Voice and Decoder, when set, let Mosko talk under /api/talk: Voice reads text, Decoder takes recordings.
+	Voice   Voice
+	Decoder Decoder
+	talking talking
 	// Size is the display's side in pixels, for drawing previews.
 	Size    int
 	Version string
@@ -97,6 +102,8 @@ func (s *Server) Handler() http.Handler {
 		s.Hub.Retry()
 		writeJSON(w, http.StatusAccepted, s.Hub.Status())
 	})
+	mux.HandleFunc("POST /api/talk", s.talk)
+	mux.HandleFunc("GET /api/talk/mosko.png", s.moskoPNG)
 	mux.HandleFunc("GET /api/sprites", s.sprites)
 	mux.HandleFunc("GET /api/sprites/{file}", s.spritePNG)
 	mux.HandleFunc("GET /api/preview.png", s.previewPNG)

@@ -3,6 +3,7 @@
 package btbridge
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -16,7 +17,10 @@ const (
 	opConnect = 0x69
 	opRelease = 0x96
 	// opChime asks for the chime on the display's own speaker; the esp32 bridge has no such op.
-	opChime   = 0x7c
+	opChime = 0x7c
+	// opSay carries a sound for that speaker: a two-byte wait in milliseconds, a four-byte length, the WAV.
+	opSay     = 0x7d
+	maxSound  = 4 << 20
 	linkDown  = 0x96
 	busyTries = 12
 )
@@ -39,6 +43,8 @@ type Bridge struct {
 	Retry time.Duration
 	// Chime, when set, plays the chime on the speaker of the display at mac.
 	Chime func(mac [6]byte)
+	// Say, when set, plays wav on that speaker after a wait.
+	Say func(mac [6]byte, wav []byte, after time.Duration)
 
 	ops     chan func()
 	cl      net.Conn
@@ -129,6 +135,15 @@ func next(in []byte) (msg, rest []byte, ok bool) {
 		size = 7
 	case opChime:
 		size = 1
+	case opSay:
+		if len(in) < 7 {
+			return nil, in, false
+		}
+		n := int(binary.LittleEndian.Uint32(in[3:7]))
+		if n > maxSound {
+			return nil, in[1:], true
+		}
+		size = 7 + n
 	case 0x01:
 		if len(in) < 3 {
 			return nil, in, false
@@ -162,6 +177,13 @@ func (b *Bridge) handle(c net.Conn, msg []byte) {
 		}
 		mac := b.mac
 		go b.Chime(mac)
+	case opSay:
+		if b.Say == nil || b.lk == nil {
+			b.Log.Info("sound skipped", "linked", b.lk != nil)
+			return
+		}
+		after := time.Duration(binary.LittleEndian.Uint16(msg[1:3])) * time.Millisecond
+		go b.Say(b.mac, msg[7:], after)
 	default:
 		b.forward(msg)
 	}

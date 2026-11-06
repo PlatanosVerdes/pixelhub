@@ -2,9 +2,11 @@ package bridge
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"sync"
 	"time"
@@ -17,6 +19,7 @@ const (
 	opConnect  = 0x69
 	opRelease  = 0x96
 	opChime    = 0x7c
+	opSay      = 0x7d
 	opLinkDown = 0x96
 )
 
@@ -43,7 +46,7 @@ type Options struct {
 	MinBackoff      time.Duration
 	MaxBackoff      time.Duration
 	ChunkPause      time.Duration
-	// Chime sends the chime op, which only pixelbridge knows; the esp32 bridge would take it for a frame.
+	// Chime sends the chime and say ops, which only pixelbridge knows; the esp32 bridge would take them for frames.
 	Chime bool
 }
 
@@ -79,6 +82,9 @@ type Session struct {
 	released    bool
 	releaseSent bool
 	status      display.Status
+
+	// said is the key of the last sound sent, so a repaint after a reconnect does not say it again.
+	said string
 }
 
 var _ display.Display = (*Session)(nil)
@@ -381,6 +387,11 @@ func (l *link) repaint() error {
 	if resend || !content.SamePicture(l.shown) {
 		msgs, err = divoom.Encode(content)
 		msgs = append(divoom.Leave(l.shown, content), msgs...)
+		// Sent right after the last frame: the bridge plays it as the display starts the animation.
+		if err == nil && len(content.Sound) > 0 && l.opt.Chime && l.said != content.Key {
+			l.said = content.Key
+			msgs = append(msgs, sayOp(content.Sound, content.SoundAfter))
+		}
 	}
 	l.shown = content
 	if err != nil {
@@ -396,6 +407,13 @@ func (l *link) repaint() error {
 		}
 	}
 	return nil
+}
+
+// sayOp is the op, the wait in milliseconds before playing, and the WAV with its length.
+func sayOp(wav []byte, after time.Duration) []byte {
+	msg := binary.LittleEndian.AppendUint16([]byte{opSay}, uint16(min(after.Milliseconds(), math.MaxUint16)))
+	msg = binary.LittleEndian.AppendUint32(msg, uint32(len(wav)))
+	return append(msg, wav...)
 }
 
 func (l *link) release() error {
