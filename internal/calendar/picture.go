@@ -63,18 +63,7 @@ func Picture(left time.Duration, size int) display.Content {
 				img.Set(x, y, ring)
 			}
 		}
-		glyphs := [][7]string{bang}
-		switch {
-		case minutes >= 100 && minutes < 10*60:
-			glyphs = [][7]string{digits[minutes/60], hours}
-		case minutes >= 10*60 && minutes < 10*24*60:
-			glyphs = [][7]string{digits[minutes/(24*60)], days}
-		case minutes >= 10*24*60:
-		case minutes >= 10:
-			glyphs = [][7]string{digits[minutes/10], digits[minutes%10]}
-		case minutes > 0:
-			glyphs = [][7]string{digits[minutes]}
-		}
+		glyphs := glyphsFor(minutes)
 		x0 := (size - (len(glyphs)*6 - 1)) / 2
 		for i, g := range glyphs {
 			for row, line := range g {
@@ -88,4 +77,23 @@ func Picture(left time.Duration, size int) display.Content {
 		return display.Frame{Image: img, Delay: 600 * time.Millisecond}
 	}
 	return display.Content{Kind: display.Picture, Name: "calendar", Key: strconv.Itoa(minutes), Frames: []display.Frame{frame(header), frame(dim)}}
+}
+
+// glyphsFor is the time left as it fits on the page: 37, 3h below 10 hours, then whole days rounded
+// up, so an event tomorrow morning reads 1d.
+func glyphsFor(minutes int) [][7]string {
+	const day = 24 * 60
+	switch {
+	case minutes <= 0:
+		return [][7]string{bang}
+	case minutes < 10:
+		return [][7]string{digits[minutes]}
+	case minutes < 100:
+		return [][7]string{digits[minutes/10], digits[minutes%10]}
+	case minutes < 10*60:
+		return [][7]string{digits[minutes/60], hours}
+	case minutes <= 9*day:
+		return [][7]string{digits[(minutes+day-1)/day], days}
+	}
+	return [][7]string{bang}
 }

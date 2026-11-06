@@ -241,6 +241,35 @@ func TestRejectsAClientThatIsNotGoogles(t *testing.T) {
 	}
 }
 
+func TestGlyphsFor(t *testing.T) {
+	t.Parallel()
+	name := func(g [][7]string) string {
+		out := ""
+		for _, x := range g {
+			switch x {
+			case bang:
+				out += "!"
+			case hours:
+				out += "h"
+			case days:
+				out += "d"
+			default:
+				for i, d := range digits {
+					if d == x {
+						out += fmt.Sprint(i)
+					}
+				}
+			}
+		}
+		return out
+	}
+	for minutes, want := range map[int]string{0: "!", 7: "7", 10: "10", 99: "99", 100: "1h", 599: "9h", 600: "1d", 19 * 60: "1d", 1440: "1d", 1441: "2d", 9 * 1440: "9d"} {
+		if got := name(glyphsFor(minutes)); got != want {
+			t.Errorf("%d minutes: %s, want %s", minutes, got, want)
+		}
+	}
+}
+
 func TestPicture(t *testing.T) {
 	t.Parallel()
 	for _, left := range []time.Duration{0, 30 * time.Second, 9 * time.Minute, 10 * time.Minute, 3 * time.Hour, 2 * 24 * time.Hour} {
