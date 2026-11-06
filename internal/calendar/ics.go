@@ -16,7 +16,9 @@ type Event struct {
 	Title string    `json:"title"`
 	Start time.Time `json:"start"`
 	End   time.Time `json:"end"`
-	uid   string
+	// Alarms are the event's own reminders, as minutes before it starts.
+	Alarms []int `json:"alarms"`
+	uid    string
 }
 
 type vevent struct {
@@ -27,8 +29,16 @@ type vevent struct {
 	declined     bool
 	rrule        string
 	exdates      []time.Time
+	alarms       []alarm
 	// recurrenceID, when set, is the start of the recurring instance this one replaces.
 	recurrenceID time.Time
+}
+
+// alarm is a VALARM trigger: an offset from the start or the end, or a fixed time.
+type alarm struct {
+	offset   time.Duration
+	fromEnd  bool
+	absolute time.Time
 }
 
 type property struct {
@@ -48,6 +58,9 @@ func parse(r io.Reader, me string) ([]vevent, error) {
 	}
 	var events []vevent
 	var cur *vevent
+	// trigger is the VALARM being read, nil outside one or until it has a usable TRIGGER.
+	var trigger *alarm
+	inAlarm := false
 	depth := 0
 	for _, line := range lines {
 		p, ok := parseLine(line)
@@ -62,9 +75,21 @@ func parse(r io.Reader, me string) ([]vevent, error) {
 			continue
 		case p.name == "BEGIN":
 			depth++
+			inAlarm = depth == 1 && strings.EqualFold(p.value, "VALARM")
 			continue
 		case p.name == "END" && depth > 0:
 			depth--
+			if depth == 0 && trigger != nil {
+				cur.alarms = append(cur.alarms, *trigger)
+			}
+			if depth == 0 {
+				trigger, inAlarm = nil, false
+			}
+			continue
+		case depth == 1 && inAlarm && p.name == "TRIGGER":
+			if a, ok := parseTrigger(p); ok {
+				trigger = &a
+			}
 			continue
 		case p.name == "END" && strings.EqualFold(p.value, "VEVENT"):
 			if !cur.start.IsZero() {
@@ -156,6 +181,31 @@ func parseLine(line string) (property, bool) {
 	return p, true
 }
 
+func parseTrigger(p property) (alarm, bool) {
+	if strings.EqualFold(p.params["VALUE"], "DATE-TIME") {
+		t, _, err := parseTime(p.value, p.params)
+		return alarm{absolute: t}, err == nil
+	}
+	d, err := parseDuration(p.value)
+	return alarm{offset: d, fromEnd: strings.EqualFold(p.params["RELATED"], "END")}, err == nil
+}
+
+// minutesBefore is how long before start the alarm goes off, in whole minutes; false if it goes off after.
+func (a alarm) minutesBefore(start, end time.Time) (int, bool) {
+	at := start.Add(a.offset)
+	switch {
+	case !a.absolute.IsZero():
+		at = a.absolute
+	case a.fromEnd:
+		at = end.Add(a.offset)
+	}
+	before := start.Sub(at)
+	if before <= 0 {
+		return 0, false
+	}
+	return int((before + time.Minute - 1) / time.Minute), true
+}
+
 func unescape(s string) string {
 	return strings.NewReplacer(`\n`, " ", `\N`, " ", `\,`, ",", `\;`, ";", `\\`, `\`).Replace(s)
 }
@@ -242,7 +292,16 @@ func occurrences(events []vevent, from, to time.Time) []Event {
 		if !e.end.IsZero() {
 			end = start.Add(e.end.Sub(e.start))
 		}
-		out = append(out, Event{Title: e.summary, Start: start, End: end, uid: e.uid})
+		alarms := []int{}
+		for _, a := range e.alarms {
+			if a.absolute.IsZero() || e.rrule == "" {
+				if m, ok := a.minutesBefore(start, end); ok && !slices.Contains(alarms, m) {
+					alarms = append(alarms, m)
+				}
+			}
+		}
+		slices.Sort(alarms)
+		out = append(out, Event{Title: e.summary, Start: start, End: end, Alarms: alarms, uid: e.uid})
 	}
 	for _, e := range events {
 		if e.rrule == "" || !e.recurrenceID.IsZero() {

@@ -132,8 +132,8 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `PUT /api/spotify` | `{"client_id": ...}` of your Spotify app; a new one forgets the signed-in account |
 | `GET /api/spotify/login` | Sends the browser to Spotify to sign in; it comes back to `/api/spotify/callback` on the same host |
 | `DELETE /api/spotify` | Forget the signed-in account |
-| `GET /api/calendar` | Whether a calendar is followed, its account, how many minutes before each event it warns, and the next events; never the address |
-| `PUT /api/calendar` | `{"url", "lead_minutes"}`: the calendar's secret iCal address (Google: Settings and sharing → Integrate calendar), checked before it is kept in `/data/calendar.json`, and the warning lead, 1-60 (10 by default); either can be left out once set |
+| `GET /api/calendar` | Whether a calendar is followed, its account, the default lead, and the next events with their own reminders (`alarms`, minutes before); never the address |
+| `PUT /api/calendar` | `{"url", "lead_minutes"}`: the calendar's secret iCal address (Google: Settings and sharing → Integrate calendar), checked before it is kept in `/data/calendar.json`, and the lead for events without reminders of their own, 1-60 (10 by default); either can be left out once set. Each event warns at its reminders and again when it starts |
 | `DELETE /api/calendar` | Forget the calendar |
 | `POST /api/calendar/show` | Show the warning the next event will get, for 15 s |
 | `GET /api/channels/{name}/pictures/{file}` | A picture's first frame, drawn 10x like a sprite |

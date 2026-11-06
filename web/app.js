@@ -1459,6 +1459,8 @@ class ConnectionCard extends LitElement {
 }
 customElements.define("ph-connection", ConnectionCard);
 
+const lead = (m) => (m % 1440 === 0 ? t("{n} d before", { n: m / 1440 }) : m % 60 === 0 ? t("{n} h before", { n: m / 60 }) : t("{n} min before", { n: m }));
+
 // Follows a calendar through its secret iCal address and warns on the display before each event.
 class CalendarCard extends LitElement {
   static properties = { info: { state: true }, draft: { state: true }, busy: { state: true } };
@@ -1471,6 +1473,7 @@ class CalendarCard extends LitElement {
     ul li { display: flex; gap: 12px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; min-width: 0; }
     ul li .when { color: var(--muted); font-family: var(--font-data); font-size: 12px; flex: none; min-width: 72px; }
     ul li span:last-child { overflow-wrap: anywhere; }
+    .alarms { display: block; color: var(--muted); font-size: 12px; }
   `];
   connectedCallback() { super.connectedCallback(); this.load(); this.timer = setInterval(() => { if (!document.hidden) this.load(); }, 60000); }
   disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.timer); }
@@ -1501,12 +1504,13 @@ class CalendarCard extends LitElement {
             <button class="btn primary" ?disabled=${this.busy || !this.draft} @click=${() => this.call("PUT", { url: this.draft })}>${this.busy ? t("Checking") : t("Save")}</button></div>`
         : html`
           ${i.account ? html`<p class="small muted" style="margin:0">${i.account}</p>` : nothing}
-          <div><span class="label">${t("Warn before each event")}</span>${segmented([[5, "5 min"], [10, "10 min"], [15, "15 min"], [30, "30 min"]], i.lead_minutes,
+          <div><span class="label">${t("Events without reminders warn")}</span>${segmented([[5, "5 min"], [10, "10 min"], [15, "15 min"], [30, "30 min"]], i.lead_minutes,
             (v) => this.call("PUT", { lead_minutes: v }))}</div>
           <div><span class="label">${t("Coming up")}</span>${i.next?.length
-            ? html`<ul>${i.next.map((e) => html`<li><span class="when">${until(e.start)}</span><span>${e.title || t("(no title)")}</span></li>`)}</ul>`
+            ? html`<ul>${i.next.map((e) => html`<li><span class="when">${until(e.start)}</span><span>${e.title || t("(no title)")}<span class="alarms">${
+              (e.alarms?.length ? e.alarms : [i.lead_minutes]).map(lead).join(" · ")}${e.alarms?.length ? "" : ` (${t("default")})`}</span></span></li>`)}</ul>`
             : html`<p class="small muted" style="margin:0">${t("Nothing in the next 7 days.")}</p>`}</div>
-          <p class="hint" style="margin:0">${t("All-day, cancelled and declined events are left out.")}</p>
+          <p class="hint" style="margin:0">${t("Each event warns at the reminders set on it in the calendar, and again when it starts. All-day, cancelled and declined events are left out.")}</p>
           ${i.error ? html`<p class="err">${i.error}</p>` : nothing}
           <div class="row">
             <button class="btn small" @click=${() => this.show()}>${t("Show on the display")}</button>

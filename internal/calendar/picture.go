@@ -31,9 +31,19 @@ var digits = [10][7]string{
 	{".###.", "#...#", "#...#", ".####", "....#", "....#", ".###."},
 }
 
-// Picture is a calendar page with the minutes left, its header blinking.
+var (
+	bang  = [7]string{"..#..", "..#..", "..#..", "..#..", "..#..", ".....", "..#.."}
+	hours = [7]string{"#....", "#....", "####.", "#...#", "#...#", "#...#", "#...#"}
+	days  = [7]string{"....#", "....#", ".####", "#...#", "#...#", "#...#", ".####"}
+)
+
+// Picture is a calendar page with the time left (37, or 3h and 2d past 99 minutes), or a ! once the
+// event starts, its header blinking.
 func Picture(left time.Duration, size int) display.Content {
-	minutes := min(99, max(1, int((left+time.Minute-1)/time.Minute)))
+	minutes := 0
+	if left > 0 {
+		minutes = max(1, int((left+time.Minute-1)/time.Minute))
+	}
 	frame := func(top color.RGBA) display.Frame {
 		img := image.NewRGBA(image.Rect(0, 0, size, size))
 		for y := 1; y < size; y++ {
@@ -53,13 +63,21 @@ func Picture(left time.Duration, size int) display.Content {
 				img.Set(x, y, ring)
 			}
 		}
-		text := []int{minutes}
-		if minutes >= 10 {
-			text = []int{minutes / 10, minutes % 10}
+		glyphs := [][7]string{bang}
+		switch {
+		case minutes >= 100 && minutes < 10*60:
+			glyphs = [][7]string{digits[minutes/60], hours}
+		case minutes >= 10*60 && minutes < 10*24*60:
+			glyphs = [][7]string{digits[minutes/(24*60)], days}
+		case minutes >= 10*24*60:
+		case minutes >= 10:
+			glyphs = [][7]string{digits[minutes/10], digits[minutes%10]}
+		case minutes > 0:
+			glyphs = [][7]string{digits[minutes]}
 		}
-		x0 := (size - (len(text)*6 - 1)) / 2
-		for i, d := range text {
-			for row, line := range digits[d] {
+		x0 := (size - (len(glyphs)*6 - 1)) / 2
+		for i, g := range glyphs {
+			for row, line := range g {
 				for col, c := range line {
 					if c == '#' {
 						img.Set(x0+i*6+col, 6+row, digit)

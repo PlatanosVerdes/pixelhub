@@ -1,6 +1,7 @@
 package calendar
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,10 @@ const feed = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" +
 	"DTEND;TZID=Europe/Madrid:20261104T111500\r\nSUMMARY:Stand-up (late)\r\nEND:VEVENT\r\n" +
 	// A one-off in UTC with an alarm inside, and a summary folded over two lines.
 	"BEGIN:VEVENT\r\nUID:dentist\r\nDTSTART:20261103T150000Z\r\nDURATION:PT1H\r\nSUMMARY:Den\r\n tist\r\n" +
-	"BEGIN:VALARM\r\nACTION:DISPLAY\r\nSUMMARY:not the title\r\nEND:VALARM\r\nEND:VEVENT\r\n" +
+	"BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-P0DT0H30M0S\r\nSUMMARY:not the title\r\nEND:VALARM\r\n" +
+	"BEGIN:VALARM\r\nACTION:EMAIL\r\nTRIGGER;VALUE=DATE-TIME:20261103T145500Z\r\nEND:VALARM\r\n" +
+	"BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER;RELATED=END:-PT1H\r\nEND:VALARM\r\n" +
+	"BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:PT5M\r\nEND:VALARM\r\nEND:VEVENT\r\n" +
 	"BEGIN:VEVENT\r\nUID:holiday\r\nDTSTART;VALUE=DATE:20261103\r\nDTEND;VALUE=DATE:20261104\r\nSUMMARY:Holiday\r\nEND:VEVENT\r\n" +
 	"BEGIN:VEVENT\r\nUID:cancelled\r\nDTSTART:20261103T160000Z\r\nSTATUS:CANCELLED\r\nSUMMARY:Gone\r\nEND:VEVENT\r\n" +
 	"BEGIN:VEVENT\r\nUID:declined\r\nDTSTART:20261103T170000Z\r\nSUMMARY:Nope\r\n" +
@@ -49,6 +53,13 @@ func TestOccurrences(t *testing.T) {
 	}
 	if d := got[1].End.Sub(got[1].Start); d != time.Hour {
 		t.Errorf("dentist lasts %s, want 1h", d)
+	}
+	// 30 min before, at 14:55 (5 min), and 1 h before the end (0, the start itself) is dropped, as is one after.
+	if fmt.Sprint(got[1].Alarms) != "[5 30]" {
+		t.Errorf("dentist alarms %v, want [5 30]", got[1].Alarms)
+	}
+	if len(got[0].Alarms) != 0 {
+		t.Errorf("stand-up alarms %v, want none", got[0].Alarms)
 	}
 }
 

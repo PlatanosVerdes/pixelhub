@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,8 @@ const (
 	lookAhead   = 7 * 24 * time.Hour
 	maxFeedSize = 8 << 20
 	shownNext   = 5
+	// startGrace is how late the warning at the start of an event may still go out, after a restart.
+	startGrace = 2 * time.Minute
 )
 
 var ErrNotConfigured = errors.New("no calendar address yet")
@@ -44,7 +47,7 @@ type saved struct {
 	LeadMinutes int    `json:"lead_minutes,omitempty"`
 }
 
-// Warn is called once per event, when it is lead away or less, with the time left.
+// Warn is called at each of an event's reminders, with the time left, and at its start with zero.
 type Warn func(e Event, left time.Duration)
 
 type Calendar struct {
@@ -197,17 +200,37 @@ func (c *Calendar) Run(ctx context.Context) {
 	}
 }
 
+// warn goes through each event's reminders, or the default lead when it has none, and its start.
+// Reminders missed while pixelhub was down collapse into one, as long as the event has not started.
 func (c *Calendar) warn() {
+	type due struct {
+		e    Event
+		left time.Duration
+	}
 	c.mu.Lock()
 	now := c.now()
-	lead := c.lead()
-	var due []Event
+	lead := int(c.lead() / time.Minute)
+	var fire []due
 	for _, e := range c.events {
-		key := e.uid + "@" + e.Start.UTC().Format(time.RFC3339)
-		left := e.Start.Sub(now)
-		if left > 0 && left <= lead && c.warned[key].IsZero() {
-			c.warned[key] = e.Start
-			due = append(due, e)
+		key := e.uid + "@" + e.Start.UTC().Format(time.RFC3339) + "@"
+		if !now.Before(e.Start) {
+			if now.Sub(e.Start) < startGrace && c.mark(key+"0", e.Start) {
+				fire = append(fire, due{e, 0})
+			}
+			continue
+		}
+		alarms := e.Alarms
+		if len(alarms) == 0 {
+			alarms = []int{lead}
+		}
+		fired := false
+		for _, m := range alarms {
+			if !now.Before(e.Start.Add(-time.Duration(m)*time.Minute)) && c.mark(key+strconv.Itoa(m), e.Start) {
+				fired = true
+			}
+		}
+		if fired {
+			fire = append(fire, due{e, e.Start.Sub(now)})
 		}
 	}
 	for key, start := range c.warned {
@@ -217,12 +240,21 @@ func (c *Calendar) warn() {
 	}
 	warn := c.Warn
 	c.mu.Unlock()
-	for _, e := range due {
-		c.log.Info("calendar", "event", e.Title, "start", e.Start)
+	for _, d := range fire {
+		c.log.Info("calendar", "event", d.e.Title, "start", d.e.Start, "left", d.left.Round(time.Second))
 		if warn != nil {
-			warn(e, e.Start.Sub(now))
+			warn(d.e, d.left)
 		}
 	}
+}
+
+// mark records a warning as given and reports whether it was new.
+func (c *Calendar) mark(key string, start time.Time) bool {
+	if !c.warned[key].IsZero() {
+		return false
+	}
+	c.warned[key] = start
+	return true
 }
 
 func (c *Calendar) fetch(ctx context.Context, address string) ([]Event, error) {

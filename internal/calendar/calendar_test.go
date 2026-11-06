@@ -25,34 +25,41 @@ func serveFeed(t *testing.T, body string) *httptest.Server {
 	return srv
 }
 
-func TestWarnsOnceWithinTheLead(t *testing.T) {
+func TestWarnsAtEachReminderAndAtTheStart(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
-	soon, later := now.Add(8*time.Minute), now.Add(2*time.Hour)
-	srv := serveFeed(t, fmt.Sprintf("BEGIN:VCALENDAR\r\n"+
-		"BEGIN:VEVENT\r\nUID:a\r\nDTSTART:%s\r\nSUMMARY:Soon\r\nEND:VEVENT\r\n"+
-		"BEGIN:VEVENT\r\nUID:b\r\nDTSTART:%s\r\nSUMMARY:Later\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
-		soon.Format("20060102T150405Z"), later.Format("20060102T150405Z")))
+	stamp := func(d time.Duration) string { return now.Add(d).Format("20060102T150405Z") }
+	srv := serveFeed(t, "BEGIN:VCALENDAR\r\n"+
+		"BEGIN:VEVENT\r\nUID:a\r\nDTSTART:"+stamp(40*time.Minute)+"\r\nSUMMARY:Reminded\r\n"+
+		"BEGIN:VALARM\r\nTRIGGER:-PT30M\r\nEND:VALARM\r\nBEGIN:VALARM\r\nTRIGGER:-PT5M\r\nEND:VALARM\r\nEND:VEVENT\r\n"+
+		"BEGIN:VEVENT\r\nUID:b\r\nDTSTART:"+stamp(20*time.Minute)+"\r\nSUMMARY:Plain\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
 	path := filepath.Join(t.TempDir(), "calendar.json")
 	c, err := Open(path, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.now = func() time.Time { return now }
+	clock := now
+	c.now = func() time.Time { return clock }
 	var warned []string
 	c.Warn = func(e Event, left time.Duration) { warned = append(warned, fmt.Sprintf("%s %s", e.Title, left)) }
-	if err := c.Set(context.Background(), "webcal"+strings.TrimPrefix(srv.URL, "http"), 0); err == nil {
-		t.Fatal("webcal:// becomes https://, which the test server does not speak; want an error")
-	}
 	if err := c.Set(context.Background(), srv.URL, 0); err != nil {
 		t.Fatal(err)
 	}
-	c.warn()
-	c.warn()
-	if strings.Join(warned, ",") != "Soon 8m0s" {
-		t.Errorf("warned %v, want Soon once", warned)
+	for _, step := range []time.Duration{0, 10 * time.Minute, 10 * time.Minute, 15 * time.Minute, 5 * time.Minute, 5 * time.Minute} {
+		clock = clock.Add(step)
+		c.warn()
 	}
-	if s := c.Status(); !s.Configured || s.LeadMinutes != 10 || len(s.Next) != 2 {
+	want := []string{
+		"Plain 10m0s",    // 10:10, the default 10 min
+		"Reminded 30m0s", // 10:10, its own 30 min reminder
+		"Plain 0s",       // 10:20, at the start
+		"Reminded 5m0s",  // 10:35
+		"Reminded 0s",    // 10:40
+	}
+	if strings.Join(warned, ", ") != strings.Join(want, ", ") {
+		t.Errorf("warned\n %v\nwant\n %v", warned, want)
+	}
+	if s := c.Status(); !s.Configured || s.LeadMinutes != 10 {
 		t.Errorf("status %+v", s)
 	}
 	info, err := os.Stat(path)
@@ -65,6 +72,24 @@ func TestWarnsOnceWithinTheLead(t *testing.T) {
 	}
 	if err := c.Forget(); err != nil || c.Status().Configured {
 		t.Errorf("forget: %v %+v", err, c.Status())
+	}
+}
+
+func TestMissedRemindersCollapseIntoOne(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
+	c, _ := Open(filepath.Join(t.TempDir(), "calendar.json"), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c.now = func() time.Time { return now }
+	c.events = []Event{
+		{Title: "Soon", Start: now.Add(3 * time.Minute), Alarms: []int{5, 30}, uid: "a"},
+		{Title: "Started", Start: now.Add(-10 * time.Minute), uid: "b"},
+	}
+	var warned []string
+	c.Warn = func(e Event, left time.Duration) { warned = append(warned, fmt.Sprintf("%s %s", e.Title, left)) }
+	c.warn()
+	c.warn()
+	if strings.Join(warned, ", ") != "Soon 3m0s" {
+		t.Errorf("warned %v, want one warning for Soon and none for what already started", warned)
 	}
 }
 
@@ -84,7 +109,7 @@ func TestRejectsWhatIsNotACalendar(t *testing.T) {
 
 func TestPicture(t *testing.T) {
 	t.Parallel()
-	for _, left := range []time.Duration{30 * time.Second, 9 * time.Minute, 10 * time.Minute, 3 * time.Hour} {
+	for _, left := range []time.Duration{0, 30 * time.Second, 9 * time.Minute, 10 * time.Minute, 3 * time.Hour, 2 * 24 * time.Hour} {
 		c := Picture(left, 16)
 		if len(c.Frames) != 2 {
 			t.Fatalf("%s: %d frames", left, len(c.Frames))
