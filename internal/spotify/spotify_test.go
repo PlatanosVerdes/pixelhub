@@ -158,7 +158,7 @@ func TestSignInFollowsPlayback(t *testing.T) {
 		t.Fatalf("now %+v, %v", p, ok)
 	}
 	c, device, ok := a.Content()
-	if !ok || c.Name != "♪ Song" || device != "Kitchen" || c.Frames[0].Image.Bounds().Dx() != coverSize {
+	if !ok || c.Name != "♪ Album" || device != "Kitchen" || c.Frames[0].Image.Bounds().Dx() != coverSize {
 		t.Fatalf("content %+v on %q, %v", c, device, ok)
 	}
 	if s := a.Status(); !slices.Equal(s.Devices, []string{"Kitchen", "Phone"}) {
@@ -174,13 +174,13 @@ func TestSignInFollowsPlayback(t *testing.T) {
 	a.mu.Lock()
 	a.previous, a.flipAt = image.NewNRGBA(image.Rect(0, 0, coverSize, coverSize)), time.Now()
 	a.mu.Unlock()
-	if c, _, _ := a.Content(); c.Key != "flip" || len(c.Frames) < 2 || c.Frames[len(c.Frames)-1].Image != cover {
+	if c, _, _ := a.Content(); c.Key != "flip" || len(c.Frames) < 2 || !sameImage(c.Frames[len(c.Frames)-1].Image, cover) {
 		t.Errorf("a changed cover shows %d frames with key %q, want the half turn ending on it", len(c.Frames), c.Key)
 	}
 	a.mu.Lock()
 	a.flipAt = time.Now().Add(-flipFor)
 	a.mu.Unlock()
-	if c, _, _ := a.Content(); c.Key != "idle" || c.Frames[0].Image != cover {
+	if c, _, _ := a.Content(); c.Key != "idle" || !sameImage(c.Frames[0].Image, cover) {
 		t.Errorf("after the half turn: key %q, want the cover idling again", c.Key)
 	}
 }
@@ -302,5 +302,39 @@ func TestForLEDsSpreadsTheLevels(t *testing.T) {
 	}
 	if light[0] < 200 || light[2] < 200 {
 		t.Errorf("the lightest pixel should stay bright: %v", light)
+	}
+}
+
+func sameImage(a, b image.Image) bool {
+	for y := range coverSize {
+		for x := range coverSize {
+			if color.NRGBAModel.Convert(a.At(x, y)) != color.NRGBAModel.Convert(b.At(x, y)) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func TestAnimationsShareAFewColours(t *testing.T) {
+	t.Parallel()
+	cover := image.NewNRGBA(image.Rect(0, 0, coverSize, coverSize))
+	for i := range cover.Pix {
+		cover.Pix[i] = uint8(i * 37)
+		if i%4 == 3 {
+			cover.Pix[i] = 255
+		}
+	}
+	all := map[color.NRGBA]bool{}
+	for _, f := range reduce(idle(cover)) {
+		b := f.Image.Bounds()
+		for y := b.Min.Y; y < b.Max.Y; y++ {
+			for x := b.Min.X; x < b.Max.X; x++ {
+				all[color.NRGBAModel.Convert(f.Image.At(x, y)).(color.NRGBA)] = true
+			}
+		}
+	}
+	if len(all) > animColors {
+		t.Errorf("%d colours across the frames, want at most %d", len(all), animColors)
 	}
 }
