@@ -487,6 +487,19 @@ func (fakeGallery) List(_ context.Context, category int, sort gallery.Sort, page
 		{Name: "Super Mario Bros", Likes: 1, FileID: "group1/M00/mario"}}, nil
 }
 
+// Search finds pictures only for "pumpkin", 45 of them; any other word gets the gallery asking to
+// slow down, so the search falls back to the index.
+func (fakeGallery) Search(_ context.Context, words string, page, perPage int) ([]gallery.Item, error) {
+	if words != "pumpkin" {
+		return nil, gallery.ErrRateLimited
+	}
+	var items []gallery.Item
+	for i := (page - 1) * perPage; i < min(45, page*perPage); i++ {
+		items = append(items, gallery.Item{Name: fmt.Sprintf("Pumpkin %d", i), FileID: fmt.Sprintf("group1/M00/pumpkin-%d", i)})
+	}
+	return items, nil
+}
+
 func (fakeGallery) Download(_ context.Context, file string) ([]byte, error) {
 	if file == "group1/M00/aa" {
 		return []byte("not a gallery file"), nil
@@ -568,6 +581,10 @@ func TestGallery(t *testing.T) {
 		{"/api/gallery/search?q=", 400, "q:"},
 		{"/api/gallery?category=animal&page=20", 200, `"name":"Deep cut"`},
 		{"/api/gallery/search?q=deep", 200, `"name":"Deep cut"`},
+		{"/api/gallery/search?q=deep", 200, `"source":"index"`},
+		{"/api/gallery/search?q=pumpkin", 200, `"more":false,"page":1,"source":"divoom"`},
+		{"/api/gallery/search?q=pumpkin", 200, `"name":"Pumpkin 44"`},
+		{"/api/gallery/search?q=pumpkin&page=2", 200, `"items":[],"more":false`},
 	}
 	for _, tt := range tests {
 		rec := httptest.NewRecorder()
