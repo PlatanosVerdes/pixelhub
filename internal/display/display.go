@@ -95,5 +95,7 @@ type Display interface {
 	Claim()
 	// Retry reconnects now rather than at the end of the current wait.
 	Retry()
+	// Chime plays a short sound on the display's speaker, where the driver can.
+	Chime()
 	Status() Status
 }

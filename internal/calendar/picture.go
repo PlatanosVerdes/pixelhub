@@ -82,6 +82,8 @@ const (
 	scrollStep = 120 * time.Millisecond
 	maxStep    = 2
 	textTop    = 7
+	// LabelFrame is the first frame with the page in place and the time left on it.
+	LabelFrame = slideIn
 )
 
 // Picture is a calendar page that slides in, blinks the time left (37, 3h, 2d, or ! once the event
@@ -190,6 +192,11 @@ func titleColumns(title string) [][5]bool {
 		cols = append(cols, [5]bool{})
 	}
 	return cols
+}
+
+// Quiet is the night, 23:00 to 08:00, when an event starting does not chime.
+func Quiet(t time.Time) bool {
+	return t.Hour() >= 23 || t.Hour() < 8
 }
 
 // glyphsFor is the time left as it fits on the page: 37, 3h below 10 hours, then whole days rounded

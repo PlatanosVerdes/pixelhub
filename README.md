@@ -51,6 +51,11 @@ PIXELHUB_BRIDGE=host.docker.internal:7777   # in pixelhub, with extra_hosts host
 Bluetooth sockets only work in the host's network namespace, which is why the bridge runs apart
 from pixelhub. It needs no extra capabilities.
 
+pixelbridge can also play a chime on the display's own speaker, through the host's PipeWire, when an
+event starts. Set `PIXELHUB_CHIME=1` in pixelhub, and run the bridge as the user that runs PipeWire
+with its runtime directory: `--user 1000:1000 -v /run/user:/run/user:ro -e XDG_RUNTIME_DIR=/run/user/1000
+--tmpfs /tmp`. The display must be connected as an audio sink too, which it is once paired.
+
 ### A Mac as the bridge
 
 `bridges/macos/pixelbridge.swift` speaks the same TCP protocol over the Mac's own Bluetooth, so no
@@ -87,6 +92,7 @@ The environment only says where the hardware is; everything else is state, edite
 | `PIXELHUB_PORT` | `8000` | HTTP port |
 | `PIXELHUB_DATA_DIR` | `/data` | Holds `state.json`, `spotify.json`, `lists/`, `gallery-index.json`, `sprites/` and `ambient/` |
 | `PIXELHUB_LOG_JSON` | | `1` logs JSON (set in the image) |
+| `PIXELHUB_CHIME` | | `1` asks pixelbridge for a chime when a calendar event starts, except 23:00-08:00; the ESP32 bridge cannot play one |
 | `TZ` | | Time zone for scenes, the schedule and the sun, e.g. `Europe/London` |
 
 `state.json` is written atomically. A fresh install has one channel, `clock`, that shows every alert

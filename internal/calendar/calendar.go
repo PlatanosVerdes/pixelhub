@@ -33,7 +33,7 @@ const (
 	checkEvery = 20 * time.Second
 	lookAhead  = 8 * 24 * time.Hour
 	maxPages   = 4
-	shownNext  = 6
+	shownNext  = 40
 	// startGrace is how late the warning at the start of an event may still go out, after a restart.
 	startGrace = 2 * time.Minute
 )
@@ -47,6 +47,7 @@ var (
 type Event struct {
 	Title    string    `json:"title"`
 	Calendar string    `json:"calendar"`
+	Color    string    `json:"color,omitempty"`
 	Start    time.Time `json:"start"`
 	End      time.Time `json:"end"`
 	// Alarms are the event's reminders, its calendar's defaults included, as minutes before it starts.
@@ -458,7 +459,7 @@ func (a *Account) listEvents(ctx context.Context, c Calendar) ([]Event, error) {
 			if e.Reminders.UseDefault {
 				alarms = slices.Clone(c.defaults)
 			}
-			out = append(out, Event{Title: e.Summary, Calendar: c.Name, Start: e.Start.DateTime, End: e.End.DateTime,
+			out = append(out, Event{Title: e.Summary, Calendar: c.Name, Color: c.Color, Start: e.Start.DateTime, End: e.End.DateTime,
 				Alarms: alarms, id: c.ID + "/" + e.ID})
 		}
 		if res.Next == "" {

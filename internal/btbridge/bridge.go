@@ -15,6 +15,8 @@ import (
 const (
 	opConnect = 0x69
 	opRelease = 0x96
+	// opChime asks for the chime on the display's own speaker; the esp32 bridge has no such op.
+	opChime   = 0x7c
 	linkDown  = 0x96
 	busyTries = 12
 )
@@ -35,6 +37,8 @@ type Bridge struct {
 	// Tries is how many times a connect is attempted, Retry the wait in between.
 	Tries int
 	Retry time.Duration
+	// Chime, when set, plays the chime on the speaker of the display at mac.
+	Chime func(mac [6]byte)
 
 	ops     chan func()
 	cl      net.Conn
@@ -42,6 +46,7 @@ type Bridge struct {
 	gen     int
 	sent    time.Time
 	greeted bool
+	mac     [6]byte
 }
 
 func New(dial Dialer, log *slog.Logger) *Bridge {
@@ -122,6 +127,8 @@ func next(in []byte) (msg, rest []byte, ok bool) {
 		size = 8
 	case opRelease:
 		size = 7
+	case opChime:
+		size = 1
 	case 0x01:
 		if len(in) < 3 {
 			return nil, in, false
@@ -148,6 +155,13 @@ func (b *Bridge) handle(c net.Conn, msg []byte) {
 	case opRelease:
 		b.Log.Info("release")
 		b.close()
+	case opChime:
+		if b.Chime == nil || b.lk == nil {
+			b.Log.Info("chime skipped", "linked", b.lk != nil)
+			return
+		}
+		mac := b.mac
+		go b.Chime(mac)
 	default:
 		b.forward(msg)
 	}
@@ -165,6 +179,7 @@ func (b *Bridge) connect(mac [6]byte, channel byte) {
 		b.Log.Info("connecting", "device", addr, "channel", channel, "attempt", try)
 		var lk io.ReadWriteCloser
 		if lk, err = b.Dial(mac, channel); err == nil {
+			b.mac = mac
 			b.linkUp(lk)
 			return
 		}

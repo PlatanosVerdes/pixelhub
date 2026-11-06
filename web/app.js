@@ -1238,9 +1238,6 @@ class AppsTab extends LitElement {
     .app { border: 1px solid var(--line); background: var(--surface); border-radius: 16px; padding: 12px 6px 10px; display: grid; justify-items: center; gap: 4px; cursor: pointer; color: var(--muted); min-width: 0; }
     .app svg { width: 24px; height: 24px; margin-bottom: 2px; }
     .app b { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-    .app small { font-size: 12px; font-variant-numeric: tabular-nums; min-height: 15px; display: inline-flex; align-items: center; gap: 5px; }
-    .app small.live { color: var(--ok); }
-    .app small.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
     .app:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); }
     .app[aria-pressed=true] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
     .app[aria-pressed=true] svg { color: var(--accent); }
@@ -1296,16 +1293,6 @@ class AppsTab extends LitElement {
   }
   run(view) { return this.call("PUT", "mode", view); }
   automatic() { return this.call("DELETE", "mode"); }
-
-  status(a) {
-    const m = this.mode, on = this.showing === a;
-    if (a === "weather") return this.weather?.known ? html`<small>${this.weather.celsius}°</small>` : html`<small></small>`;
-    if (!on) return html`<small></small>`;
-    if (a === "countdown") return html`<small class=${m.running ? "live" : ""}>${mmss(this.left())}</small>`;
-    if (a === "stopwatch") return html`<small class=${m.running ? "live" : ""}>${mmss(this.counted())}</small>`;
-    if (a === "scoreboard") return html`<small class="live">${m.red ?? 0} : ${m.blue ?? 0}</small>`;
-    return html`<small class=${m.running ? "live" : ""}>${m.running ? t("On") : t("Off")}</small>`;
-  }
 
   back() {
     return this.showing === this.current ? html`<div class="note"><span>${t("Showing on the Evo now.")}</span>
@@ -1405,7 +1392,7 @@ class AppsTab extends LitElement {
     const cur = this.current;
     return html`
       <div class="apps" role="group" aria-label=${t("Apps")}>${APPS.map((a) => html`
-        <button class="app" aria-pressed=${String(cur === a)} @click=${() => { this.picked = a; }}>${appIcons[a]}<b>${appName(a)}</b>${this.status(a)}</button>`)}</div>
+        <button class="app" aria-pressed=${String(cur === a)} @click=${() => { this.picked = a; }}>${appIcons[a]}<b>${appName(a)}</b></button>`)}</div>
       <section class="panel" aria-label=${appName(cur)}>${this[`${cur}Panel`]()}</section>`;
   }
 }
@@ -1461,25 +1448,62 @@ customElements.define("ph-connection", ConnectionCard);
 
 const lead = (m) => (m % 1440 === 0 ? t("{n} d before", { n: m / 1440 }) : m % 60 === 0 ? t("{n} h before", { n: m / 60 }) : t("{n} min before", { n: m }));
 
-// Links a Google account and warns on the display at the reminders of the events in the calendars picked.
-class CalendarCard extends LitElement {
+const bell = icon(svg`<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0"/>`);
+const dayKey = (d) => d.toDateString();
+const dayName = (d) => {
+  const today = new Date(), tomorrow = new Date(Date.now() + 86400000);
+  if (dayKey(d) === dayKey(today)) return t("Today");
+  if (dayKey(d) === dayKey(tomorrow)) return t("Tomorrow");
+  return d.toLocaleDateString(lang, { weekday: "long", day: "numeric", month: "short" });
+};
+const inTime = (at) => {
+  const m = Math.round((new Date(at) - Date.now()) / 60000);
+  if (m <= 0) return t("now");
+  if (m < 60) return t("in {n} min", { n: m });
+  if (m < 1440) return t("in {h} h {m} min", { h: Math.floor(m / 60), m: m % 60 });
+  return t("in {n} d", { n: Math.round(m / 1440) });
+};
+
+// Links a Google account, picks the calendars that warn, and lists what comes up with its warnings.
+class CalendarTab extends LitElement {
   static properties = { info: { state: true }, id: { state: true }, secret: { state: true }, busy: { state: true } };
   static styles = [base, css`
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+    @media (min-width: 900px) { .layout { grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); align-items: start; } .side { position: sticky; top: 88px; } }
+    .side, .main { display: grid; gap: 18px; min-width: 0; }
     .grid { display: grid; gap: 14px; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .row input { flex: 1 1 260px; font-family: var(--font-data); }
     ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; }
     code { font-family: var(--font-data); font-size: 12px; background: var(--chip); padding: 2px 6px; border-radius: 6px; overflow-wrap: anywhere; }
     a { color: var(--accent); }
-    .cals { display: grid; gap: 8px; }
-    .toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
-    .swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
-    input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
-    ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
-    ul li { display: flex; gap: 12px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; min-width: 0; }
-    ul li .when { color: var(--muted); font-family: var(--font-data); font-size: 12px; flex: none; min-width: 72px; }
-    ul li span:last-child { overflow-wrap: anywhere; }
-    .alarms { display: block; color: var(--muted); font-size: 12px; }
+    .next { display: grid; gap: 12px; justify-items: center; text-align: center; }
+    ph-led { width: min(100%, 220px); }
+    .next b { font-size: 17px; font-weight: 600; }
+    .when { color: var(--muted); font-size: 14px; }
+    .soon { font-size: 13px; padding: 6px 12px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+    .cals { display: grid; }
+    .cal { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 14px; }
+    .cal:first-child { border-top: 0; padding-top: 0; }
+    .cal span.name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .swatch { width: 12px; height: 12px; border-radius: 4px; flex: none; }
+    .switch { width: 40px; height: 24px; border-radius: 999px; border: 1px solid var(--line); background: var(--chip); position: relative; cursor: pointer; flex: none; padding: 0; }
+    .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform .15s; }
+    .switch[aria-checked=true] { background: var(--accent); border-color: var(--accent); }
+    .switch[aria-checked=true]::after { transform: translateX(16px); background: var(--on-accent); }
+    .switch:disabled { opacity: .5; cursor: default; }
+    .account { display: flex; align-items: center; gap: 8px; justify-content: space-between; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .day { margin: 18px 0 6px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: capitalize; }
+    .day:first-of-type { margin-top: 0; }
+    .event { display: grid; grid-template-columns: 52px 4px minmax(0, 1fr); gap: 12px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); }
+    .event .time { font-family: var(--font-data); font-size: 13px; color: var(--muted); padding-top: 2px; }
+    .event .bar { align-self: stretch; border-radius: 2px; }
+    .event b { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
+    .event .cal-name { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; }
+    .chip { display: inline-flex; align-items: center; gap: 4px; height: auto; padding: 0; background: none; border-radius: 0; font-family: inherit; font-size: 12px; color: var(--muted); opacity: .8; }
+    .chip svg { width: 11px; height: 11px; }
+    .empty { margin: 0; }
   `];
   connectedCallback() { super.connectedCallback(); this.load(); this.timer = setInterval(() => { if (!document.hidden) this.load(); }, 30000); }
   disconnectedCallback() { super.disconnectedCallback(); clearInterval(this.timer); }
@@ -1494,53 +1518,95 @@ class CalendarCard extends LitElement {
   }
   pick(id, on) {
     const ids = this.info.calendars.filter((c) => (c.id === id ? on : c.selected)).map((c) => c.id);
+    this.info = { ...this.info, calendars: this.info.calendars.map((c) => (c.id === id ? { ...c, selected: on } : c)) };
     this.call("PUT", "google/calendars", { ids });
   }
   callback() { return `${location.origin}/api/google/callback`; }
 
-  render() {
-    const i = this.info;
-    if (!i) return nothing;
+  setup(i) {
     const secure = location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1";
-    return html`<section class="card" aria-labelledby="ca-h">
-      <div class="head"><h2 id="ca-h">${t("Google Calendar")}</h2>${i.connected ? html`<span class="tag on">${t("Connected")}</span>` : nothing}</div>
-      <div class="grid">
-        ${!i.configured ? html`
-          <ol>
-            <li>${t("In")} <a href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com" target="_blank" rel="noopener">Google Cloud Console</a>${t(", create a project and enable the Google Calendar API.")}</li>
-            <li>${t("In Google Auth Platform, set it up as External, add the scope calendar.readonly and, under Audience, press Publish app (in Testing, Google signs you out every 7 days).")}</li>
-            <li>${t("Under Clients, create a Web application client with this redirect URI:")} <code>${this.callback()}</code></li>
-            <li>${t("Paste its client ID and secret here.")}</li>
-          </ol>
-          ${secure ? nothing : html`<p class="err">${t("Google only takes https addresses: open pixelhub through its https address to connect.")}</p>`}
-          <div class="row"><input placeholder=${t("Client ID")} aria-label=${t("Client ID")} .value=${this.id ?? ""} @input=${(e) => { this.id = e.target.value; }}></div>
-          <div class="row"><input type="password" autocomplete="off" placeholder=${t("Client secret")} aria-label=${t("Client secret")} .value=${this.secret ?? ""} @input=${(e) => { this.secret = e.target.value; }}>
-            <button class="btn primary" ?disabled=${this.busy || !this.id || !this.secret} @click=${() => this.call("PUT", "google", { client_id: this.id, client_secret: this.secret })}>${t("Save")}</button></div>`
-        : !i.connected ? html`
-          <p class="small muted" style="margin:0">${t("The Google client must list this redirect URI:")} <code>${this.callback()}</code></p>
-          ${secure ? nothing : html`<p class="err">${t("Google only takes https addresses: open pixelhub through its https address to connect.")}</p>`}
-          <div class="row"><a class="btn primary" href="api/google/login">${t("Connect Google")}</a>
-            <button class="btn small" ?disabled=${this.busy} @click=${() => { this.id = this.secret = ""; this.info = { ...i, configured: false }; }}>${t("Change client")}</button></div>`
-        : html`
-          ${i.account ? html`<p class="small muted" style="margin:0">${t("Signed in as {user}.", { user: i.account })}</p>` : nothing}
-          <div><span class="label">${t("Calendars")}</span><div class="cals">${i.calendars.map((c) => html`
-            <label class="toggle"><input type="checkbox" .checked=${c.selected} ?disabled=${this.busy} @change=${(e) => this.pick(c.id, e.target.checked)}>
-              <span class="swatch" style=${`background:${c.color || "var(--muted)"}`}></span>${c.name}</label>`)}</div></div>
-          <div><span class="label">${t("Coming up")}</span>${i.next?.length
-            ? html`<ul>${i.next.map((e) => html`<li><span class="when">${until(e.start)}</span><span>${e.title || t("(no title)")}<span class="alarms">${
-              [e.calendar, ...(e.alarms?.length ? e.alarms.map(lead) : [t("no reminders")])].join(" · ")}</span></span></li>`)}</ul>`
-            : html`<p class="small muted" style="margin:0">${t("Nothing in the next 7 days.")}</p>`}</div>
-          <p class="hint" style="margin:0">${t("Each event warns at its reminders in Google Calendar, and again when it starts. All-day, cancelled and declined events are left out.")}</p>
-          ${i.error ? html`<p class="err">${i.error}</p>` : nothing}
-          <div class="row">
-            <button class="btn small" @click=${() => this.show()}>${t("Show on the display")}</button>
-            <button class="btn small" ?disabled=${this.busy} @click=${() => this.call("DELETE", "google")}>${t("Disconnect")}</button>
-          </div>`}
+    const warn = secure ? nothing : html`<p class="err">${t("Google only takes https addresses: open pixelhub through its https address to connect.")}</p>`;
+    return html`<section class="card" aria-labelledby="gs-h">
+      <div class="head"><h2 id="gs-h">${t("Google Calendar")}</h2></div>
+      <div class="grid">${!i.configured ? html`
+        <ol>
+          <li>${t("In")} <a href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com" target="_blank" rel="noopener">Google Cloud Console</a>${t(", create a project and enable the Google Calendar API.")}</li>
+          <li>${t("In Google Auth Platform, set it up as External, add the scope calendar.readonly and, under Audience, press Publish app (in Testing, Google signs you out every 7 days).")}</li>
+          <li>${t("Under Clients, create a Web application client with this redirect URI:")} <code>${this.callback()}</code></li>
+          <li>${t("Paste its client ID and secret here.")}</li>
+        </ol>
+        ${warn}
+        <div class="row"><input placeholder=${t("Client ID")} aria-label=${t("Client ID")} .value=${this.id ?? ""} @input=${(e) => { this.id = e.target.value; }}></div>
+        <div class="row"><input type="password" autocomplete="off" placeholder=${t("Client secret")} aria-label=${t("Client secret")} .value=${this.secret ?? ""} @input=${(e) => { this.secret = e.target.value; }}>
+          <button class="btn primary" ?disabled=${this.busy || !this.id || !this.secret} @click=${() => this.call("PUT", "google", { client_id: this.id, client_secret: this.secret })}>${t("Save")}</button></div>`
+      : html`
+        <p class="small muted" style="margin:0">${t("The Google client must list this redirect URI:")} <code>${this.callback()}</code></p>
+        ${warn}
+        <div class="row"><a class="btn primary" href="api/google/login">${t("Connect Google")}</a>
+          <button class="btn small" ?disabled=${this.busy} @click=${() => { this.id = this.secret = ""; this.info = { ...i, configured: false }; }}>${t("Change client")}</button></div>`}
       </div>
     </section>`;
   }
+
+  nextCard(i) {
+    const e = i.next?.find((x) => new Date(x.start) > Date.now());
+    return html`<section class="card next" aria-labelledby="nx-h">
+      <div class="head" style="width:100%"><h2 id="nx-h">${t("Next event")}</h2></div>
+      ${e ? html`
+        <ph-led .src=${`api/google/preview.png?k=${encodeURIComponent(e.start + e.title)}&m=${Math.floor(Date.now() / 60000)}`} .label=${e.title}></ph-led>
+        <div><b>${e.title || t("(no title)")}</b><div class="when">${dayName(new Date(e.start))} · ${hhmm(new Date(e.start))}</div></div>
+        <span class="soon">${inTime(e.start)}</span>
+        <button class="btn small" @click=${() => this.show()}>${t("Show on the display")}</button>`
+      : html`<p class="muted empty">${t("Nothing in the next 7 days.")}</p>`}
+    </section>`;
+  }
+
+  calendarsCard(i) {
+    return html`<section class="card" aria-labelledby="cl-h">
+      <div class="head"><h2 id="cl-h">${t("Calendars")}</h2></div>
+      <div class="cals">${i.calendars.map((c) => html`<div class="cal">
+        <span class="swatch" style=${`background:${c.color || "var(--muted)"}`}></span>
+        <span class="name">${c.name}</span>
+        <button class="switch" role="switch" aria-checked=${String(c.selected)} aria-label=${c.name} ?disabled=${this.busy} @click=${() => this.pick(c.id, !c.selected)}></button>
+      </div>`)}</div>
+      <div class="account"><span class="small muted">${i.account}</span>
+        <button class="btn small" ?disabled=${this.busy} @click=${() => this.call("DELETE", "google")}>${t("Disconnect")}</button></div>
+    </section>`;
+  }
+
+  eventsCard(i) {
+    const days = [];
+    for (const e of i.next ?? []) {
+      const d = new Date(e.start);
+      if (days.at(-1)?.key !== dayKey(d)) days.push({ key: dayKey(d), name: dayName(d), events: [] });
+      days.at(-1).events.push(e);
+    }
+    return html`<section class="card" aria-labelledby="ev-h">
+      <div class="head"><h2 id="ev-h">${t("Coming up")}</h2></div>
+      ${days.length ? days.map((d) => html`<h3 class="day">${d.name}</h3>${d.events.map((e) => html`<div class="event">
+        <span class="time">${hhmm(new Date(e.start))}</span>
+        <span class="bar" style=${`background:${e.color || "var(--muted)"}`}></span>
+        <div><b>${e.title || t("(no title)")}</b><div class="cal-name">${e.calendar}</div>
+          <div class="chips">${(e.alarms ?? []).slice().reverse().map((m) => html`<span class="chip">${bell}${lead(m)}</span>`)}
+            <span class="chip">${bell}${t("when it starts")}</span></div></div>
+      </div>`)}`)
+      : html`<p class="muted empty">${t("Nothing in the next 7 days.")}</p>`}
+      <p class="hint">${t("Each event warns at its reminders in Google Calendar, and again when it starts, with a chime except from 23:00 to 08:00. All-day, cancelled and declined events are left out.")}</p>
+      ${i.error ? html`<p class="err">${i.error}</p>` : nothing}
+    </section>`;
+  }
+
+  render() {
+    const i = this.info;
+    if (!i) return nothing;
+    if (!i.connected) return html`<div class="layout"><div class="main" style="grid-column:1/-1;max-width:720px">${this.setup(i)}</div></div>`;
+    return html`<div class="layout">
+      <div class="side">${this.nextCard(i)}${this.calendarsCard(i)}</div>
+      <div class="main">${this.eventsCard(i)}</div>
+    </div>`;
+  }
 }
-customElements.define("ph-calendar", CalendarCard);
+customElements.define("ph-calendar", CalendarTab);
 
 // A toast hides by itself, but not while the pointer or focus is on it, so its action stays reachable.
 // `expire` is the work an Undo cancels: it runs when the toast goes away any other way.
@@ -1571,6 +1637,7 @@ const TABS = [
   ["display", "Display", icon(svg`<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 8.5h.01M12 8.5h.01M15.5 8.5h.01M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 15.5h.01M12 15.5h.01M15.5 15.5h.01" stroke-width="2.6"/>`)],
   ["gallery", "Gallery", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="m14 20 2.5-3.5 2 2.5 1.5-2"/>`)],
   ["music", "Music", icon(svg`<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>`)],
+  ["calendar", "Calendar", icon(svg`<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>`)],
   ["apps", "Apps", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M17 13.5v7M13.5 17h7"/>`)],
   ["settings", "Settings", icon(svg`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>`)],
 ];
@@ -1595,7 +1662,7 @@ class PixelhubApp extends LitElement {
     .bottom { display: none; }
     @media (max-width: 759px) {
       .top { display: none; }
-      .bottom { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
+      .bottom { display: grid; grid-template-columns: repeat(6, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
         padding: 6px 8px max(8px, env(safe-area-inset-bottom, 0px)); background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--line); }
       .bottom button { flex-direction: column; gap: 3px; font-size: 11px; padding: 6px 2px; }
       .bottom button[aria-current=page] { background: none; }
@@ -1604,7 +1671,6 @@ class PixelhubApp extends LitElement {
     main { max-width: 1120px; margin: 0 auto; padding: 8px 16px 48px; }
     .tab { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; min-width: 0; }
     .tab.two { grid-template-columns: minmax(0, 1fr); }
-    .tab .stack { display: grid; gap: 18px; min-width: 0; }
     @media (min-width: 900px) { .tab.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
     footer { max-width: 1120px; margin: 0 auto; padding: 0 16px 32px; font-size: 12px; color: var(--muted); }
     @media (max-width: 759px) { footer { padding-bottom: 96px; } }
@@ -1712,7 +1778,8 @@ class PixelhubApp extends LitElement {
       case "gallery": return gallery;
       case "apps": return html`<ph-apps .state=${view}></ph-apps>${gallery}`;
       case "music": return html`<ph-music .state=${view} .status=${this.status} .styles=${this.modes}></ph-music>${gallery}`;
-      case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<div class="stack"><ph-connection .status=${this.status} .state=${view}></ph-connection><ph-calendar></ph-calendar></div></div>${gallery}`;
+      case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<ph-connection .status=${this.status} .state=${view}></ph-connection></div>${gallery}`;
+      case "calendar": return html`<ph-calendar></ph-calendar>${gallery}`;
       default: return html`<ph-display .status=${this.status} .state=${view} .sprites=${this.sprites} .styles=${this.modes} ?offline=${this.offline}></ph-display>${gallery}`;
     }
   }

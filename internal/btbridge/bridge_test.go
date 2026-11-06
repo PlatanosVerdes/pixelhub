@@ -30,6 +30,8 @@ func TestBridge(t *testing.T) {
 	var dialed [6]byte
 	b := New(func(mac [6]byte, _ byte) (io.ReadWriteCloser, error) { dialed = mac; return link, nil }, slog.New(slog.DiscardHandler))
 	b.GreetAfter = 50 * time.Millisecond
+	chimed := make(chan [6]byte, 2)
+	b.Chime = func(mac [6]byte) { chimed <- mac }
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +55,8 @@ func TestBridge(t *testing.T) {
 	}
 
 	frame := []byte{0x01, 0x04, 0x00, 0x74, 0x50, 0xc8, 0x00, 0x02}
-	c.Write(frame) // before the link: the display is not there
+	c.Write([]byte{opChime}) // before the link: nothing to play it on
+	c.Write(frame)           // nor to paint
 	if got := read(1); got[0] != linkDown {
 		t.Fatalf("a frame without a link: %x", got)
 	}
@@ -64,9 +67,20 @@ func TestBridge(t *testing.T) {
 	if dialed != [6]byte{0x01, 0x12, 0x23, 0x45, 0x56, 0x67} {
 		t.Errorf("dialed %x", dialed)
 	}
-	c.Write(append([]byte{0x00}, frame...)) // a stray byte, then a frame
+	c.Write(append([]byte{0x00, opChime}, frame...)) // a stray byte, the chime, then a frame
 	if got := <-link.written; !bytes.Equal(got, frame) {
 		t.Errorf("forwarded %x", got)
+	}
+	select {
+	case mac := <-chimed:
+		if mac != dialed {
+			t.Errorf("chimed on %x, want the linked display", mac)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("no chime")
+	}
+	if len(chimed) != 0 {
+		t.Error("the chime sent before the link played")
 	}
 	answer := []byte{0x01, 0x06, 0x00, 0x04, 0x32, 0x55, 0x50, 0xe1, 0x00, 0x02}
 	go w.Write(answer)

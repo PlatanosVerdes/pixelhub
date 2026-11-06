@@ -89,7 +89,9 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 	if err != nil {
 		return err
 	}
-	session := bridge.New(bridge.DefaultOptions(cfg.Bridge, cfg.DeviceMAC, cfg.Channel), log)
+	opt := bridge.DefaultOptions(cfg.Bridge, cfg.DeviceMAC, cfg.Channel)
+	opt.Chime = cfg.Chime
+	session := bridge.New(opt, log)
 	pictures := sprite.Ambient{Dir: filepath.Join(cfg.DataDir, "ambient"), Size: divoom.Size}
 	h := hub.New(session, st, store, sprites, pictures, log)
 	music, err := spotify.Open(filepath.Join(cfg.DataDir, "spotify.json"), log)
@@ -112,7 +114,10 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 		return err
 	}
 	cal.Warn = func(e calendar.Event, left time.Duration) {
-		h.Notify(hub.Alert{Content: calendar.Picture(left, e.Title, divoom.Size), Priority: calendarPriority, Duration: calendarAlert, Source: "calendar"})
+		_, shown := h.Notify(hub.Alert{Content: calendar.Picture(left, e.Title, divoom.Size), Priority: calendarPriority, Duration: calendarAlert, Source: "calendar"})
+		if shown && left == 0 && !calendar.Quiet(time.Now()) {
+			h.Chime()
+		}
 	}
 	go session.Run(ctx)
 	go h.Run(ctx)

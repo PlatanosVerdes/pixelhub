@@ -16,6 +16,7 @@ import (
 const (
 	opConnect  = 0x69
 	opRelease  = 0x96
+	opChime    = 0x7c
 	opLinkDown = 0x96
 )
 
@@ -42,6 +43,8 @@ type Options struct {
 	MinBackoff      time.Duration
 	MaxBackoff      time.Duration
 	ChunkPause      time.Duration
+	// Chime sends the chime op, which only pixelbridge knows; the esp32 bridge would take it for a frame.
+	Chime bool
 }
 
 func DefaultOptions(address string, mac net.HardwareAddr, channel byte) Options {
@@ -68,6 +71,7 @@ type Session struct {
 	paint   chan struct{}
 	control chan struct{}
 	retry   chan struct{}
+	chime   chan struct{}
 
 	mu          sync.Mutex
 	desired     display.Content
@@ -86,6 +90,7 @@ func New(opt Options, log *slog.Logger) *Session {
 		paint:   make(chan struct{}, 1),
 		control: make(chan struct{}, 1),
 		retry:   make(chan struct{}, 1),
+		chime:   make(chan struct{}, 1),
 		status:  display.Status{Address: opt.Address},
 	}
 }
@@ -110,6 +115,13 @@ func (s *Session) Claim() {
 	s.released = false
 	s.mu.Unlock()
 	poke(s.control)
+}
+
+// Chime asks the bridge to play the chime now; it is dropped while the display is away.
+func (s *Session) Chime() {
+	if s.opt.Chime {
+		poke(s.chime)
+	}
 }
 
 // Retry cuts short the wait before the next connect, which grows to a minute while the Evo is away.
@@ -275,6 +287,10 @@ func (l *link) hold() error {
 	defer keepalive.Stop()
 	// A weak Bluetooth signal answers seconds late, so a ping has until the next one to be answered.
 	waiting := false
+	select {
+	case <-l.chime:
+	default:
+	}
 	for {
 		if err := l.repaint(); err != nil {
 			return err
@@ -287,6 +303,10 @@ func (l *link) hold() error {
 				return l.release()
 			}
 		case <-l.paint:
+		case <-l.chime:
+			if err := l.write([]byte{opChime}); err != nil {
+				return err
+			}
 		case <-keepalive.C:
 			if waiting {
 				return errors.New("no answer to the keepalive")

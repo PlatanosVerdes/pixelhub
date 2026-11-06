@@ -15,6 +15,8 @@ type Config struct {
 	Port      int
 	DataDir   string
 	LogJSON   bool
+	// Chime lets pixelhub ask the bridge for a sound; only pixelbridge plays one.
+	Chime bool
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -28,6 +30,7 @@ func Load(getenv func(string) string) (Config, error) {
 		Bridge:  getenv("PIXELHUB_BRIDGE"),
 		DataDir: env("PIXELHUB_DATA_DIR", "/data"),
 		LogJSON: getenv("PIXELHUB_LOG_JSON") == "1",
+		Chime:   getenv("PIXELHUB_CHIME") == "1",
 	}
 	var errs []error
 	if _, _, err := net.SplitHostPort(c.Bridge); err != nil {
