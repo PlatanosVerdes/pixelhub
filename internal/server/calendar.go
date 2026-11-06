@@ -88,14 +88,14 @@ func (s *Server) calendarRoutes(mux *http.ServeMux) {
 	})
 	// Shows the warning the next event will get, or a sample one, to see how it looks.
 	mux.HandleFunc("POST /api/google/show", func(w http.ResponseWriter, _ *http.Request) {
-		left := 10 * time.Minute
+		left, title := 10*time.Minute, "Example event"
 		if e, ok := s.Calendar.Next(); ok {
-			left = time.Until(e.Start)
+			left, title = time.Until(e.Start), e.Title
 			if len(e.Alarms) > 0 {
 				left = min(left, time.Duration(e.Alarms[0])*time.Minute)
 			}
 		}
-		s.Hub.Show(calendar.Picture(left, s.Size), calendarShow)
+		s.Hub.Show(calendar.Picture(left, title, s.Size), calendarShow)
 		writeJSON(w, http.StatusAccepted, map[string]any{"showing": "calendar", "duration": calendarShow.String()})
 	})
 }
