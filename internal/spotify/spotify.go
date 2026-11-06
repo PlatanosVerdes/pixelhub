@@ -94,8 +94,14 @@ type Account struct {
 	// previous and flipAt are the cover before the last change and when it changed, for the flip.
 	previous image.Image
 	flipAt   time.Time
-	listed   time.Time
-	wake     chan struct{}
+	// anim keeps the frames last made for a cover, since the hub asks every second.
+	anim struct {
+		cover  image.Image
+		key    string
+		frames []display.Frame
+	}
+	listed time.Time
+	wake   chan struct{}
 }
 
 // Open reads the saved link from path; a missing file is an account not set up yet.
@@ -431,20 +437,28 @@ func shrink(src image.Image, size int) *image.NRGBA {
 	return dst
 }
 
-// Content is the cover of the current track and its device; playing is false while paused. For a
-// moment after the cover changes to another it is a half turn from the old one, then the cover alone.
+// Content is the cover of the current track and its device; playing is false while paused. The
+// cover turns half way round now and then, and from the old one for a moment after it changes.
 func (a *Account) Content() (display.Content, string, bool) {
 	p, playing := a.Now()
 	if p.Cover == nil {
 		return display.Content{}, p.Device, false
 	}
-	c := display.Content{Kind: display.Picture, Name: "♪ " + p.Track, Frames: []display.Frame{{Image: p.Cover}}}
+	c := display.Content{Kind: display.Picture, Name: "♪ " + p.Track, Key: "idle"}
 	a.mu.Lock()
-	previous, flipping := a.previous, time.Since(a.flipAt) < flipFor
-	a.mu.Unlock()
-	if flipping && previous != nil {
-		c.Key, c.Frames = "flip", flip(previous, p.Cover)
+	defer a.mu.Unlock()
+	if a.previous != nil && time.Since(a.flipAt) < flipFor {
+		c.Key = "flip"
 	}
+	if a.anim.cover != p.Cover || a.anim.key != c.Key {
+		a.anim.cover, a.anim.key = p.Cover, c.Key
+		if c.Key == "flip" {
+			a.anim.frames = flip(a.previous, p.Cover)
+		} else {
+			a.anim.frames = idle(p.Cover)
+		}
+	}
+	c.Frames = a.anim.frames
 	return c, p.Device, playing
 }
 
