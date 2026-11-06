@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -34,8 +35,10 @@ const (
 	lookAhead  = 8 * 24 * time.Hour
 	maxPages   = 4
 	shownNext  = 40
-	// startGrace is how late the warning at the start of an event may still go out, after a restart.
+	// startGrace and lateGrace are how late the warning at the start of an event, and a reminder, may
+	// still go out; one missed by more while pixelhub was down is skipped rather than shown late.
 	startGrace = 2 * time.Minute
+	lateGrace  = 15 * time.Minute
 )
 
 var (
@@ -93,10 +96,12 @@ type Warn func(e Event, left time.Duration)
 
 type Account struct {
 	path string
-	http *http.Client
-	log  *slog.Logger
-	Warn Warn
-	now  func() time.Time
+	// warnedPath keeps the warnings given, so a restart does not give them again.
+	warnedPath string
+	http       *http.Client
+	log        *slog.Logger
+	Warn       Warn
+	now        func() time.Time
 	// AuthURL, TokenURL and APIURL are Google's, replaced in tests.
 	AuthURL, TokenURL, APIURL string
 
@@ -117,10 +122,17 @@ type Account struct {
 // Open reads the saved link from path; a missing file is an account not set up yet.
 func Open(path string, log *slog.Logger) (*Account, error) {
 	a := &Account{
-		path: path, http: &http.Client{Timeout: 30 * time.Second}, log: log, now: time.Now,
+		path: path, warnedPath: filepath.Join(filepath.Dir(path), "calendar-warned.json"),
+		http: &http.Client{Timeout: 30 * time.Second}, log: log, now: time.Now,
 		AuthURL: "https://accounts.google.com/o/oauth2/v2/auth", TokenURL: "https://oauth2.googleapis.com/token",
 		APIURL:  "https://www.googleapis.com/calendar/v3",
 		pending: map[string]login{}, warned: map[string]time.Time{}, wake: make(chan struct{}, 1),
+	}
+	if data, err := os.ReadFile(a.warnedPath); err == nil {
+		if err := json.Unmarshal(data, &a.warned); err != nil {
+			log.Warn("calendar: warnings given before the restart not read, some may show again", "err", err)
+			a.warned = map[string]time.Time{}
+		}
 	}
 	data, err := os.ReadFile(path)
 	switch {
@@ -470,8 +482,8 @@ func (a *Account) listEvents(ctx context.Context, c Calendar) ([]Event, error) {
 	return out, nil
 }
 
-// warn goes through each event's reminders and its start. Reminders missed while pixelhub was down
-// collapse into one, as long as the event has not started.
+// warn goes through each event's reminders and its start. Reminders due together, after a short
+// outage, collapse into one; the warnings given are saved so a restart does not repeat them.
 func (a *Account) warn() {
 	type due struct {
 		e    Event
@@ -490,7 +502,8 @@ func (a *Account) warn() {
 		}
 		fired := false
 		for _, m := range e.Alarms {
-			if !now.Before(e.Start.Add(-time.Duration(m)*time.Minute)) && a.mark(key+strconv.Itoa(m), e.Start) {
+			at := e.Start.Add(-time.Duration(m) * time.Minute)
+			if !now.Before(at) && now.Sub(at) < lateGrace && a.mark(key+strconv.Itoa(m), e.Start) {
 				fired = true
 			}
 		}
@@ -498,10 +511,14 @@ func (a *Account) warn() {
 			fire = append(fire, due{e, e.Start.Sub(now)})
 		}
 	}
+	before := len(a.warned)
 	for key, start := range a.warned {
 		if now.Sub(start) > time.Hour {
 			delete(a.warned, key)
 		}
+	}
+	if len(fire) > 0 || len(a.warned) != before {
+		a.saveWarnedLocked()
 	}
 	warn := a.Warn
 	a.mu.Unlock()
@@ -510,6 +527,16 @@ func (a *Account) warn() {
 		if warn != nil {
 			warn(d.e, d.left)
 		}
+	}
+}
+
+func (a *Account) saveWarnedLocked() {
+	data, err := json.Marshal(a.warned)
+	if err == nil {
+		err = atomicfile.Write(a.warnedPath, data)
+	}
+	if err != nil {
+		a.log.Warn("calendar: warnings given not saved, a restart may repeat them", "err", err)
 	}
 }
 
