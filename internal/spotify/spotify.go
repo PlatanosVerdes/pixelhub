@@ -444,7 +444,8 @@ func (a *Account) Content() (display.Content, string, bool) {
 	if p.Cover == nil {
 		return display.Content{}, p.Device, false
 	}
-	c := display.Content{Kind: display.Picture, Name: "♪ " + p.Track, Key: "idle"}
+	// Named after the album, which owns the cover, so the next track of it sends nothing new.
+	c := display.Content{Kind: display.Picture, Name: "♪ " + cmp.Or(p.Album, p.Track), Key: "idle"}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.previous != nil && time.Since(a.flipAt) < flipFor {
@@ -453,9 +454,9 @@ func (a *Account) Content() (display.Content, string, bool) {
 	if a.anim.cover != p.Cover || a.anim.key != c.Key {
 		a.anim.cover, a.anim.key = p.Cover, c.Key
 		if c.Key == "flip" {
-			a.anim.frames = flip(a.previous, p.Cover)
+			a.anim.frames = reduce(flip(a.previous, p.Cover))
 		} else {
-			a.anim.frames = idle(p.Cover)
+			a.anim.frames = reduce(idle(p.Cover))
 		}
 	}
 	c.Frames = a.anim.frames
