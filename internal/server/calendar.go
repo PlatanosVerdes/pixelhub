@@ -80,9 +80,9 @@ func (s *Server) calendarRoutes(mux *http.ServeMux) {
 				problem = err.Error()
 			}
 		}
-		back := "/#settings"
+		back := "/#calendar"
 		if problem != "" {
-			back = "/?google_error=" + url.QueryEscape(problem) + "#settings"
+			back = "/?google_error=" + url.QueryEscape(problem) + "#calendar"
 		}
 		http.Redirect(w, r, back, http.StatusFound)
 	})

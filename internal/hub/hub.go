@@ -466,6 +466,16 @@ func (h *Hub) Retry() {
 	h.display.Retry()
 }
 
+// Chime plays a short sound on the display, unless it is lent to the phone app.
+func (h *Hub) Chime() {
+	h.mu.Lock()
+	released := !h.releasedUntil.IsZero()
+	h.mu.Unlock()
+	if !released {
+		h.display.Chime()
+	}
+}
+
 func (h *Hub) Status() Status {
 	h.mu.Lock()
 	defer h.mu.Unlock()

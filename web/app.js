@@ -1530,7 +1530,7 @@ class CalendarCard extends LitElement {
             ? html`<ul>${i.next.map((e) => html`<li><span class="when">${until(e.start)}</span><span>${e.title || t("(no title)")}<span class="alarms">${
               [e.calendar, ...(e.alarms?.length ? e.alarms.map(lead) : [t("no reminders")])].join(" · ")}</span></span></li>`)}</ul>`
             : html`<p class="small muted" style="margin:0">${t("Nothing in the next 7 days.")}</p>`}</div>
-          <p class="hint" style="margin:0">${t("Each event warns at its reminders in Google Calendar, and again when it starts. All-day, cancelled and declined events are left out.")}</p>
+          <p class="hint" style="margin:0">${t("Each event warns at its reminders in Google Calendar, and again when it starts, with a chime except from 23:00 to 08:00. All-day, cancelled and declined events are left out.")}</p>
           ${i.error ? html`<p class="err">${i.error}</p>` : nothing}
           <div class="row">
             <button class="btn small" @click=${() => this.show()}>${t("Show on the display")}</button>
@@ -1571,6 +1571,7 @@ const TABS = [
   ["display", "Display", icon(svg`<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 8.5h.01M12 8.5h.01M15.5 8.5h.01M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 15.5h.01M12 15.5h.01M15.5 15.5h.01" stroke-width="2.6"/>`)],
   ["gallery", "Gallery", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="m14 20 2.5-3.5 2 2.5 1.5-2"/>`)],
   ["music", "Music", icon(svg`<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>`)],
+  ["calendar", "Calendar", icon(svg`<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>`)],
   ["apps", "Apps", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M17 13.5v7M13.5 17h7"/>`)],
   ["settings", "Settings", icon(svg`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>`)],
 ];
@@ -1595,7 +1596,7 @@ class PixelhubApp extends LitElement {
     .bottom { display: none; }
     @media (max-width: 759px) {
       .top { display: none; }
-      .bottom { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
+      .bottom { display: grid; grid-template-columns: repeat(6, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
         padding: 6px 8px max(8px, env(safe-area-inset-bottom, 0px)); background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--line); }
       .bottom button { flex-direction: column; gap: 3px; font-size: 11px; padding: 6px 2px; }
       .bottom button[aria-current=page] { background: none; }
@@ -1604,7 +1605,7 @@ class PixelhubApp extends LitElement {
     main { max-width: 1120px; margin: 0 auto; padding: 8px 16px 48px; }
     .tab { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; min-width: 0; }
     .tab.two { grid-template-columns: minmax(0, 1fr); }
-    .tab .stack { display: grid; gap: 18px; min-width: 0; }
+    .tab.narrow { max-width: 720px; }
     @media (min-width: 900px) { .tab.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
     footer { max-width: 1120px; margin: 0 auto; padding: 0 16px 32px; font-size: 12px; color: var(--muted); }
     @media (max-width: 759px) { footer { padding-bottom: 96px; } }
@@ -1712,7 +1713,8 @@ class PixelhubApp extends LitElement {
       case "gallery": return gallery;
       case "apps": return html`<ph-apps .state=${view}></ph-apps>${gallery}`;
       case "music": return html`<ph-music .state=${view} .status=${this.status} .styles=${this.modes}></ph-music>${gallery}`;
-      case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<div class="stack"><ph-connection .status=${this.status} .state=${view}></ph-connection><ph-calendar></ph-calendar></div></div>${gallery}`;
+      case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<ph-connection .status=${this.status} .state=${view}></ph-connection></div>${gallery}`;
+      case "calendar": return html`<div class="tab narrow"><ph-calendar></ph-calendar></div>${gallery}`;
       default: return html`<ph-display .status=${this.status} .state=${view} .sprites=${this.sprites} .styles=${this.modes} ?offline=${this.offline}></ph-display>${gallery}`;
     }
   }

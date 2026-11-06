@@ -192,6 +192,11 @@ func titleColumns(title string) [][5]bool {
 	return cols
 }
 
+// Quiet is the night, 23:00 to 08:00, when an event starting does not chime.
+func Quiet(t time.Time) bool {
+	return t.Hour() >= 23 || t.Hour() < 8
+}
+
 // glyphsFor is the time left as it fits on the page: 37, 3h below 10 hours, then whole days rounded
 // up, so an event tomorrow morning reads 1d.
 func glyphsFor(minutes int) [][7]string {
