@@ -2,9 +2,11 @@ package bridge
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"sync"
 	"time"
@@ -17,6 +19,7 @@ const (
 	opConnect  = 0x69
 	opRelease  = 0x96
 	opChime    = 0x7c
+	opSay      = 0x7d
 	opLinkDown = 0x96
 )
 
@@ -43,7 +46,7 @@ type Options struct {
 	MinBackoff      time.Duration
 	MaxBackoff      time.Duration
 	ChunkPause      time.Duration
-	// Chime sends the chime op, which only pixelbridge knows; the esp32 bridge would take it for a frame.
+	// Chime sends the chime and say ops, which only pixelbridge knows; the esp32 bridge would take them for frames.
 	Chime bool
 }
 
@@ -79,6 +82,9 @@ type Session struct {
 	released    bool
 	releaseSent bool
 	status      display.Status
+
+	// said is the key of the last sound sent, so a repaint after a reconnect does not say it again.
+	said string
 }
 
 var _ display.Display = (*Session)(nil)
@@ -379,7 +385,7 @@ func (l *link) repaint() error {
 	// Native modes are sent again to keep the clock right, but a tool sent again would restart.
 	resend := content.Kind != display.Picture && !content.View.Mode.Tool()
 	if resend || !content.SamePicture(l.shown) {
-		msgs, err = divoom.Encode(content)
+		msgs, err = l.encode(content)
 		msgs = append(divoom.Leave(l.shown, content), msgs...)
 	}
 	l.shown = content
@@ -396,6 +402,38 @@ func (l *link) repaint() error {
 		}
 	}
 	return nil
+}
+
+// encode paints c. A talking clip goes whole, once, to a bridge that can play it; otherwise its last face shows.
+func (l *link) encode(c display.Content) ([][]byte, error) {
+	if len(c.Sound) == 0 || len(c.Frames) == 0 {
+		return divoom.Encode(c)
+	}
+	if !l.opt.Chime || l.said == c.Key {
+		still := c
+		still.Frames = c.Frames[len(c.Frames)-1:]
+		return divoom.Encode(still)
+	}
+	l.said = c.Key
+	return [][]byte{divoom.Brightness(c.Brightness), sayOp(c)}, nil
+}
+
+// sayOp is the op and the length of the rest: the waits before the sound and the faces in
+// milliseconds, the WAV with its length, then each face as its time on screen, its length and
+// the message that paints it.
+func sayOp(c display.Content) []byte {
+	ms := func(d time.Duration) uint16 { return uint16(min(max(d.Milliseconds(), 0), math.MaxUint16)) }
+	body := binary.LittleEndian.AppendUint16(nil, ms(c.SoundAfter))
+	body = binary.LittleEndian.AppendUint16(body, ms(c.FramesAfter))
+	body = binary.LittleEndian.AppendUint32(body, uint32(len(c.Sound)))
+	body = append(body, c.Sound...)
+	for _, f := range c.Frames {
+		img := divoom.Image(f.Image)
+		body = binary.LittleEndian.AppendUint16(body, ms(f.Delay))
+		body = binary.LittleEndian.AppendUint16(body, uint16(len(img)))
+		body = append(body, img...)
+	}
+	return append(binary.LittleEndian.AppendUint32([]byte{opSay}, uint32(len(body))), body...)
 }
 
 func (l *link) release() error {

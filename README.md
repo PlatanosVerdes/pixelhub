@@ -92,7 +92,9 @@ The environment only says where the hardware is; everything else is state, edite
 | `PIXELHUB_PORT` | `8000` | HTTP port |
 | `PIXELHUB_DATA_DIR` | `/data` | Holds `state.json`, `spotify.json`, `lists/`, `gallery-index.json`, `sprites/` and `ambient/` |
 | `PIXELHUB_LOG_JSON` | | `1` logs JSON (set in the image) |
-| `PIXELHUB_CHIME` | | `1` asks pixelbridge for a chime when a calendar event starts, except 23:00-08:00; the ESP32 bridge cannot play one |
+| `PIXELHUB_CHIME` | | `1` asks pixelbridge for a chime when a calendar event starts, except 23:00-08:00, and lets Mosko talk; the ESP32 bridge cannot play sound |
+| `PIXELHUB_SPEECH` | | A [Wyoming](https://github.com/rhasspy/wyoming) text-to-speech server's `host:port`, such as `wyoming-piper`, for Mosko to read text |
+| `PIXELHUB_VOICE` | | One of that server's voices, e.g. `es_ES-davefx-medium`; its default otherwise |
 | `TZ` | | Time zone for scenes, the schedule and the sun, e.g. `Europe/London` |
 
 `state.json` is written atomically. A fresh install has one channel, `clock`, that shows every alert
@@ -110,6 +112,7 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `GET /healthz` | 200 while the process runs, even with the display unreachable |
 | `GET /api/status` | Channel and why (`override` or `schedule`), layer, what is showing, `preview_version`, connection, last ack, `released_until` |
 | `POST /api/notify` | Show an alert: `sprite` or `color`, `priority` 0-10, `duration` up to `1h`, `source` |
+| `POST /api/talk` | Mosko says `{"text": ...}` or a multipart `audio` recording, his mouth and eyes moving with it |
 | `POST /api/channel` | Override the channel: `name`, optional `for`; without it, until the schedule changes |
 | `DELETE /api/channel` | Back to the schedule |
 | `POST /api/release`, `POST /api/claim` | Let the phone app have the display, and take it back (it comes back by itself after `release_for`) |
@@ -232,6 +235,26 @@ HTTPS), and paste its client ID in Settings. Sign-in uses PKCE, so no client sec
 refresh token is kept in `/data/spotify.json` (mode 0600). Development-mode apps need a Premium
 account. Spotify no longer gives beat or tempo data to new apps.
 
+### Mosko
+
+Mosko is a face that talks on the display: `POST /api/talk` with `{"text": "..."}` (needs
+`PIXELHUB_SPEECH`) or a recording in the multipart field `audio` (anything ffmpeg reads, up to 12 MB),
+at most 30 s. It needs pixelbridge, which plays the sound.
+
+- **Mouth**: follows the voice's loudness in 10 ms windows, shut under a gate set from the clip's own
+  quiet and loud parts, then three openings; long silences get a blink.
+- **Gestures**: text is read a sentence at a time, so each ending sets the eyes where it is said:
+  `!` raises the eyebrows, `?` one of them, `...` a long pause looking aside, and `jaja` laughs.
+- **Timing**: pixelhub sends the sound and every face with its time in one message; pixelbridge starts
+  the sound and paints each face as a still on its own clock, so there is no 60-frame limit and no
+  drift. Anything else painted meanwhile stops both. The sound starts with 0.8 s of silence, which the
+  speaker's Bluetooth stream eats while it wakes up.
+- **Settings** (`"talk"` in `PUT /api/settings`): `lag_ms`, how much later the speaker sounds than the
+  display paints (250 by default: PipeWire alone reports 140 ms); `pitch` in percent at the same
+  speed; `effect`, one of `cartoon`, `squirrel`, `monster`, `robot`, `nervous`, `echo`.
+
+The container needs a writable `/tmp` for ffmpeg.
+
 ## Sprites
 
 Built in: `heart`, `heartbeat`, `moon`, `sun`, `sunrise`, `lunch`, `coffee`, `zzz`, `alert`, `check`.
@@ -257,6 +280,11 @@ Learnt on the real hardware; the code lives in `internal/bridge` (session) and `
 - **Commands**: light `45 01 R G B <brightness> 00 01 00 00 00`, clock `45 00 01 00 01 00 00 00 00 00 00 00`,
   still image `44 00 0A 0A 04 <frame>`, animation `49 <total uint16 LE> <chunk index> <200 bytes>` per
   chunk, about 50 ms apart, at most 60 frames.
+- **Sound** (pixelbridge only): `7c` plays the chime. `7d` and the length of the rest (uint32 LE) is a
+  talk: the waits before the sound and before the faces in ms (uint16 LE each), the WAV's length
+  (uint32 LE) and the WAV, then per face its time on screen in ms (uint16 LE), its length (uint16 LE)
+  and the message that paints it. The display greets each face; the bridge keeps those greetings
+  from pixelhub while a talk runs.
 - **Picture frame**: `AA`, length (uint16 LE, body + 3), then the delay in ms (uint16 LE, 0 for a still),
   `00`, colour count (256 is written as 0), RGB palette in first-seen order, and the pixel indices packed
   LSB first at `max(1, ceil(log2(colours)))` bits each. Pixels with alpha up to 32 are black.

@@ -3,6 +3,8 @@
 package btbridge
 
 import (
+	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -16,7 +18,11 @@ const (
 	opConnect = 0x69
 	opRelease = 0x96
 	// opChime asks for the chime on the display's own speaker; the esp32 bridge has no such op.
-	opChime   = 0x7c
+	opChime = 0x7c
+	// opSay carries a sound for that speaker and the faces to paint in time with it, after a four-byte length.
+	opSay     = 0x7d
+	maxSay    = 8 << 20
+	cmdBright = 0x74
 	linkDown  = 0x96
 	busyTries = 12
 )
@@ -39,6 +45,8 @@ type Bridge struct {
 	Retry time.Duration
 	// Chime, when set, plays the chime on the speaker of the display at mac.
 	Chime func(mac [6]byte)
+	// Say, when set, plays wav on that speaker after a wait, until ctx ends.
+	Say func(ctx context.Context, mac [6]byte, wav []byte, after time.Duration)
 
 	ops     chan func()
 	cl      net.Conn
@@ -47,6 +55,16 @@ type Bridge struct {
 	sent    time.Time
 	greeted bool
 	mac     [6]byte
+	talk    *talk
+}
+
+// talk is a sound playing with its faces still to paint; anything else painted stops it.
+type talk struct {
+	stop   context.CancelFunc
+	timers []*time.Timer
+	// left is the faces still to paint; heard is when the sound has finished.
+	left  int
+	heard bool
 }
 
 func New(dial Dialer, log *slog.Logger) *Bridge {
@@ -129,6 +147,15 @@ func next(in []byte) (msg, rest []byte, ok bool) {
 		size = 7
 	case opChime:
 		size = 1
+	case opSay:
+		if len(in) < 5 {
+			return nil, in, false
+		}
+		n := int(binary.LittleEndian.Uint32(in[1:5]))
+		if n > maxSay {
+			return nil, in[1:], true
+		}
+		size = 5 + n
 	case 0x01:
 		if len(in) < 3 {
 			return nil, in, false
@@ -162,9 +189,84 @@ func (b *Bridge) handle(c net.Conn, msg []byte) {
 		}
 		mac := b.mac
 		go b.Chime(mac)
+	case opSay:
+		b.say(msg[5:])
 	default:
+		if msg[0] == 0x01 && len(msg) > 3 && msg[3] != cmdBright && b.talk != nil {
+			b.stopTalk()
+		}
 		b.forward(msg)
 	}
+}
+
+// say plays the sound and paints each face at its time, both from now, so neither drifts from the other.
+func (b *Bridge) say(body []byte) {
+	b.stopTalk()
+	if b.Say == nil || b.lk == nil {
+		b.Log.Info("talk skipped", "linked", b.lk != nil)
+		return
+	}
+	ms := func(p []byte) time.Duration { return time.Duration(binary.LittleEndian.Uint16(p)) * time.Millisecond }
+	if len(body) < 8 {
+		b.Log.Warn("talk too short")
+		return
+	}
+	soundAfter, at := ms(body[0:]), ms(body[2:])
+	n := int(binary.LittleEndian.Uint32(body[4:8]))
+	if len(body) < 8+n {
+		b.Log.Warn("talk sound cut short")
+		return
+	}
+	wav, rest := body[8:8+n], body[8+n:]
+	ctx, stop := context.WithCancel(context.Background())
+	t := &talk{stop: stop}
+	gen := b.gen
+	for len(rest) >= 4 {
+		hold, size := ms(rest), int(binary.LittleEndian.Uint16(rest[2:4]))
+		if len(rest) < 4+size {
+			break
+		}
+		face := rest[4 : 4+size]
+		t.left++
+		t.timers = append(t.timers, time.AfterFunc(at, func() {
+			b.ops <- func() {
+				if b.talk == t && b.gen == gen {
+					b.forward(face)
+					t.left--
+					b.endTalk(t)
+				}
+			}
+		}))
+		at += hold
+		rest = rest[4+size:]
+	}
+	b.talk = t
+	mac := b.mac
+	go func() {
+		b.Say(ctx, mac, wav, soundAfter)
+		b.ops <- func() {
+			t.heard = true
+			b.endTalk(t)
+		}
+	}()
+}
+
+// endTalk lets go of a talk whose sound and faces are done.
+func (b *Bridge) endTalk(t *talk) {
+	if b.talk == t && t.left == 0 && t.heard {
+		b.talk = nil
+	}
+}
+
+func (b *Bridge) stopTalk() {
+	if b.talk == nil {
+		return
+	}
+	b.talk.stop()
+	for _, t := range b.talk.timers {
+		t.Stop()
+	}
+	b.talk = nil
 }
 
 func (b *Bridge) connect(mac [6]byte, channel byte) {
@@ -225,6 +327,10 @@ func (b *Bridge) readLink(lk io.ReadWriteCloser, gen int) {
 				}
 				if len(data) > 4 && data[3] == 0x04 && data[4] == 0xbd {
 					b.greeted = true
+					// The display greets each face a talk paints; pixelhub would take it for a restart and repaint.
+					if b.talk != nil {
+						return
+					}
 				}
 				b.reply(data)
 			}
@@ -233,6 +339,7 @@ func (b *Bridge) readLink(lk io.ReadWriteCloser, gen int) {
 			b.ops <- func() {
 				if b.gen == gen && b.lk != nil {
 					b.Log.Info("link down", "err", err)
+					b.stopTalk()
 					b.lk.Close()
 					b.lk = nil
 					b.reply([]byte{linkDown})
@@ -260,6 +367,7 @@ func (b *Bridge) forward(frame []byte) {
 }
 
 func (b *Bridge) close() {
+	b.stopTalk()
 	if b.lk != nil {
 		b.gen++
 		b.lk.Close()

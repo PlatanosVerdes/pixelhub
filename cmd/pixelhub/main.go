@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -27,6 +28,7 @@ import (
 	"github.com/PlatanosVerdes/pixelhub/internal/spotify"
 	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
+	"github.com/PlatanosVerdes/pixelhub/internal/talk"
 	"github.com/PlatanosVerdes/pixelhub/internal/weather"
 )
 
@@ -126,6 +128,14 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 	go cal.Run(ctx)
 
 	api := &server.Server{Hub: h, Sprites: sprites, Spotify: music, Calendar: cal, Weather: station, Gallery: gallery.NewClient(), Lists: kept, IndexPath: filepath.Join(cfg.DataDir, "gallery-index.json"), Size: divoom.Size, Version: buildVersion}
+	if ffmpeg, err := exec.LookPath("ffmpeg"); err == nil {
+		api.Decoder = talk.Decoder{FFmpeg: ffmpeg}
+	} else {
+		log.Info("no ffmpeg, Mosko stays quiet")
+	}
+	if cfg.Speech != "" {
+		api.Voice = talk.Speaker{Addr: cfg.Speech, Voice: cfg.Voice}
+	}
 	go api.WarmGallery(ctx)
 	srv := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),

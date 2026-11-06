@@ -25,7 +25,9 @@ func main() {
 	}
 	log.Info("listening", "address", ln.Addr())
 	bridge := btbridge.New(dialRFCOMM, log)
-	bridge.Chime = chimePlayer(log)
+	if sp := newSpeaker(log); sp != nil {
+		bridge.Chime, bridge.Say = sp.chime(), sp.say
+	}
 	if err := bridge.Serve(ln); err != nil {
 		log.Error("serve", "err", err)
 		os.Exit(1)

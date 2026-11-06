@@ -17,6 +17,9 @@ type Config struct {
 	LogJSON   bool
 	// Chime lets pixelhub ask the bridge for a sound; only pixelbridge plays one.
 	Chime bool
+	// Speech is a Wyoming text-to-speech server's host:port, Voice one of its voices; both optional.
+	Speech string
+	Voice  string
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -31,6 +34,13 @@ func Load(getenv func(string) string) (Config, error) {
 		DataDir: env("PIXELHUB_DATA_DIR", "/data"),
 		LogJSON: getenv("PIXELHUB_LOG_JSON") == "1",
 		Chime:   getenv("PIXELHUB_CHIME") == "1",
+		Speech:  getenv("PIXELHUB_SPEECH"),
+		Voice:   getenv("PIXELHUB_VOICE"),
+	}
+	if c.Speech != "" {
+		if _, _, err := net.SplitHostPort(c.Speech); err != nil {
+			return c, errors.New("PIXELHUB_SPEECH: want the speech server's host:port like piper:10200")
+		}
 	}
 	var errs []error
 	if _, _, err := net.SplitHostPort(c.Bridge); err != nil {

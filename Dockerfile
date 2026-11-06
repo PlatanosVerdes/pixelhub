@@ -14,7 +14,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
 FROM alpine:3.21
 
 WORKDIR /app
-RUN apk add --no-cache tzdata pipewire-tools \
+RUN apk add --no-cache tzdata pipewire-tools ffmpeg \
     && adduser -D -H -u 10001 pixelhub \
     && install -d -o pixelhub -g pixelhub -m 700 /data
 COPY --from=build /out/pixelhub /out/pixelbridge /usr/local/bin/
