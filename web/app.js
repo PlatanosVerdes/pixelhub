@@ -1235,13 +1235,9 @@ class AppsTab extends LitElement {
       .app { flex: 0 0 96px; }
     }
     @media (min-width: 560px) { .apps { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
-    .app { position: relative; border: 1px solid var(--line); background: var(--surface); border-radius: 16px; padding: 12px 6px 10px; display: grid; justify-items: center; gap: 4px; cursor: pointer; color: var(--muted); min-width: 0; }
+    .app { border: 1px solid var(--line); background: var(--surface); border-radius: 16px; padding: 12px 6px 10px; display: grid; justify-items: center; gap: 4px; cursor: pointer; color: var(--muted); min-width: 0; }
     .app svg { width: 24px; height: 24px; margin-bottom: 2px; }
     .app b { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-    .app small { position: absolute; top: 7px; right: 8px; font-size: 11px; font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; gap: 4px; }
-    .app small:empty { display: none; }
-    .app small.live { color: var(--ok); }
-    .app small.live::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
     .app:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); }
     .app[aria-pressed=true] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
     .app[aria-pressed=true] svg { color: var(--accent); }
@@ -1297,16 +1293,6 @@ class AppsTab extends LitElement {
   }
   run(view) { return this.call("PUT", "mode", view); }
   automatic() { return this.call("DELETE", "mode"); }
-
-  status(a) {
-    const m = this.mode, on = this.showing === a;
-    if (a === "weather") return this.weather?.known ? html`<small>${this.weather.celsius}°</small>` : html`<small></small>`;
-    if (!on) return html`<small></small>`;
-    if (a === "countdown") return html`<small class=${m.running ? "live" : ""}>${mmss(this.left())}</small>`;
-    if (a === "stopwatch") return html`<small class=${m.running ? "live" : ""}>${mmss(this.counted())}</small>`;
-    if (a === "scoreboard") return html`<small class="live">${m.red ?? 0} : ${m.blue ?? 0}</small>`;
-    return html`<small class=${m.running ? "live" : ""}>${m.running ? t("On") : t("Off")}</small>`;
-  }
 
   back() {
     return this.showing === this.current ? html`<div class="note"><span>${t("Showing on the Evo now.")}</span>
@@ -1406,7 +1392,7 @@ class AppsTab extends LitElement {
     const cur = this.current;
     return html`
       <div class="apps" role="group" aria-label=${t("Apps")}>${APPS.map((a) => html`
-        <button class="app" aria-pressed=${String(cur === a)} @click=${() => { this.picked = a; }}>${appIcons[a]}<b>${appName(a)}</b>${this.status(a)}</button>`)}</div>
+        <button class="app" aria-pressed=${String(cur === a)} @click=${() => { this.picked = a; }}>${appIcons[a]}<b>${appName(a)}</b></button>`)}</div>
       <section class="panel" aria-label=${appName(cur)}>${this[`${cur}Panel`]()}</section>`;
   }
 }
