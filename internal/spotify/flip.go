@@ -17,7 +17,7 @@ const (
 	// idleTurn is how long the cover stays still before it turns round twice on its own, idlePause
 	// the short stop between those two full turns.
 	idleTurn  = 20 * time.Second
-	idlePause = 200 * time.Millisecond
+	idlePause = 500 * time.Millisecond
 	// distance is how far the eye is from the cover, in cover widths: closer gives more perspective.
 	distance = 1.6
 	// samples per pixel side, averaged so the turning edges come out smooth.
