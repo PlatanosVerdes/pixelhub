@@ -10,10 +10,12 @@ import (
 )
 
 const (
-	// flipFor is how long the music layer plays the half turn before the still cover replaces it.
+	// flipFor is how long the music layer plays the half turn to a new cover before the idle one.
 	flipFor   = 2 * time.Second
 	flipFrame = 40 * time.Millisecond
 	flipHold  = 5 * time.Second
+	// idleTurn is how long the cover stays still between the half turns it makes on its own.
+	idleTurn = 20 * time.Second
 	// distance is how far the eye is from the cover, in cover widths: closer gives more perspective.
 	distance = 1.6
 	// samples per pixel side, averaged so the turning edges come out smooth.
@@ -22,6 +24,15 @@ const (
 
 // flip turns the old cover half a turn about its vertical axis and brings the new one round.
 func flip(old, cover image.Image) []display.Frame {
+	return append(halfTurn(old, cover), display.Frame{Image: cover, Delay: flipHold})
+}
+
+// idle holds the cover still, then turns it half way round onto itself; the display loops it.
+func idle(cover image.Image) []display.Frame {
+	return append([]display.Frame{{Image: cover, Delay: idleTurn}}, halfTurn(cover, cover)...)
+}
+
+func halfTurn(old, cover image.Image) []display.Frame {
 	size := cover.Bounds().Dx()
 	var frames []display.Frame
 	for _, deg := range []float64{22, 45, 66, 84} {
@@ -30,7 +41,7 @@ func flip(old, cover image.Image) []display.Frame {
 	for _, deg := range []float64{84, 66, 45, 22} {
 		frames = append(frames, display.Frame{Image: turned(cover, size, -deg), Delay: flipFrame})
 	}
-	return append(frames, display.Frame{Image: cover, Delay: flipHold})
+	return frames
 }
 
 // turned draws src rotated deg degrees about its vertical axis, seen in perspective: the edge going

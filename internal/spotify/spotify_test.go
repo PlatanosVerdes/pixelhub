@@ -164,8 +164,8 @@ func TestSignInFollowsPlayback(t *testing.T) {
 	if s := a.Status(); !slices.Equal(s.Devices, []string{"Kitchen", "Phone"}) {
 		t.Errorf("devices %v, want the listed and the playing ones", s.Devices)
 	}
-	if c.Key != "" || len(c.Frames) != 1 {
-		t.Errorf("the first cover shows %d frames with key %q, want it alone", len(c.Frames), c.Key)
+	if c.Key != "idle" || len(c.Frames) < 2 || c.Frames[0].Delay != idleTurn {
+		t.Errorf("the first cover shows %d frames with key %q, want it still, then turning on itself", len(c.Frames), c.Key)
 	}
 	cover := c.Frames[0].Image
 	if got := color.NRGBAModel.Convert(cover.At(3, 3)).(color.NRGBA); got.R < 200 || got.G > 10 || got.B > 10 {
@@ -180,8 +180,8 @@ func TestSignInFollowsPlayback(t *testing.T) {
 	a.mu.Lock()
 	a.flipAt = time.Now().Add(-flipFor)
 	a.mu.Unlock()
-	if c, _, _ := a.Content(); c.Key != "" || len(c.Frames) != 1 {
-		t.Errorf("after the half turn: %d frames with key %q, want the cover alone", len(c.Frames), c.Key)
+	if c, _, _ := a.Content(); c.Key != "idle" || c.Frames[0].Image != cover {
+		t.Errorf("after the half turn: key %q, want the cover idling again", c.Key)
 	}
 }
 
