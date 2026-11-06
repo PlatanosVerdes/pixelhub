@@ -1634,11 +1634,154 @@ class Toasts {
   }
 }
 
+const VOICE_EFFECTS = [["", "Plain"], ["cartoon", "Cartoon"], ["squirrel", "Squirrel"], ["monster", "Monster"], ["robot", "Robot"], ["nervous", "Nervous"], ["echo", "Echo"]];
+
+// Mosko says what is typed, or a recording, on the display, his mouth moving with the voice.
+class MoskoTab extends LitElement {
+  static properties = { state: { attribute: false }, text: { state: true }, busy: { state: true }, recording: { state: true }, lag: { state: true }, pitch: { state: true }, effect: { state: true } };
+  static styles = [base, css`
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+    @media (min-width: 900px) { .layout { grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); align-items: start; } .side { position: sticky; top: 88px; } }
+    .side, .main { display: grid; gap: 18px; min-width: 0; }
+    .who { display: grid; gap: 10px; justify-items: center; text-align: center; }
+    ph-led { width: min(100%, 240px); }
+    @media (max-width: 599px) { ph-led { width: min(60%, 200px); } }
+    .who b { font-family: var(--font-pixel); font-size: 22px; font-weight: 600; }
+    .who span { color: var(--muted); font-size: 13px; }
+    textarea { font: inherit; font-size: 16px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; width: 100%; min-height: 96px; resize: vertical; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+    .row .count { margin-left: auto; font-size: 12px; color: var(--muted); font-family: var(--font-data); }
+    .rec[aria-pressed=true] { color: var(--bad); border-color: var(--bad); }
+    .tune { display: grid; gap: 16px; }
+    .slider { display: grid; gap: 4px; }
+    .slider .top { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+    .slider .top output { font-family: var(--font-data); color: var(--accent); }
+    .slider input { width: 100%; }
+    .slider .hint { margin: 0; }
+    input[type=file] { display: none; }
+  `];
+  constructor() { super(); this.text = ""; }
+  willUpdate(c) {
+    if (c.has("state") && this.state) {
+      const tune = this.state.talk ?? {};
+      if (!this.editing) { this.lag = tune.lag_ms ?? 250; this.pitch = tune.pitch || 100; this.effect = tune.effect ?? ""; }
+    }
+  }
+  disconnectedCallback() { super.disconnectedCallback(); this.stopRecording(true); }
+
+  async say(body) {
+    this.busy = true;
+    try {
+      const r = await api("POST", "talk", body);
+      toast(this, t("Mosko talks for {s} s", { s: Math.round(seconds(r.duration)) }));
+      send(this, "refresh");
+      return true;
+    } catch (e) { toast(this, e.message); return false; }
+    finally { this.busy = false; }
+  }
+  async sayText() {
+    const text = this.text.trim();
+    if (text && await this.say({ text })) this.text = "";
+  }
+  sayFile(file) {
+    if (!file) return;
+    const form = new FormData();
+    form.append("audio", file, file.name || "recording");
+    this.say(form);
+  }
+  get canRecord() { return !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder); }
+  async startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const chunks = [];
+      this.recorder = new MediaRecorder(stream);
+      this.recorder.ondataavailable = (e) => chunks.push(e.data);
+      this.recorder.onstop = () => {
+        stream.getTracks().forEach((tr) => tr.stop());
+        if (!this.dropRecording) this.sayFile(new File(chunks, "recording", { type: this.recorder.mimeType }));
+        this.recorder = null;
+      };
+      this.dropRecording = false;
+      this.recorder.start();
+      this.recording = true;
+      this.limit = setTimeout(() => this.stopRecording(), 30000);
+    } catch (e) { toast(this, t("No microphone: {reason}", { reason: e.message })); }
+  }
+  stopRecording(drop = false) {
+    clearTimeout(this.limit);
+    if (!this.recorder) return;
+    this.dropRecording = drop;
+    this.recorder.stop();
+    this.recording = false;
+  }
+  async tune(talk) {
+    this.editing = false;
+    try { saved(this, await api("PUT", "settings", { talk })); } catch (e) { toast(this, e.message); }
+  }
+  lagText() {
+    const ms = Number(this.lag);
+    if (ms === 0) return t("in step");
+    return ms > 0 ? t("voice {ms} ms behind", { ms }) : t("voice {ms} ms ahead", { ms: -ms });
+  }
+
+  render() {
+    return html`<div class="layout">
+      <div class="side">
+        <div class="card who">
+          <ph-led .src=${"api/talk/mosko.png"} .label=${"Mosko"}></ph-led>
+          <b>Mosko</b><span>${t("Lives in the display and says whatever you tell him.")}</span>
+        </div>
+      </div>
+      <div class="main">
+        <div class="card">
+          <div class="head"><h2>${t("What should he say?")}</h2></div>
+          <textarea maxlength="400" .value=${this.text} placeholder=${t("Hola, soy Mosko")}
+            @input=${(e) => { this.text = e.target.value; }}
+            @keydown=${(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); this.sayText(); } }}></textarea>
+          <div class="row">
+            <button class="btn primary" ?disabled=${this.busy || !this.text.trim()} @click=${() => this.sayText()}>${this.busy ? t("Thinking…") : t("Say it")}</button>
+            <button class="btn" ?disabled=${this.busy} @click=${() => this.renderRoot.querySelector("input[type=file]").click()}>${t("Send a recording")}</button>
+            ${this.canRecord ? html`<button class="btn rec" aria-pressed=${String(!!this.recording)} ?disabled=${this.busy && !this.recording}
+              @click=${() => (this.recording ? this.stopRecording() : this.startRecording())}>${this.recording ? t("Stop and send") : t("Record")}</button>` : nothing}
+            <span class="count">${this.text.length}/400</span>
+            <input type="file" accept="audio/*" @change=${(e) => { this.sayFile(e.target.files[0]); e.target.value = ""; }}>
+          </div>
+          <p class="hint">${t("Up to 30 seconds. The mouth follows the voice: shut in the pauses, wider the louder.")}</p>
+          <p class="hint">${t("He gestures with the text: ! raises his eyebrows, ? raises one, ... makes him think, jaja makes him laugh.")}</p>
+        </div>
+        <div class="card tune">
+          <h2>${t("Voice")}</h2>
+          <label class="slider">
+            <span class="top"><span>${t("Sync")}</span><output>${this.lagText()}</output></span>
+            <input type="range" min="-1000" max="1500" step="10" .value=${String(this.lag ?? 250)}
+              @input=${(e) => { this.editing = true; this.lag = Number(e.target.value); }}
+              @change=${() => this.tune({ lag_ms: this.lag, pitch: this.pitch, effect: this.effect })}>
+            <span class="hint">${t("If the mouth moves before the sound, move it right; if after, left.")}</span>
+          </label>
+          <div><button class="btn small" ?disabled=${this.busy} @click=${() => this.say({ text: "¡Pa! ¡Pa! ¡Pa! ¡Pa! ¡Pa! ¡Pa!" })}>${t("Test the sync")}</button></div>
+          <label class="slider">
+            <span class="top"><span>${t("Pitch")}</span><output>${this.pitch ?? 100}%</output></span>
+            <input type="range" min="50" max="200" step="5" .value=${String(this.pitch ?? 100)}
+              @input=${(e) => { this.editing = true; this.pitch = Number(e.target.value); }}
+              @change=${() => this.tune({ lag_ms: this.lag, pitch: this.pitch, effect: this.effect })}>
+          </label>
+          <div class="slider">
+            <span class="top"><span>${t("Effect")}</span></span>
+            ${segmented(VOICE_EFFECTS.map(([v, label]) => [v, t(label)]), this.effect ?? "", (v) => { this.effect = v; this.tune({ lag_ms: this.lag, pitch: this.pitch, effect: v }); })}
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+}
+customElements.define("ph-mosko", MoskoTab);
+
 const TABS = [
   ["display", "Display", icon(svg`<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 8.5h.01M12 8.5h.01M15.5 8.5h.01M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 15.5h.01M12 15.5h.01M15.5 15.5h.01" stroke-width="2.6"/>`)],
   ["gallery", "Gallery", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="m14 20 2.5-3.5 2 2.5 1.5-2"/>`)],
   ["music", "Music", icon(svg`<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>`)],
   ["calendar", "Calendar", icon(svg`<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>`)],
+  ["mosko", "Mosko", icon(svg`<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M7 9.5h3M14 9.5h3M9 15h6"/>`)],
   ["apps", "Apps", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M17 13.5v7M13.5 17h7"/>`)],
   ["settings", "Settings", icon(svg`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>`)],
 ];
@@ -1663,7 +1806,7 @@ class PixelhubApp extends LitElement {
     .bottom { display: none; }
     @media (max-width: 759px) {
       .top { display: none; }
-      .bottom { display: grid; grid-template-columns: repeat(6, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
+      .bottom { display: grid; grid-template-columns: repeat(7, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
         padding: 6px 8px max(8px, env(safe-area-inset-bottom, 0px)); background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--line); }
       .bottom button { flex-direction: column; gap: 3px; font-size: 11px; padding: 6px 2px; }
       .bottom button[aria-current=page] { background: none; }
@@ -1781,6 +1924,7 @@ class PixelhubApp extends LitElement {
       case "music": return html`<ph-music .state=${view} .status=${this.status} .styles=${this.modes}></ph-music>${gallery}`;
       case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<ph-connection .status=${this.status} .state=${view}></ph-connection></div>${gallery}`;
       case "calendar": return html`<ph-calendar></ph-calendar>${gallery}`;
+      case "mosko": return html`<ph-mosko .state=${view}></ph-mosko>${gallery}`;
       default: return html`<ph-display .status=${this.status} .state=${view} .sprites=${this.sprites} .styles=${this.modes} ?offline=${this.offline}></ph-display>${gallery}`;
     }
   }

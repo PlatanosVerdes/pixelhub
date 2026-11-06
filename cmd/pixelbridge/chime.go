@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"math"
@@ -11,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/PlatanosVerdes/pixelhub/internal/talk"
 )
 
 const chimeRate = 44100
@@ -35,39 +36,70 @@ func chimeWAV() []byte {
 		v *= 0.35 * min(1, t/0.004)
 		samples[i] = int16(max(-1, min(1, v)) * math.MaxInt16)
 	}
-	var b bytes.Buffer
-	data := len(samples) * 2
-	b.WriteString("RIFF")
-	_ = binary.Write(&b, binary.LittleEndian, uint32(36+data))
-	b.WriteString("WAVEfmt ")
-	_ = binary.Write(&b, binary.LittleEndian, []any{uint32(16), uint16(1), uint16(1), uint32(chimeRate), uint32(chimeRate * 2), uint16(2), uint16(16)})
-	b.WriteString("data")
-	_ = binary.Write(&b, binary.LittleEndian, uint32(data))
-	_ = binary.Write(&b, binary.LittleEndian, samples)
-	return b.Bytes()
+	return talk.PCM{Rate: chimeRate, Samples: samples}.WAV()
 }
 
-// chimePlayer plays the chime on the display's Bluetooth speaker through PipeWire, whose node for a
-// device is named after its address. Without pw-play, or without a place to write the sound, it is nil.
-func chimePlayer(log *slog.Logger) func(mac [6]byte) {
+// speaker plays sounds on the display's Bluetooth speaker through PipeWire, whose node for a device
+// is named after its address.
+type speaker struct {
+	player string
+	log    *slog.Logger
+}
+
+// newSpeaker is nil without pw-play.
+func newSpeaker(log *slog.Logger) *speaker {
 	player, err := exec.LookPath("pw-play")
 	if err != nil {
-		log.Info("no pw-play, the chime stays silent")
+		log.Info("no pw-play, the display stays silent")
 		return nil
 	}
-	file := filepath.Join(os.TempDir(), "pixelbridge-chime.wav")
-	if err := os.WriteFile(file, chimeWAV(), 0o600); err != nil {
-		log.Warn("chime not written, it stays silent", "err", err)
-		return nil
-	}
-	return func(mac [6]byte) {
-		node := fmt.Sprintf("bluez_output.%02X_%02X_%02X_%02X_%02X_%02X.1", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5])
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if out, err := exec.CommandContext(ctx, player, "--target", node, file).CombinedOutput(); err != nil {
-			log.Warn("chime failed", "node", node, "err", err, "output", string(bytes.TrimSpace(out)))
+	return &speaker{player: player, log: log}
+}
+
+func (s *speaker) play(ctx context.Context, mac [6]byte, file, what string) {
+	node := fmt.Sprintf("bluez_output.%02X_%02X_%02X_%02X_%02X_%02X.1", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5])
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, s.player, "--target", node, file).CombinedOutput(); err != nil {
+		if ctx.Err() != nil {
+			s.log.Info(what+" stopped", "node", node)
 			return
 		}
-		log.Info("chime played", "node", node)
+		s.log.Warn(what+" failed", "node", node, "err", err, "output", string(bytes.TrimSpace(out)))
+		return
 	}
+	s.log.Info(what+" played", "node", node)
+}
+
+// chime is nil without a place to write the sound.
+func (s *speaker) chime() func(mac [6]byte) {
+	file := filepath.Join(os.TempDir(), "pixelbridge-chime.wav")
+	if err := os.WriteFile(file, chimeWAV(), 0o600); err != nil {
+		s.log.Warn("chime not written, it stays silent", "err", err)
+		return nil
+	}
+	return func(mac [6]byte) { s.play(context.Background(), mac, file, "chime") }
+}
+
+func (s *speaker) say(ctx context.Context, mac [6]byte, wav []byte, after time.Duration) {
+	f, err := os.CreateTemp("", "pixelbridge-say-*.wav")
+	if err != nil {
+		s.log.Warn("sound not written", "err", err)
+		return
+	}
+	defer os.Remove(f.Name())
+	_, err = f.Write(wav)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		s.log.Warn("sound not written", "err", err)
+		return
+	}
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(after):
+	}
+	s.play(ctx, mac, f.Name(), "sound")
 }

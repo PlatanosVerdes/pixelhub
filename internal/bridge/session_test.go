@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"image"
@@ -90,6 +91,11 @@ func opSize(buf []byte) int {
 		return 8
 	case buf[0] == opRelease:
 		return 7
+	case buf[0] == opSay:
+		if len(buf) < 5 {
+			return 0
+		}
+		return 5 + int(binary.LittleEndian.Uint32(buf[1:5]))
 	default:
 		return divoom.FrameLen(buf)
 	}
@@ -111,6 +117,14 @@ func (f *fakeBridge) handle(conn net.Conn, op []byte) {
 	case opRelease:
 		f.ops <- "release"
 		f.linked = false
+	case opSay:
+		body := op[5:]
+		wav := int(binary.LittleEndian.Uint32(body[4:8]))
+		faces := 0
+		for rest := body[8+wav:]; len(rest) >= 4; rest = rest[4+int(binary.LittleEndian.Uint16(rest[2:4])):] {
+			faces++
+		}
+		f.ops <- fmt.Sprintf("say:%d sound after %d, %d faces after %d", wav, binary.LittleEndian.Uint16(body[0:2]), faces, binary.LittleEndian.Uint16(body[2:4]))
 	default:
 		cmd := op[3]
 		if f.silent {
@@ -184,6 +198,11 @@ func mustHex(s string) []byte {
 
 func startSession(t *testing.T, f *fakeBridge, show *display.Content) *Session {
 	t.Helper()
+	return startSessionWith(t, f, show, nil)
+}
+
+func startSessionWith(t *testing.T, f *fakeBridge, show *display.Content, tune func(*Options)) *Session {
+	t.Helper()
 	opt := DefaultOptions(f.ln.Addr().String(), evoMAC, 1)
 	opt.ProbeTimeout = 500 * time.Millisecond
 	opt.GreetingTimeout = time.Second
@@ -191,6 +210,9 @@ func startSession(t *testing.T, f *fakeBridge, show *display.Content) *Session {
 	opt.MinBackoff = 10 * time.Millisecond
 	opt.MaxBackoff = 20 * time.Millisecond
 	opt.ChunkPause = time.Millisecond
+	if tune != nil {
+		tune(&opt)
+	}
 	s := New(opt, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if show != nil {
 		s.Show(*show)
@@ -229,6 +251,36 @@ func TestAlreadyLinkedSkipsConnect(t *testing.T) {
 	if st := s.Status(); !st.Connected || st.Acks < 4 || st.LastAck.IsZero() {
 		t.Errorf("status %+v, want connected with acks counted", st)
 	}
+}
+
+func TestTalkGoesToTheBridgeOnce(t *testing.T) {
+	t.Parallel()
+	f := newFakeBridge(t, true)
+	talking := picture(80)
+	talking.Key, talking.Sound, talking.SoundAfter = "a", make([]byte, 5000), 120*time.Millisecond
+	s := startSessionWith(t, f, new(picture(1)), func(o *Options) { o.Chime = true })
+	f.expect("frame:74", "frame:44", "frame:74")
+	s.Show(talking)
+	f.expect("frame:74", "say:5000 sound after 120, 80 faces after 0")
+	s.Show(talking.WithBrightness(90))
+	f.expect("frame:74")
+	f.mu.Lock()
+	for _, c := range f.conns {
+		c.Write(mustHex(greetingHex))
+	}
+	f.mu.Unlock()
+	f.expect("frame:44", "frame:74")
+	f.expectQuiet(100 * time.Millisecond)
+}
+
+func TestTalkShowsItsLastFaceToABridgeWithoutSound(t *testing.T) {
+	t.Parallel()
+	f := newFakeBridge(t, true)
+	talking := picture(2)
+	talking.Key, talking.Sound = "a", make([]byte, 100)
+	startSession(t, f, &talking)
+	f.expect("frame:74", "frame:44", "frame:74")
+	f.expectQuiet(100 * time.Millisecond)
 }
 
 func TestConnectWaitsForGreeting(t *testing.T) {
