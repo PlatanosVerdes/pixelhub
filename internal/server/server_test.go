@@ -208,7 +208,7 @@ func TestCallbackURL(t *testing.T) {
 		if tt.proto != "" {
 			r.Header.Set("X-Forwarded-Proto", tt.proto)
 		}
-		if got := callbackURL(r); got != tt.want {
+		if got := callbackURL(r, "/api/spotify/callback"); got != tt.want {
 			t.Errorf("%s %s: %s, want %s", tt.proto, tt.host, got, tt.want)
 		}
 	}

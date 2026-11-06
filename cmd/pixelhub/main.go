@@ -107,7 +107,7 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 		return err
 	}
 	h.Lists = hub.ListFunc(func(list string, turn int) (display.Content, bool, error) { return kept.Pick(list, turn, divoom.Size) })
-	cal, err := calendar.Open(filepath.Join(cfg.DataDir, "calendar.json"), log)
+	cal, err := calendar.Open(filepath.Join(cfg.DataDir, "google.json"), log)
 	if err != nil {
 		return err
 	}
