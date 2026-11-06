@@ -1684,11 +1684,52 @@ class Toasts {
   }
 }
 
-const VOICE_EFFECTS = [["", "Plain"], ["cartoon", "Cartoon"], ["squirrel", "Squirrel"], ["monster", "Monster"], ["robot", "Robot"], ["nervous", "Nervous"], ["echo", "Echo"]];
+const VOICE_EFFECTS = [
+  ["", "Plain", "As it is"], ["cartoon", "Cartoon", "High and in a hurry"], ["squirrel", "Squirrel", "Very high"],
+  ["monster", "Monster", "Deep and slow"], ["robot", "Robot", "Metallic"], ["nervous", "Nervous", "Shaky voice"], ["echo", "Echo", "Like in a cave"],
+];
+// Mosko's shapes and moods, as the API numbers them.
+const SHUT = 0, SMALL = 1, HALF = 2, BLINK = 4, CALM = 0, EXCITED = 1, THINKING = 3, LAUGHING = 4;
+const POKES_TO_TALK = 10;
+const POKE_LINES = [
+  "¡Eh! ¡Que me haces cosquillas! Jajaja.",
+  "¿Otra vez? Que soy una pantalla, no un botón...",
+  "¡Vale, vale! Ya estoy despierto.",
+  "Si me sigues tocando, me pongo el reloj y no te hablo más.",
+];
+const SYNC = { min: -1000, max: 1500, step: 10, rest: 0 };
+const PITCH = { min: 50, max: 200, step: 5, rest: 100 };
+const BARS = 40;
+// The loudest sample in each of n slices, scaled so the loudest slice fills the bar.
+const peaksOf = (data, n) => {
+  const size = Math.max(1, Math.floor(data.length / n)), out = [];
+  for (let i = 0; i < n; i++) {
+    let peak = 0;
+    for (let j = i * size; j < Math.min(data.length, (i + 1) * size); j++) peak = Math.max(peak, Math.abs(data[j]));
+    out.push(peak);
+  }
+  const top = Math.max(...out, 0.01);
+  return out.map((v) => v / top);
+};
+const noteIcons = {
+  mic: icon(svg`<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>`),
+  trash: icon(svg`<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>`),
+  stop: icon(svg`<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/>`),
+  play: icon(svg`<path d="M8 5v14l11-7z" fill="currentColor"/>`),
+  pause: icon(svg`<path d="M7 5h3v14H7zM14 5h3v14h-3z" fill="currentColor"/>`),
+  send: icon(svg`<path d="M4 12 20 4l-6 16-3-7z" fill="currentColor"/>`),
+};
+const faceURL = (shape, mood) => `api/talk/mosko.png?shape=${shape}&mood=${mood}`;
+const at = (range, v) => ((v - range.min) / (range.max - range.min)) * 100;
 
-// Mosko says what is typed, or a recording, on the display, his mouth moving with the voice.
+// Mosko says what is typed, or a recording, on the display, his mouth and eyes moving with the voice.
+// The page plays the same faces the display shows, and idles with a blink now and then.
 class MoskoTab extends LitElement {
-  static properties = { state: { attribute: false }, text: { state: true }, busy: { state: true }, recording: { state: true }, lag: { state: true }, pitch: { state: true }, effect: { state: true } };
+  static properties = {
+    state: { attribute: false }, text: { state: true }, busy: { state: true }, rec: { state: true },
+    lag: { state: true }, pitch: { state: true }, effect: { state: true }, face: { state: true }, talking: { state: true },
+    anim: { state: true },
+  };
   static styles = [base, css`
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
     @media (min-width: 900px) { .layout { grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); align-items: start; } .side { position: sticky; top: 88px; } }
@@ -1696,90 +1737,293 @@ class MoskoTab extends LitElement {
     .who { display: grid; gap: 10px; justify-items: center; text-align: center; }
     ph-led { width: min(100%, 240px); }
     @media (max-width: 599px) { ph-led { width: min(60%, 200px); } }
+    .poke { border: 0; background: none; padding: 0; cursor: pointer; width: min(100%, 240px); display: flex; justify-content: center; -webkit-tap-highlight-color: transparent; }
+    .poke ph-led { width: 100%; }
+    .poke.boing { animation: boing .35s ease-out; }
+    .poke.giggle { animation: giggle .5s ease-in-out; }
+    .poke.spin { animation: spin .9s cubic-bezier(.3, 1.4, .5, 1); }
+    @keyframes boing { 30% { transform: scale(.9, 1.08); } 60% { transform: scale(1.05, .95); } }
+    @keyframes giggle { 20%, 60% { transform: rotate(-5deg); } 40%, 80% { transform: rotate(5deg); } }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .who b { font-family: var(--font-pixel); font-size: 22px; font-weight: 600; }
-    .who span { color: var(--muted); font-size: 13px; }
+    .who p { margin: 0; color: var(--muted); font-size: 13px; }
+    .mood { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); padding: 4px 10px; border-radius: 999px; background: var(--chip); }
+    .mood i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+    .mood.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+    .mood.on i { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: .25; } }
     textarea { font: inherit; font-size: 16px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; width: 100%; min-height: 96px; resize: vertical; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
     .row .count { margin-left: auto; font-size: 12px; color: var(--muted); font-family: var(--font-data); }
-    .rec[aria-pressed=true] { color: var(--bad); border-color: var(--bad); }
-    .tune { display: grid; gap: 16px; }
-    .slider { display: grid; gap: 4px; }
-    .slider .top { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
-    .slider .top output { font-family: var(--font-data); color: var(--accent); }
-    .slider input { width: 100%; }
-    .slider .hint { margin: 0; }
-    input[type=file] { display: none; }
+    .note { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); }
+    .note.recording { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+    .note .round { width: 38px; height: 38px; flex: none; border-radius: 50%; border: 0; background: none; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+    .note .round:hover { color: var(--ink); background: var(--chip); }
+    .note .round svg { width: 20px; height: 20px; }
+    .note .stop { color: var(--bad); }
+    .note .play { background: var(--chip); color: var(--ink); }
+    .note .send { background: var(--accent); color: var(--on-accent); }
+    .note .send:hover { background: var(--accent); filter: brightness(1.08); color: var(--on-accent); }
+    .note .send:disabled { opacity: .5; cursor: default; }
+    .note .dot { width: 10px; height: 10px; flex: none; border-radius: 50%; background: var(--bad); animation: pulse 1s ease-in-out infinite; }
+    .note .clock { font-family: var(--font-data); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 36px; }
+    .wave { flex: 1; min-width: 0; height: 30px; display: flex; align-items: center; gap: 2px; overflow: hidden; }
+    .wave i { flex: 1; min-width: 2px; max-width: 4px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 55%, transparent); transition: height .08s linear; }
+    .wave i.on { background: var(--accent); }
+    .wave.live i { background: var(--bad); }
+
+    .voice { display: grid; gap: 22px; }
+    .voice h2 { margin: 0; }
+    .field { display: grid; gap: 10px; }
+    .field + .field { border-top: 1px solid var(--line); padding-top: 20px; }
+    .field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .field-head .name { font-size: 14px; font-weight: 600; }
+    .field-head .sub { font-size: 12px; color: var(--muted); }
+    .value { font-family: var(--font-data); font-size: 13px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 3px 10px; border-radius: 8px; font-variant-numeric: tabular-nums; }
+    .slide { display: grid; grid-template-columns: 32px minmax(0, 1fr) 32px; gap: 10px; align-items: center; }
+    .step { width: 32px; height: 32px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg); color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 0; }
+    .step:hover { color: var(--ink); border-color: var(--muted); }
+    .track { position: relative; height: 28px; display: flex; align-items: center; }
+    .track::before { content: ""; position: absolute; left: var(--rest); top: 4px; bottom: 4px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--muted); opacity: .5; }
+    input.range { position: relative; z-index: 1; -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 999px; margin: 0; cursor: pointer; border: 0; padding: 0;
+      background: linear-gradient(to right, var(--line) var(--lo), var(--accent) var(--lo), var(--accent) var(--hi), var(--line) var(--hi)); }
+    input.range::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--ink); border: 4px solid var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent); }
+    input.range::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--ink); border: 4px solid var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent); }
+    .scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); padding: 0 42px; }
+    .field-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .field-foot .hint { margin: 0; flex: 1 1 220px; }
+    .link { border: 0; background: none; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; padding: 0; }
+    .effects { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
+    .effect { text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 10px 12px; cursor: pointer; display: grid; gap: 2px; color: var(--ink); }
+    .effect span { font-size: 12px; color: var(--muted); }
+    .effect:hover { border-color: var(--muted); }
+    .effect[aria-pressed=true] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+    .effect[aria-pressed=true] b { color: var(--accent); }
   `];
-  constructor() { super(); this.text = ""; }
+  constructor() { super(); this.text = ""; this.face = [HALF, CALM]; this.timers = []; }
+  connectedCallback() {
+    super.connectedCallback();
+    for (let s = 0; s <= 4; s++) for (let m = 0; m <= 4; m++) new Image().src = faceURL(s, m);
+    this.idle();
+  }
+  disconnectedCallback() { super.disconnectedCallback(); this.stopRecording(true); this.discard(); this.clear(); clearTimeout(this.saving); }
   willUpdate(c) {
-    if (c.has("state") && this.state) {
+    if (c.has("state") && this.state && !this.editing) {
       const tune = this.state.talk ?? {};
-      if (!this.editing) { this.lag = tune.lag_ms ?? 250; this.pitch = tune.pitch || 100; this.effect = tune.effect ?? ""; }
+      this.lag = tune.lag_ms ?? 250; this.pitch = tune.pitch || 100; this.effect = tune.effect ?? "";
     }
   }
-  disconnectedCallback() { super.disconnectedCallback(); this.stopRecording(true); }
+
+  clear() { this.timers.forEach(clearTimeout); this.timers = []; }
+  later(ms, fn) { this.timers.push(setTimeout(fn, ms)); }
+  // Idle: shut mouth, a blink every few seconds, now and then a look aside.
+  idle() {
+    this.clear();
+    this.talking = false;
+    this.face = [SHUT, CALM];
+    const next = () => this.later(2500 + Math.random() * 3500, () => {
+      if (Math.random() < 0.25) {
+        this.face = [SHUT, THINKING];
+        this.later(1200, () => { this.face = [SHUT, CALM]; next(); });
+      } else {
+        this.face = [BLINK, CALM];
+        this.later(140, () => { this.face = [SHUT, CALM]; next(); });
+      }
+    });
+    next();
+  }
+  thinking() { this.clear(); this.face = [SHUT, THINKING]; }
+  // A poke startles him; a few in a row tickle him; keep going and he complains out loud on the display.
+  animate(name) {
+    this.anim = "";
+    requestAnimationFrame(() => { this.anim = name; });
+  }
+  poke() {
+    const now = Date.now();
+    this.pokes = [...(this.pokes ?? []).filter((at) => now - at < 2500), now];
+    const n = this.pokes.length;
+    if (n >= POKES_TO_TALK && !this.busy && !this.talking) {
+      this.pokes = [];
+      this.animate("spin");
+      this.say({ text: POKE_LINES[Math.floor(Math.random() * POKE_LINES.length)] });
+      return;
+    }
+    if (this.busy || this.talking) { this.animate("boing"); return; }
+    this.clear();
+    if (n >= 4) {
+      this.animate("giggle");
+      this.face = [HALF, LAUGHING];
+      this.later(900, () => this.idle());
+    } else {
+      this.animate("boing");
+      this.face = [SMALL, EXCITED];
+      this.later(600, () => this.idle());
+    }
+  }
+  // Plays the faces the display got, each at its time from the start, so they do not drift.
+  play(faces, after) {
+    this.clear();
+    this.talking = true;
+    let t = after;
+    for (const f of faces) {
+      this.later(t, () => { this.face = [f.shape, f.mood]; });
+      t += f.ms;
+    }
+    this.later(t + 300, () => this.idle());
+  }
 
   async say(body) {
     this.busy = true;
+    this.thinking();
     try {
       const r = await api("POST", "talk", body);
-      toast(this, t("Mosko talks for {s} s", { s: Math.round(seconds(r.duration)) }));
+      this.play(r.faces ?? [], r.faces_after_ms ?? 0);
       send(this, "refresh");
       return true;
-    } catch (e) { toast(this, e.message); return false; }
+    } catch (e) { toast(this, e.message); this.idle(); return false; }
     finally { this.busy = false; }
   }
   async sayText() {
     const text = this.text.trim();
     if (text && await this.say({ text })) this.text = "";
   }
-  sayFile(file) {
-    if (!file) return;
-    const form = new FormData();
-    form.append("audio", file, file.name || "recording");
-    this.say(form);
-  }
   get canRecord() { return !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder); }
+  // A voice note, as in a chat: record with live levels, then listen, delete or send it.
   async startRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const chunks = [];
-      this.recorder = new MediaRecorder(stream);
-      this.recorder.ondataavailable = (e) => chunks.push(e.data);
-      this.recorder.onstop = () => {
-        stream.getTracks().forEach((tr) => tr.stop());
-        if (!this.dropRecording) this.sayFile(new File(chunks, "recording", { type: this.recorder.mimeType }));
-        this.recorder = null;
-      };
-      this.dropRecording = false;
-      this.recorder.start();
-      this.recording = true;
-      this.limit = setTimeout(() => this.stopRecording(), 30000);
-    } catch (e) { toast(this, t("No microphone: {reason}", { reason: e.message })); }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { toast(this, t("No microphone: {reason}", { reason: e.message })); return; }
+    const chunks = [];
+    const recorder = new MediaRecorder(stream);
+    const audio = new AudioContext();
+    const analyser = audio.createAnalyser();
+    analyser.fftSize = 512;
+    audio.createMediaStreamSource(stream).connect(analyser);
+    const samples = new Uint8Array(analyser.fftSize);
+    this.rec = { phase: "recording", started: Date.now(), levels: [], elapsed: 0 };
+    const tick = () => {
+      if (this.rec?.phase !== "recording") return;
+      analyser.getByteTimeDomainData(samples);
+      let peak = 0;
+      for (const v of samples) peak = Math.max(peak, Math.abs(v - 128) / 128);
+      this.rec = { ...this.rec, levels: [...this.rec.levels, peak].slice(-BARS), elapsed: (Date.now() - this.rec.started) / 1000 };
+      this.frame = requestAnimationFrame(tick);
+    };
+    recorder.ondataavailable = (e) => chunks.push(e.data);
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((tr) => tr.stop());
+      cancelAnimationFrame(this.frame);
+      if (this.dropRecording) { audio.close(); this.rec = null; return; }
+      const blob = new Blob(chunks, { type: recorder.mimeType });
+      let peaks = [], duration = this.rec?.elapsed ?? 0;
+      try {
+        const decoded = await audio.decodeAudioData(await blob.arrayBuffer());
+        duration = decoded.duration;
+        peaks = peaksOf(decoded.getChannelData(0), BARS);
+      } catch { /* the bars stay flat; the note still plays and sends */ }
+      audio.close();
+      this.rec = { phase: "review", blob, url: URL.createObjectURL(blob), duration, peaks, progress: 0, playing: false };
+    };
+    this.recorder = recorder;
+    this.dropRecording = false;
+    recorder.start();
+    this.frame = requestAnimationFrame(tick);
+    this.limit = setTimeout(() => this.stopRecording(), 30000);
   }
   stopRecording(drop = false) {
     clearTimeout(this.limit);
     if (!this.recorder) return;
     this.dropRecording = drop;
-    this.recorder.stop();
-    this.recording = false;
+    if (this.recorder.state !== "inactive") this.recorder.stop();
+    this.recorder = null;
   }
-  async tune(talk) {
-    this.editing = false;
-    try { saved(this, await api("PUT", "settings", { talk })); } catch (e) { toast(this, e.message); }
+  togglePlay() {
+    const r = this.rec;
+    if (!r) return;
+    if (!this.player) {
+      this.player = new Audio(r.url);
+      this.player.ontimeupdate = () => { if (this.rec) this.rec = { ...this.rec, progress: this.player.currentTime / (this.rec.duration || this.player.duration || 1) }; };
+      this.player.onended = () => { if (this.rec) this.rec = { ...this.rec, playing: false, progress: 0 }; };
+    }
+    if (r.playing) this.player.pause(); else this.player.play();
+    this.rec = { ...r, playing: !r.playing };
   }
-  lagText() {
-    const ms = Number(this.lag);
-    if (ms === 0) return t("in step");
-    return ms > 0 ? t("voice {ms} ms behind", { ms }) : t("voice {ms} ms ahead", { ms: -ms });
+  discard() {
+    this.player?.pause();
+    this.player = null;
+    if (this.rec?.url) URL.revokeObjectURL(this.rec.url);
+    this.rec = null;
+  }
+  async sendNote() {
+    const blob = this.rec?.blob;
+    if (!blob) return;
+    const form = new FormData();
+    form.append("audio", blob, "note");
+    if (await this.say(form)) this.discard();
+  }
+  noteBar() {
+    const r = this.rec;
+    const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+    if (r.phase === "recording") {
+      const levels = [...Array(BARS - r.levels.length).fill(0), ...r.levels];
+      return html`<div class="note recording">
+        <button class="round" aria-label=${t("Cancel")} @click=${() => this.stopRecording(true)}>${noteIcons.trash}</button>
+        <span class="dot"></span><span class="clock">${clock(r.elapsed)}</span>
+        <div class="wave live">${levels.map((v) => html`<i style="height:${Math.max(8, Math.min(100, v * 160))}%"></i>`)}</div>
+        <button class="round stop" aria-label=${t("Stop")} @click=${() => this.stopRecording()}>${noteIcons.stop}</button>
+      </div>`;
+    }
+    const played = Math.round(r.progress * BARS);
+    const peaks = r.peaks.length ? r.peaks : Array(BARS).fill(0.15);
+    return html`<div class="note">
+      <button class="round" aria-label=${t("Delete")} @click=${() => this.discard()}>${noteIcons.trash}</button>
+      <button class="round play" aria-label=${r.playing ? t("Pause") : t("Listen")} @click=${() => this.togglePlay()}>${r.playing ? noteIcons.pause : noteIcons.play}</button>
+      <div class="wave">${peaks.map((v, i) => html`<i class=${i < played ? "on" : ""} style="height:${Math.max(10, v * 100)}%"></i>`)}</div>
+      <span class="clock">${clock(r.duration)}</span>
+      <button class="round send" ?disabled=${this.busy} aria-label=${t("Send to Mosko")} @click=${() => this.sendNote()}>${noteIcons.send}</button>
+    </div>`;
+  }
+
+  // Sliders and steps save a moment after the last change.
+  tune(change, wait = 400) {
+    this.editing = true;
+    Object.assign(this, change);
+    clearTimeout(this.saving);
+    this.saving = setTimeout(async () => {
+      try { saved(this, await api("PUT", "settings", { talk: { lag_ms: this.lag, pitch: this.pitch, effect: this.effect } })); }
+      catch (e) { toast(this, e.message); }
+      this.editing = false;
+    }, wait);
+  }
+  slider(range, value, set) {
+    const clamp = (v) => Math.min(range.max, Math.max(range.min, v));
+    const p = at(range, value), rest = at(range, range.rest);
+    return html`<div class="slide">
+      <button class="step" aria-label=${t("Less")} @click=${() => set(clamp(value - range.step))}>−</button>
+      <div class="track" style="--rest:${rest}%">
+        <input class="range" type="range" min=${range.min} max=${range.max} step=${range.step} .value=${String(value)}
+          style="--lo:${Math.min(p, rest)}%;--hi:${Math.max(p, rest)}%" @input=${(e) => set(Number(e.target.value))}>
+      </div>
+      <button class="step" aria-label=${t("More")} @click=${() => set(clamp(value + range.step))}>+</button>
+    </div>`;
+  }
+  status() {
+    if (this.busy) return [true, t("Thinking…")];
+    if (this.talking) return [true, t("Talking")];
+    return [false, t("Waiting for you")];
   }
 
   render() {
+    const lag = this.lag ?? 250, pitch = this.pitch ?? 100;
+    const [on, mood] = this.status();
     return html`<div class="layout">
       <div class="side">
         <div class="card who">
-          <ph-led .src=${"api/talk/mosko.png"} .label=${"Mosko"}></ph-led>
-          <b>Mosko</b><span>${t("Lives in the display and says whatever you tell him.")}</span>
+          <button class="poke ${this.anim ?? ""}" aria-label=${t("Poke Mosko")} @click=${() => this.poke()} @animationend=${() => { this.anim = ""; }}>
+            <ph-led .src=${faceURL(...this.face)} .label=${"Mosko"}></ph-led></button>
+          <b>Mosko</b>
+          <span class="mood ${on ? "on" : ""}"><i></i>${mood}</span>
+          <p>${t("Lives in the display and says whatever you tell him.")}</p>
         </div>
       </div>
       <div class="main">
@@ -1788,36 +2032,40 @@ class MoskoTab extends LitElement {
           <textarea maxlength="400" .value=${this.text} placeholder=${t("Hola, soy Mosko")}
             @input=${(e) => { this.text = e.target.value; }}
             @keydown=${(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); this.sayText(); } }}></textarea>
-          <div class="row">
+          ${this.rec ? this.noteBar() : html`<div class="row">
             <button class="btn primary" ?disabled=${this.busy || !this.text.trim()} @click=${() => this.sayText()}>${this.busy ? t("Thinking…") : t("Say it")}</button>
-            <button class="btn" ?disabled=${this.busy} @click=${() => this.renderRoot.querySelector("input[type=file]").click()}>${t("Send a recording")}</button>
-            ${this.canRecord ? html`<button class="btn rec" aria-pressed=${String(!!this.recording)} ?disabled=${this.busy && !this.recording}
-              @click=${() => (this.recording ? this.stopRecording() : this.startRecording())}>${this.recording ? t("Stop and send") : t("Record")}</button>` : nothing}
+            ${this.canRecord ? html`<button class="btn" ?disabled=${this.busy} @click=${() => this.startRecording()}>${noteIcons.mic}${t("Record")}</button>` : nothing}
             <span class="count">${this.text.length}/400</span>
-            <input type="file" accept="audio/*" @change=${(e) => { this.sayFile(e.target.files[0]); e.target.value = ""; }}>
-          </div>
+          </div>`}
           <p class="hint">${t("Up to 30 seconds. The mouth follows the voice: shut in the pauses, wider the louder.")}</p>
           <p class="hint">${t("He gestures with the text: ! raises his eyebrows, ? raises one, ... makes him think, jaja makes him laugh.")}</p>
         </div>
-        <div class="card tune">
+        <div class="card voice">
           <h2>${t("Voice")}</h2>
-          <label class="slider">
-            <span class="top"><span>${t("Sync")}</span><output>${this.lagText()}</output></span>
-            <input type="range" min="-1000" max="1500" step="10" .value=${String(this.lag ?? 250)}
-              @input=${(e) => { this.editing = true; this.lag = Number(e.target.value); }}
-              @change=${() => this.tune({ lag_ms: this.lag, pitch: this.pitch, effect: this.effect })}>
-            <span class="hint">${t("If the mouth moves before the sound, move it right; if after, left.")}</span>
-          </label>
-          <div><button class="btn small" ?disabled=${this.busy} @click=${() => this.say({ text: "¡Pa! ¡Pa! ¡Pa! ¡Pa! ¡Pa! ¡Pa!" })}>${t("Test the sync")}</button></div>
-          <label class="slider">
-            <span class="top"><span>${t("Pitch")}</span><output>${this.pitch ?? 100}%</output></span>
-            <input type="range" min="50" max="200" step="5" .value=${String(this.pitch ?? 100)}
-              @input=${(e) => { this.editing = true; this.pitch = Number(e.target.value); }}
-              @change=${() => this.tune({ lag_ms: this.lag, pitch: this.pitch, effect: this.effect })}>
-          </label>
-          <div class="slider">
-            <span class="top"><span>${t("Effect")}</span></span>
-            ${segmented(VOICE_EFFECTS.map(([v, label]) => [v, t(label)]), this.effect ?? "", (v) => { this.effect = v; this.tune({ lag_ms: this.lag, pitch: this.pitch, effect: v }); })}
+          <div class="field">
+            <div class="field-head"><div class="name">${t("Effect")}</div></div>
+            <div class="effects">${VOICE_EFFECTS.map(([v, name, desc]) => html`<button class="effect" aria-pressed=${String((this.effect ?? "") === v)}
+              @click=${() => this.tune({ effect: v }, 0)}><b>${t(name)}</b><span>${t(desc)}</span></button>`)}</div>
+          </div>
+          <div class="field">
+            <div class="field-head">
+              <div><div class="name">${t("Pitch")}</div>${pitch !== 100 ? html`<button class="link" @click=${() => this.tune({ pitch: 100 }, 0)}>${t("Back to 100%")}</button>` : html`<div class="sub">${t("as the voice is")}</div>`}</div>
+              <span class="value">${pitch}%</span>
+            </div>
+            ${this.slider(PITCH, pitch, (v) => this.tune({ pitch: v }))}
+            <div class="scale"><span>${t("Deeper")}</span><span>${t("Higher")}</span></div>
+          </div>
+          <div class="field">
+            <div class="field-head">
+              <div><div class="name">${t("Sync")}</div><div class="sub">${lag === 0 ? t("in step") : lag > 0 ? t("the voice comes later") : t("the voice comes first")}</div></div>
+              <span class="value">${lag > 0 ? "+" : ""}${lag} ms</span>
+            </div>
+            ${this.slider(SYNC, lag, (v) => this.tune({ lag: v }))}
+            <div class="scale"><span>${t("Voice first")}</span><span>${t("Voice later")}</span></div>
+            <div class="field-foot">
+              <p class="hint">${t("If the mouth moves before the sound, move it right; if after, left.")}</p>
+              <button class="btn small" ?disabled=${this.busy} @click=${() => this.say({ text: "¡Pa! ¡Pa! ¡Pa! ¡Pa! ¡Pa! ¡Pa!" })}>${t("Test the sync")}</button>
+            </div>
           </div>
         </div>
       </div>

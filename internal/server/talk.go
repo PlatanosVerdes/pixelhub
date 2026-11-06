@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -22,7 +23,7 @@ const (
 	// talkWork is how long a request may take to read, turn into speech and answer.
 	talkWork = 90 * time.Second
 	// sendSlack covers the clip reaching the bridge.
-	sendSlack = 2 * time.Second
+	sendSlack = 300 * time.Millisecond
 )
 
 // Voice reads text aloud.
@@ -77,7 +78,7 @@ func (s *Server) talk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, err)
 		return
 	}
-	clip := talk.Clip(pcm, spans, tune.Lag())
+	clip, poses := talk.Clip(pcm, spans, tune.Lag())
 	if err := s.Hub.Say(clip, talk.Length(clip)+sendSlack); err != nil {
 		code := http.StatusInternalServerError
 		if errors.Is(err, hub.ErrLent) {
@@ -86,7 +87,10 @@ func (s *Server) talk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, code, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"duration": pcm.Duration().Round(time.Millisecond).String(), "frames": len(clip.Frames)})
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"duration": pcm.Duration().Round(time.Millisecond).String(), "frames": len(clip.Frames),
+		"faces": poses, "faces_after_ms": clip.FramesAfter.Milliseconds(),
+	})
 }
 
 func (s *Server) recording(ctx context.Context, w http.ResponseWriter, r *http.Request, tune state.Talk) (talk.PCM, int, error) {
@@ -133,9 +137,23 @@ func (s *Server) spoken(ctx context.Context, text string, tune state.Talk) (talk
 	return pcm, spans, 0, nil
 }
 
-// moskoPNG draws Mosko mid-word, for the UI.
-func (s *Server) moskoPNG(w http.ResponseWriter, _ *http.Request) {
+// moskoPNG draws one of Mosko's faces, ?shape=0-4&mood=0-4, mid-word and calm by default.
+func (s *Server) moskoPNG(w http.ResponseWriter, r *http.Request) {
+	pick := func(key string, def, most int) (int, bool) {
+		v := r.URL.Query().Get(key)
+		if v == "" {
+			return def, true
+		}
+		n, err := strconv.Atoi(v)
+		return n, err == nil && n >= 0 && n <= most
+	}
+	shape, okShape := pick("shape", int(talk.Half), int(talk.Blink))
+	mood, okMood := pick("mood", int(talk.Calm), int(talk.Laughing))
+	if !okShape || !okMood {
+		writeError(w, http.StatusBadRequest, errors.New("want shape and mood 0-4"))
+		return
+	}
 	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "max-age=3600")
-	_ = png.Encode(w, sprite.Resize(talk.Face(talk.Half, talk.Calm), 16*8))
+	w.Header().Set("Cache-Control", "max-age=86400")
+	_ = png.Encode(w, sprite.Resize(talk.Face(talk.Shape(shape), talk.Mood(mood)), 16*8))
 }

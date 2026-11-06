@@ -18,6 +18,8 @@ const (
 	blinkAt, blinkLasting = 500 * time.Millisecond, 150 * time.Millisecond
 	// wake is silence put before the voice: the speaker drops the first moment while its Bluetooth stream starts.
 	wake = 800 * time.Millisecond
+	// restFor is how long the calm face stays after the voice.
+	restFor = 700 * time.Millisecond
 	// silence is the loudness under which a clip counts as quiet throughout.
 	silence = 200
 )
@@ -28,21 +30,29 @@ type segment struct {
 	dur   time.Duration
 }
 
+// Pose is one face of a clip and how long it stays, for a UI to play along.
+type Pose struct {
+	Shape Shape `json:"shape"`
+	Mood  Mood  `json:"mood"`
+	MS    int64 `json:"ms"`
+}
+
 // Clip is Mosko saying p, one still face per change of mouth or mood, shown in time with the sound
 // by the bridge. spans set the moods, Calm elsewhere. lag is how much later the speaker sounds than
 // the display paints: a positive one holds the faces back, a negative one the sound.
-func Clip(p PCM, spans []Span, lag time.Duration) display.Content {
+func Clip(p PCM, spans []Span, lag time.Duration) (display.Content, []Pose) {
 	p = p.withSilence(wake)
 	spans = slices.Clone(spans)
 	for i := range spans {
 		spans[i].From += wake
 		spans[i].To += wake
 	}
+	fr, poses := frames(rest(blinks(moods(mouth(p), spans))))
 	c := display.Content{
 		Kind:   display.Picture,
 		Name:   "Mosko",
 		Key:    strconv.FormatInt(time.Now().UnixNano(), 36),
-		Frames: frames(rest(blinks(moods(mouth(p), spans)))),
+		Frames: fr,
 		Sound:  p.WAV(),
 	}
 	if lag > 0 {
@@ -50,20 +60,22 @@ func Clip(p PCM, spans []Span, lag time.Duration) display.Content {
 	} else {
 		c.SoundAfter = -lag
 	}
-	return c
+	return c, poses
 }
 
 // frames rounds each segment to whole milliseconds on the running total, so the mouth never drifts from the sound.
-func frames(segs []segment) []display.Frame {
+func frames(segs []segment) ([]display.Frame, []Pose) {
 	out := make([]display.Frame, 0, len(segs))
+	poses := make([]Pose, 0, len(segs))
 	var at, sent time.Duration
 	for _, s := range segs {
 		at += s.dur
 		end := at.Round(time.Millisecond)
 		out = append(out, display.Frame{Image: Face(s.shape, s.mood), Delay: end - sent})
+		poses = append(poses, Pose{s.shape, s.mood, (end - sent).Milliseconds()})
 		sent = end
 	}
-	return out
+	return out, poses
 }
 
 // mouth opens the mouth with the loudness of p.
@@ -138,12 +150,9 @@ func moods(segs []segment, spans []Span) []segment {
 	return out
 }
 
-// rest ends on the mouth shut, which stays on the display after the sound.
+// rest ends on the calm face for a moment, before the display goes back to what it showed.
 func rest(segs []segment) []segment {
-	if n := len(segs); n == 0 || segs[n-1].shape != Shut {
-		segs = append(segs, segment{Shut, Calm, 0})
-	}
-	return segs
+	return add(segs, segment{Shut, Calm, restFor})
 }
 
 // blinks puts a blink in long silences.

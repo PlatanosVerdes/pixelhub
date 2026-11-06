@@ -73,8 +73,8 @@ func TestMouthFollowsTheSilences(t *testing.T) {
 	t.Parallel()
 	p := speech(part{500 * time.Millisecond, 0}, part{400 * time.Millisecond, 20000}, part{300 * time.Millisecond, 0},
 		part{300 * time.Millisecond, 4000}, part{2 * time.Second, 0}, part{200 * time.Millisecond, 20000})
-	c := Clip(p, nil, 0)
-	if got := Length(c); got != (p.Duration() + wake).Round(time.Millisecond) {
+	c, _ := Clip(p, nil, 0)
+	if got := Length(c); got != (p.Duration() + wake + restFor).Round(time.Millisecond) {
 		t.Errorf("the mouth lasts %s, the sound %s", got, p.Duration())
 	}
 	for _, tc := range []struct {
@@ -103,15 +103,15 @@ func TestMouthFollowsTheSilences(t *testing.T) {
 func TestLagShiftsTheMouthOrTheSound(t *testing.T) {
 	t.Parallel()
 	p := speech(part{300 * time.Millisecond, 20000}, part{300 * time.Millisecond, 0})
-	late := Clip(p, nil, 250*time.Millisecond)
+	late, _ := Clip(p, nil, 250*time.Millisecond)
 	if late.FramesAfter != 250*time.Millisecond || late.SoundAfter != 0 {
 		t.Errorf("a speaker behind the display should hold the faces back: faces after %s, sound after %s", late.FramesAfter, late.SoundAfter)
 	}
-	early := Clip(p, nil, -250*time.Millisecond)
+	early, _ := Clip(p, nil, -250*time.Millisecond)
 	if early.SoundAfter != 250*time.Millisecond || early.FramesAfter != 0 {
 		t.Errorf("a speaker ahead of the display should wait: faces after %s, sound after %s", early.FramesAfter, early.SoundAfter)
 	}
-	if got, want := Length(early), p.Duration()+wake+250*time.Millisecond; got != want {
+	if got, want := Length(early), p.Duration()+wake+restFor+250*time.Millisecond; got != want {
 		t.Errorf("talks for %s, want %s", got, want)
 	}
 }
@@ -122,7 +122,7 @@ func TestLongClipsKeepEverySyllable(t *testing.T) {
 	for range 100 {
 		parts = append(parts, part{180 * time.Millisecond, 20000}, part{120 * time.Millisecond, 0})
 	}
-	c := Clip(speech(parts...), nil, 0)
+	c, _ := Clip(speech(parts...), nil, 0)
 	for i := range 100 {
 		start := time.Duration(i) * 300 * time.Millisecond
 		if got := at(t, c.Frames, start+90*time.Millisecond); got == Shut {
@@ -136,7 +136,7 @@ func TestLongClipsKeepEverySyllable(t *testing.T) {
 
 func TestQuietClipKeepsTheMouthShut(t *testing.T) {
 	t.Parallel()
-	c := Clip(speech(part{time.Second, 50}), nil, 0)
+	c, _ := Clip(speech(part{time.Second, 50}), nil, 0)
 	for _, f := range c.Frames {
 		if s := shapeOf(t, f.Image); s != Shut && s != Blink {
 			t.Errorf("the mouth opens to %d in a near-silent clip", s)
@@ -222,7 +222,7 @@ func TestLongClipsKeepTheirPauses(t *testing.T) {
 		}
 		parts = append(parts, part{220 * time.Millisecond, 0})
 	}
-	c := Clip(speech(parts...), nil, 0)
+	c, _ := Clip(speech(parts...), nil, 0)
 	word := 6 * 130 * time.Millisecond
 	for i := range 25 {
 		start := time.Duration(i) * (word + 220*time.Millisecond)
@@ -289,7 +289,7 @@ func TestMoodsFallWhereTheyAreSaid(t *testing.T) {
 	if (p.Duration() - 2300*time.Millisecond).Abs() > time.Millisecond {
 		t.Fatalf("said for %s", p.Duration())
 	}
-	c := Clip(p, spans, 0)
+	c, _ := Clip(p, spans, 0)
 	mood := func(d time.Duration) Mood {
 		var end time.Duration
 		for _, f := range c.Frames {
@@ -312,6 +312,10 @@ func TestMoodsFallWhereTheyAreSaid(t *testing.T) {
 		if got := mood(tc.at); got != tc.want {
 			t.Errorf("at %s the eyes are %d, want %d", tc.at, got, tc.want)
 		}
+	}
+	last := c.Frames[len(c.Frames)-1]
+	if eyesOf(t, last.Image) != Calm || shapeOf(t, last.Image) != Shut || last.Delay != restFor {
+		t.Errorf("the clip ends on eyes %d for %s, want the calm face for %s", eyesOf(t, last.Image), last.Delay, restFor)
 	}
 	if got := mood(-wake / 2); got != Calm {
 		t.Errorf("before the voice the eyes are %d, want calm", got)

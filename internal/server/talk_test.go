@@ -46,7 +46,7 @@ func TestTalk(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest("POST", "/api/talk", strings.NewReader(`{"text":"  hola  "}`)))
-	if rec.Code != 202 || said != "hola" || pitch != 0 {
+	if rec.Code != 202 || said != "hola" || pitch != 0 || !strings.Contains(rec.Body.String(), `"faces":[{"shape":0,"mood":0,"ms":`) {
 		t.Fatalf("text: code %d body %s, said %q, decoded at %v", rec.Code, rec.Body, said, pitch)
 	}
 	for deadline := time.Now().Add(2 * time.Second); f.hub.Status().Showing != "Mosko"; time.Sleep(5 * time.Millisecond) {
@@ -98,6 +98,16 @@ func TestTalk(t *testing.T) {
 	srv.ServeHTTP(rec, httptest.NewRequest("POST", "/api/talk", strings.NewReader(`{"text":"hola"}`)))
 	if rec.Code != 409 {
 		t.Errorf("while lent to the phone: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestMoskoFaces(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	for path, code := range map[string]int{"/api/talk/mosko.png": 200, "/api/talk/mosko.png?shape=4&mood=4": 200, "/api/talk/mosko.png?shape=5": 400, "/api/talk/mosko.png?mood=x": 400} {
+		if rec := f.do(t, "GET", path, ""); rec.Code != code {
+			t.Errorf("%s: %d, want %d", path, rec.Code, code)
+		}
 	}
 }
 
