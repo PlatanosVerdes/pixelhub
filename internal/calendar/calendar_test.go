@@ -196,20 +196,32 @@ func TestWarnsAtEachReminderAndAtTheStart(t *testing.T) {
 	}
 }
 
-func TestMissedRemindersCollapseIntoOne(t *testing.T) {
+func TestRestartsDoNotRepeatOrLateWarnings(t *testing.T) {
 	t.Parallel()
-	c, _ := Open(filepath.Join(t.TempDir(), "google.json"), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	c.now = func() time.Time { return now }
-	c.events = []Event{
-		{Title: "Soon", Start: now.Add(3 * time.Minute), Alarms: []int{5, 30}, id: "a"},
-		{Title: "Started", Start: now.Add(-10 * time.Minute), id: "b"},
+	path := filepath.Join(t.TempDir(), "google.json")
+	events := []Event{
+		{Title: "Soon", Start: now.Add(3 * time.Minute), Alarms: []int{5, 10}, id: "a"},
+		{Title: "Tomorrow", Start: now.Add(20 * time.Hour), Alarms: []int{1440}, id: "b"},
+		{Title: "Started", Start: now.Add(-10 * time.Minute), id: "c"},
 	}
 	var warned []string
-	c.Warn = func(e Event, left time.Duration) { warned = append(warned, fmt.Sprintf("%s %s", e.Title, left)) }
+	start := func() *Account {
+		c, err := Open(path, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.now, c.events = func() time.Time { return now }, events
+		c.Warn = func(e Event, left time.Duration) { warned = append(warned, fmt.Sprintf("%s %s", e.Title, left)) }
+		return c
+	}
+	c := start()
 	c.warn()
 	c.warn()
+	start().warn()
+	// Soon's two reminders came due in the last 15 minutes and give one warning; Tomorrow's was four
+	// hours ago, too late to show now; Started began too long ago.
 	if strings.Join(warned, ", ") != "Soon 3m0s" {
-		t.Errorf("warned %v, want one warning for Soon and none for what already started", warned)
+		t.Errorf("warned %v, want Soon once across the restart", warned)
 	}
 }
 
