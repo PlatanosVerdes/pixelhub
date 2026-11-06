@@ -101,6 +101,8 @@ const icons = {
   locate: icon(svg`<circle cx="12" cy="12" r="3.5"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>`),
   bookmark: icon(svg`<path d="M6 3.5h12v17l-6-4-6 4z"/>`),
   back: icon(svg`<path d="m15 18-6-6 6-6"/>`),
+  link: icon(svg`<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>`),
+  unlink: icon(svg`<path d="m18.84 12.25 1.72-1.71a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="m5.17 11.75-1.71 1.71a5 5 0 0 0 7.07 7.07l1.71-1.71"/><path d="M8 2v3M2 8h3M16 22v-3M22 16h-3"/>`),
 };
 
 const base = css`
@@ -117,10 +119,11 @@ const base = css`
   .hint { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
   .err { font-size: 12px; color: var(--bad); margin: 4px 0 0; }
   .errors { margin: 12px 0 0; padding: 0; list-style: none; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; background: var(--muted); }
-  .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
-  .dot.warn { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 25%, transparent); }
-  .dot.bad { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 25%, transparent); }
+  .chain { flex: none; display: inline-flex; color: var(--muted); }
+  .chain svg { width: 16px; height: 16px; }
+  .chain.ok { color: var(--ok); }
+  .chain.warn { color: var(--warn); }
+  .chain.bad { color: var(--bad); }
   svg { width: 18px; height: 18px; display: block; }
 
   input, select { font: inherit; font-size: 16px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 9px; height: 38px; padding: 0 10px; min-width: 0; }
@@ -235,6 +238,8 @@ class DaysPicker extends LitElement {
   }
 }
 customElements.define("ph-days", DaysPicker);
+
+const chain = (tone, linked) => html`<span class="chain ${tone}">${linked ? icons.link : icons.unlink}</span>`;
 
 const linkState = (s) => {
   if (s.released_until) return ["warn", t("Released to the phone app")];
@@ -1433,7 +1438,7 @@ class ConnectionCard extends LitElement {
     return html`<section class="card" aria-labelledby="co-h">
       <div class="head"><h2 id="co-h">${t("Connection")}</h2></div>
       <dl>
-        <dt>${t("Display")}</dt><dd><span class="dot ${tone}"></span>${linkText}</dd>
+        <dt>${t("Display")}</dt><dd>${chain(tone, s.connected)}${linkText}</dd>
         <dt>${t("Last answer")}</dt><dd>${ago(s.last_ack)}</dd>
         <dt>${t("Battery")}</dt><dd>${s.battery === undefined ? html`<span class="muted small">${t("This bridge cannot read it")}</span>`
           : html`${Math.min(100, (s.battery + 1) * 10)} %<span class="muted small">${ago(s.battery_at)}</span>`}</dd>
@@ -1626,7 +1631,7 @@ class PixelhubApp extends LitElement {
       <header><div class="bar">
         <div class="brand"><img src="favicon.svg" alt="">pixelhub</div>
         ${this.nav("top")}
-        <div class="link" title=${linkText}><span class="dot ${this.offline ? "bad" : tone}"></span><span>${this.offline ? t("No answer") : linkText}</span></div>
+        <div class="link" title=${linkText}>${chain(this.offline ? "bad" : tone, !this.offline && !!this.status?.connected)}<span>${this.offline ? t("No answer") : linkText}</span></div>
       </div></header>
       <main>${this.page(view)}</main>
       <footer>pixelhub ${this.version ?? ""}</footer>
