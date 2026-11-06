@@ -129,7 +129,7 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `DELETE /api/mode` | Back to alerts, scenes and ambient |
 | `GET /api/gallery/categories` | Categories of the Divoom community gallery |
 | `GET /api/gallery?category=&sort=likes\|new&page=` | One page of 16x16 pictures and animations: `file`, `name`, `author`, `likes` |
-| `GET /api/gallery/search?q=&page=` | Words looked for at the start of the names, authors, tags and descriptions of the 16 most liked pages of every category (about 7,500 pictures), read one page every 3 s from the first search on, again every 6 h, and kept across restarts (the gallery has no search without signing in and answers 429 to bursts); `indexed`/`of` say how far it got |
+| `GET /api/gallery/search?q=&page=` | Words looked for at the start of the names, authors, tags and descriptions of the 16 most liked and 8 newest pages of every category (about 11,000 pictures) and of every page browsed, read one page every 3 s from the first search on, again every 6 h, and kept across restarts (the gallery has no search without signing in and answers 429 to bursts); `indexed`/`of` say how far it got |
 | `GET /api/gallery/gif?file=` | A gallery file as an animated GIF |
 | `POST /api/gallery/show` | `{"file", "name", "for"}`: show it now, like an alert that every profile accepts (30 s by default) |
 | `POST /api/gallery/save` | `{"file", "name", "channel"}`: keep it among a profile's ambient pictures |

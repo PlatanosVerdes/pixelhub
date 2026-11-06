@@ -473,9 +473,14 @@ func TestPicturePNG(t *testing.T) {
 
 type fakeGallery struct{}
 
-func (fakeGallery) List(_ context.Context, category int, _ gallery.Sort, page, _ int) ([]gallery.Item, error) {
-	if page > 1 {
+func (fakeGallery) List(_ context.Context, category int, sort gallery.Sort, page, _ int) ([]gallery.Item, error) {
+	switch {
+	case page == 39:
+		return []gallery.Item{{Name: "Deep cut", Likes: 0, FileID: "group1/M00/deep"}}, nil
+	case page > 1:
 		return nil, nil
+	case sort == gallery.Newest:
+		return []gallery.Item{{Name: "Haunted2026+ghost-girl", Tags: []string{"ghost"}, Likes: 14, FileID: "group1/M00/ghost"}}, nil
 	}
 	return []gallery.Item{{Name: "cat", Author: "someone", Likes: 3, FileID: "group1/M00/aa", About: "a sleepy kitten", Class: 32},
 		{Name: "Corazón", Tags: []string{"love"}, Likes: 9, FileID: fmt.Sprintf("group1/M00/heart-%d", category)},
@@ -534,7 +539,7 @@ func TestGallery(t *testing.T) {
 		for range 200 {
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, httptest.NewRequest("GET", "/api/gallery/search?q="+q, nil))
-			if strings.Contains(rec.Body.String(), `"indexed":256,`) {
+			if strings.Contains(rec.Body.String(), fmt.Sprintf(`"indexed":%d,`, len(gallery.Categories)*searchPages)) {
 				return rec.Body.String()
 			}
 			time.Sleep(5 * time.Millisecond)
@@ -544,7 +549,7 @@ func TestGallery(t *testing.T) {
 		t.Fatalf("the gallery index never finished: %s", rec.Body)
 		return ""
 	}
-	for q, want := range map[string]string{"corazon": `"name":"Corazón"`, "LOVE": `"name":"Corazón"`, "cat+someone": `"name":"cat"`, "dog": `"items":[]`, "ove": `"items":[]`, "mariobros": `"name":"Super Mario Bros"`, "bros": `"name":"Super Mario Bros"`, "kitten": `"category":"animal"`} {
+	for q, want := range map[string]string{"ghost": `"name":"Haunted2026+ghost-girl"`, "corazon": `"name":"Corazón"`, "LOVE": `"name":"Corazón"`, "cat+someone": `"name":"cat"`, "dog": `"items":[]`, "ove": `"items":[]`, "mariobros": `"name":"Super Mario Bros"`, "bros": `"name":"Super Mario Bros"`, "kitten": `"category":"animal"`} {
 		if got := search(q); !strings.Contains(got, want) {
 			t.Errorf("search %s: %s, want %s", q, got, want)
 		}
@@ -561,6 +566,8 @@ func TestGallery(t *testing.T) {
 		{"/api/gallery?category=animal&page=0", 400, "page"},
 		{"/api/gallery/gif?file=group1/M00/aa", 422, "not a 16x16"},
 		{"/api/gallery/search?q=", 400, "q:"},
+		{"/api/gallery?category=animal&page=20", 200, `"name":"Deep cut"`},
+		{"/api/gallery/search?q=deep", 200, `"name":"Deep cut"`},
 	}
 	for _, tt := range tests {
 		rec := httptest.NewRecorder()
