@@ -14,8 +14,10 @@ const (
 	flipFor   = 2 * time.Second
 	flipFrame = 40 * time.Millisecond
 	flipHold  = 5 * time.Second
-	// idleTurn is how long the cover stays still between the half turns it makes on its own.
-	idleTurn = 20 * time.Second
+	// idleTurn is how long the cover stays still before it turns round twice on its own, idlePause
+	// the short stop between those two full turns.
+	idleTurn  = 20 * time.Second
+	idlePause = 200 * time.Millisecond
 	// distance is how far the eye is from the cover, in cover widths: closer gives more perspective.
 	distance = 1.6
 	// samples per pixel side, averaged so the turning edges come out smooth.
@@ -27,9 +29,13 @@ func flip(old, cover image.Image) []display.Frame {
 	return append(halfTurn(old, cover), display.Frame{Image: cover, Delay: flipHold})
 }
 
-// idle holds the cover still, then turns it half way round onto itself; the display loops it.
+// idle holds the cover still, then turns it a full turn twice with a short stop in between; the
+// display loops it.
 func idle(cover image.Image) []display.Frame {
-	return append([]display.Frame{{Image: cover, Delay: idleTurn}}, halfTurn(cover, cover)...)
+	turn := append(halfTurn(cover, cover), halfTurn(cover, cover)...)
+	frames := append([]display.Frame{{Image: cover, Delay: idleTurn}}, turn...)
+	frames = append(frames, display.Frame{Image: cover, Delay: idlePause})
+	return append(frames, turn...)
 }
 
 func halfTurn(old, cover image.Image) []display.Frame {
