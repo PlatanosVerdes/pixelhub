@@ -93,5 +93,7 @@ type Display interface {
 	Show(Content)
 	Release()
 	Claim()
+	// Retry reconnects now rather than at the end of the current wait.
+	Retry()
 	Status() Status
 }

@@ -30,6 +30,7 @@ func (d *fakeDisplay) Show(c display.Content) {
 }
 func (d *fakeDisplay) Release() { d.released = true }
 func (d *fakeDisplay) Claim()   { d.released = false }
+func (d *fakeDisplay) Retry()   {}
 func (d *fakeDisplay) Status() display.Status {
 	d.mu.Lock()
 	defer d.mu.Unlock()

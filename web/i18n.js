@@ -411,6 +411,10 @@ const es = {
   "Not shown: an alert or a mode picked by hand is on top": "No se muestra: hay un aviso o un modo elegido a mano por encima",
   "Not shown yet": "Todavía no se muestra",
   "Connect Spotify below to see what plays.": "Conecta Spotify aquí debajo para ver qué suena.",
+  // Reconnecting
+  "Retry now": "Reintentar ahora",
+  "Look for the display now instead of at the next try": "Buscar la pantalla ya, sin esperar al siguiente intento",
+  "Looking for the display": "Buscando la pantalla",
   "The Evo's visualiser": "Visualizador del Evo",
   "Back to automatic": "Volver a automático",
 };
