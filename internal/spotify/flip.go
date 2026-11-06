@@ -10,104 +10,64 @@ import (
 )
 
 const (
-	// flipFor is how long the music layer plays the flip before the still cover replaces it.
+	// flipFor is how long the music layer plays the half turn before the still cover replaces it.
 	flipFor   = 2 * time.Second
-	flipFrame = 55 * time.Millisecond
+	flipFrame = 40 * time.Millisecond
 	flipHold  = 5 * time.Second
-	// tilt is how much shorter the far edge of the turning cover gets, for depth.
-	tilt = 0.35
+	// distance is how far the eye is from the cover, in cover widths: closer gives more perspective.
+	distance = 1.6
+	// samples per pixel side, averaged so the turning edges come out smooth.
+	samples = 4
 )
 
-// flip turns the old cover over like a card and brings the new one round; without an old cover the
-// back of the card, a record, turns first.
+// flip turns the old cover half a turn about its vertical axis and brings the new one round.
 func flip(old, cover image.Image) []display.Frame {
 	size := cover.Bounds().Dx()
-	if old == nil {
-		old = record(cover, size)
-	}
 	var frames []display.Frame
-	for _, deg := range []float64{25, 50, 70, 85} {
-		frames = append(frames, display.Frame{Image: turned(old, size, deg, false), Delay: flipFrame})
+	for _, deg := range []float64{22, 45, 66, 84} {
+		frames = append(frames, display.Frame{Image: turned(old, size, deg), Delay: flipFrame})
 	}
-	for _, deg := range []float64{85, 70, 50, 25} {
-		frames = append(frames, display.Frame{Image: turned(cover, size, deg, true), Delay: flipFrame})
+	for _, deg := range []float64{84, 66, 45, 22} {
+		frames = append(frames, display.Frame{Image: turned(cover, size, -deg), Delay: flipFrame})
 	}
 	return append(frames, display.Frame{Image: cover, Delay: flipHold})
 }
 
-// turned draws src rotated deg degrees about its vertical axis: narrower, darker, and with the far
-// edge shorter. coming puts the far edge on the left, as the new face swings in.
-func turned(src image.Image, size int, deg float64, coming bool) *image.NRGBA {
+// turned draws src rotated deg degrees about its vertical axis, seen in perspective: the edge going
+// away gets shorter and the cover darkens as it turns side on. Outside the cover is black.
+func turned(src image.Image, size int, deg float64) *image.NRGBA {
 	rad := deg * math.Pi / 180
-	out := image.NewNRGBA(image.Rect(0, 0, size, size))
-	for i := range out.Pix {
-		if i%4 == 3 {
-			out.Pix[i] = 255
-		}
-	}
-	w := max(1, int(math.Round(float64(size)*math.Cos(rad))))
-	x0 := (size - w) / 2
-	shade := 0.55 + 0.45*math.Cos(rad)
+	sin, cos := math.Sin(rad), math.Cos(rad)
+	shade := 0.7 + 0.3*cos
 	b := src.Bounds()
-	for i := range w {
-		u := (float64(i) + 0.5) / float64(w)
-		far := u
-		if coming {
-			far = 1 - u
-		}
-		h := max(1, int(math.Round(float64(size)*(1-tilt*math.Sin(rad)*far))))
-		y0 := (size - h) / 2
-		sx := b.Min.X + min(size-1, int(u*float64(size)))
-		for j := range h {
-			sy := b.Min.Y + min(size-1, (j*size)/h)
-			r, g, bl, _ := src.At(sx, sy).RGBA()
-			out.SetNRGBA(x0+i, y0+j, color.NRGBA{R: uint8(float64(r>>8) * shade), G: uint8(float64(g>>8) * shade), B: uint8(float64(bl>>8) * shade), A: 255})
-		}
-	}
-	return out
-}
-
-// record is the back of the card: a dark disc with two grooves and a label in the cover's mean
-// colour, brightened so a dark cover still gives a label that shows.
-func record(cover image.Image, size int) *image.NRGBA {
-	label := brighten(mean(cover))
+	half := float64(size) / 2
+	d := distance * 2
 	out := image.NewNRGBA(image.Rect(0, 0, size, size))
-	c := float64(size-1) / 2
-	edge, outer, inner := float64(size)*0.47, float64(size)*0.38, float64(size)*0.27
-	for y := range size {
-		for x := range size {
-			d := math.Hypot(float64(x)-c, float64(y)-c)
-			px := color.NRGBA{A: 255}
-			switch {
-			case d < 0.8:
-			case d < 2.6:
-				px = label
-			case d < edge:
-				px = color.NRGBA{R: 36, G: 36, B: 42, A: 255}
-				if math.Abs(d-inner) < 0.45 || math.Abs(d-outer) < 0.45 {
-					px = color.NRGBA{R: 100, G: 100, B: 112, A: 255}
+	for py := range size {
+		for px := range size {
+			var r, g, bl float64
+			for sy := range samples {
+				for sx := range samples {
+					// The output point, centred and scaled so the cover spans -1..1.
+					X := (float64(px)+(float64(sx)+0.5)/samples)/half - 1
+					Y := (float64(py)+(float64(sy)+0.5)/samples)/half - 1
+					// Solve for the point on the cover that projects to X, then scale Y by its depth.
+					den := cos*d - X*sin
+					if den <= 0 {
+						continue
+					}
+					x := X * d / den
+					y := Y * (d + x*sin) / d
+					if x < -1 || x >= 1 || y < -1 || y >= 1 {
+						continue
+					}
+					cr, cg, cb, _ := src.At(b.Min.X+int((x+1)*half), b.Min.Y+int((y+1)*half)).RGBA()
+					r, g, bl = r+float64(cr>>8), g+float64(cg>>8), bl+float64(cb>>8)
 				}
 			}
-			out.SetNRGBA(x, y, px)
+			n := float64(samples*samples) / shade
+			out.SetNRGBA(px, py, color.NRGBA{R: uint8(min(255, r/n)), G: uint8(min(255, g/n)), B: uint8(min(255, bl/n)), A: 255})
 		}
 	}
 	return out
-}
-
-func mean(img image.Image) color.NRGBA {
-	b := img.Bounds()
-	var r, g, bl, n uint64
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		for x := b.Min.X; x < b.Max.X; x++ {
-			cr, cg, cb, _ := img.At(x, y).RGBA()
-			r, g, bl, n = r+uint64(cr>>8), g+uint64(cg>>8), bl+uint64(cb>>8), n+1
-		}
-	}
-	return color.NRGBA{R: uint8(r / n), G: uint8(g / n), B: uint8(bl / n), A: 255}
-}
-
-func brighten(c color.NRGBA) color.NRGBA {
-	top := max(c.R, c.G, c.B, 1)
-	k := 230 / float64(top)
-	return color.NRGBA{R: uint8(float64(c.R) * k), G: uint8(float64(c.G) * k), B: uint8(float64(c.B) * k), A: 255}
 }

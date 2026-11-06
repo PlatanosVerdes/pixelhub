@@ -432,7 +432,7 @@ func shrink(src image.Image, size int) *image.NRGBA {
 }
 
 // Content is the cover of the current track and its device; playing is false while paused. For a
-// moment after the cover changes it is the flip from the old one, then the cover alone.
+// moment after the cover changes to another it is a half turn from the old one, then the cover alone.
 func (a *Account) Content() (display.Content, string, bool) {
 	p, playing := a.Now()
 	if p.Cover == nil {
@@ -442,7 +442,7 @@ func (a *Account) Content() (display.Content, string, bool) {
 	a.mu.Lock()
 	previous, flipping := a.previous, time.Since(a.flipAt) < flipFor
 	a.mu.Unlock()
-	if flipping {
+	if flipping && previous != nil {
 		c.Key, c.Frames = "flip", flip(previous, p.Cover)
 	}
 	return c, p.Device, playing
