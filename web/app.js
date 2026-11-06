@@ -396,6 +396,38 @@ class LedMatrix extends LitElement {
 }
 customElements.define("ph-led", LedMatrix);
 
+// Pokable wraps something to click for fun: a bounce, a wobble after a few quick clicks, a full turn
+// after SPIN_AFTER. It sends "poke" with how many came in a row, and spun when it turned.
+const SPIN_AFTER = 10;
+class Pokable extends LitElement {
+  static properties = { anim: { state: true }, label: {} };
+  static styles = css`
+    :host { display: block; }
+    button { display: block; width: 100%; border: 0; background: none; padding: 0; cursor: pointer; color: inherit; -webkit-tap-highlight-color: transparent; }
+    ::slotted(*) { width: 100% !important; }
+    .boing { animation: boing .35s ease-out; }
+    .wobble { animation: wobble .5s ease-in-out; }
+    .spin { animation: spin .9s cubic-bezier(.3, 1.4, .5, 1); }
+    @keyframes boing { 30% { transform: scale(.9, 1.08); } 60% { transform: scale(1.05, .95); } }
+    @keyframes wobble { 20%, 60% { transform: rotate(-5deg); } 40%, 80% { transform: rotate(5deg); } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  `;
+  poke() {
+    const now = Date.now();
+    this.pokes = [...(this.pokes ?? []).filter((at) => now - at < 2500), now];
+    const count = this.pokes.length, spun = count >= SPIN_AFTER;
+    if (spun) this.pokes = [];
+    this.anim = "";
+    requestAnimationFrame(() => { this.anim = spun ? "spin" : count >= 4 ? "wobble" : "boing"; });
+    this.dispatchEvent(new CustomEvent("poke", { detail: { count, spun } }));
+  }
+  render() {
+    return html`<button class=${this.anim ?? ""} aria-label=${this.label ?? ""} @click=${() => this.poke()} @animationend=${() => { this.anim = ""; }}><slot></slot></button>`;
+  }
+}
+customElements.define("ph-poke", Pokable);
+
 // The display's own modes, as its side button cycles them. Each tap is sent at once, like the button.
 const MODES = ["clock", "light", "animations"];
 const modeName = (m) => ({ clock: t("Clock"), light: t("Light"), animations: t("My animations"), visualizer: t("Music"), scoreboard: t("Scoreboard"), stopwatch: t("Stopwatch"), countdown: t("Countdown"), noise: t("Noise meter") })[m];
@@ -1191,11 +1223,11 @@ class MusicTab extends LitElement {
     @media (min-width: 900px) { .layout { grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); align-items: start; } .side { position: sticky; top: 88px; } }
     .side, .main { display: grid; gap: 18px; min-width: 0; }
     .playing { display: grid; gap: 12px; justify-items: center; text-align: center; }
-    ph-led { width: min(100%, 300px); }
+    ph-led, ph-poke { width: min(100%, 300px); }
     .playing.idle { padding-block: 14px; gap: 4px; }
     .playing.idle p { margin: 0; }
     .playing.idle .head { margin-bottom: 0; }
-    @media (max-width: 599px) { ph-led { width: min(60%, 220px); } }
+    @media (max-width: 599px) { ph-led, ph-poke { width: min(60%, 220px); } }
     .playing b { font-size: 17px; font-weight: 600; }
     .playing .who { color: var(--muted); font-size: 14px; }
     .state { font-size: 13px; padding: 6px 12px; border-radius: 999px; background: var(--chip); }
@@ -1241,7 +1273,7 @@ class MusicTab extends LitElement {
         <section class="card playing ${now ? "" : "idle"}" aria-labelledby="np-h">
           <div class="head" style="width:100%"><h2 id="np-h">${t("Now playing")}</h2></div>
           ${now ? html`
-            <ph-led .src=${`api/spotify/cover.png?t=${encodeURIComponent(now.track)}`} .label=${now.track}></ph-led>
+            <ph-poke .label=${now.track}><ph-led .src=${`api/spotify/cover.png?t=${encodeURIComponent(now.track)}`} .label=${now.track}></ph-led></ph-poke>
             <div><b>${now.track}</b><div class="who">${now.artists}</div><div class="small muted">${now.device}</div></div>
             <span class="state ${on ? "on" : ""}">${why}</span>`
           : html`<p class="muted">${this.info?.connected ? t("Nothing is playing.") : t("Connect Spotify below to see what plays.")}</p>`}
@@ -1690,7 +1722,6 @@ const VOICE_EFFECTS = [
 ];
 // Mosko's shapes and moods, as the API numbers them.
 const SHUT = 0, SMALL = 1, HALF = 2, BLINK = 4, CALM = 0, EXCITED = 1, THINKING = 3, LAUGHING = 4;
-const POKES_TO_TALK = 10;
 const POKE_LINES = [
   "¡Eh! ¡Que me haces cosquillas! Jajaja.",
   "¿Otra vez? Que soy una pantalla, no un botón...",
@@ -1728,23 +1759,14 @@ class MoskoTab extends LitElement {
   static properties = {
     state: { attribute: false }, text: { state: true }, busy: { state: true }, rec: { state: true },
     lag: { state: true }, pitch: { state: true }, effect: { state: true }, face: { state: true }, talking: { state: true },
-    anim: { state: true },
   };
   static styles = [base, css`
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
     @media (min-width: 900px) { .layout { grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); align-items: start; } .side { position: sticky; top: 88px; } }
     .side, .main { display: grid; gap: 18px; min-width: 0; }
     .who { display: grid; gap: 10px; justify-items: center; text-align: center; }
-    ph-led { width: min(100%, 240px); }
-    @media (max-width: 599px) { ph-led { width: min(60%, 200px); } }
-    .poke { border: 0; background: none; padding: 0; cursor: pointer; width: min(100%, 240px); display: flex; justify-content: center; -webkit-tap-highlight-color: transparent; }
-    .poke ph-led { width: 100%; }
-    .poke.boing { animation: boing .35s ease-out; }
-    .poke.giggle { animation: giggle .5s ease-in-out; }
-    .poke.spin { animation: spin .9s cubic-bezier(.3, 1.4, .5, 1); }
-    @keyframes boing { 30% { transform: scale(.9, 1.08); } 60% { transform: scale(1.05, .95); } }
-    @keyframes giggle { 20%, 60% { transform: rotate(-5deg); } 40%, 80% { transform: rotate(5deg); } }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    ph-poke { width: min(100%, 240px); }
+    @media (max-width: 599px) { ph-poke { width: min(60%, 200px); } }
     .who b { font-family: var(--font-pixel); font-size: 22px; font-weight: 600; }
     .who p { margin: 0; color: var(--muted); font-size: 13px; }
     .mood { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); padding: 4px 10px; border-radius: 999px; background: var(--chip); }
@@ -1834,28 +1856,18 @@ class MoskoTab extends LitElement {
   }
   thinking() { this.clear(); this.face = [SHUT, THINKING]; }
   // A poke startles him; a few in a row tickle him; keep going and he complains out loud on the display.
-  animate(name) {
-    this.anim = "";
-    requestAnimationFrame(() => { this.anim = name; });
-  }
-  poke() {
-    const now = Date.now();
-    this.pokes = [...(this.pokes ?? []).filter((at) => now - at < 2500), now];
-    const n = this.pokes.length;
-    if (n >= POKES_TO_TALK && !this.busy && !this.talking) {
-      this.pokes = [];
-      this.animate("spin");
+  // A poke startles him, a few in a row tickle him, and a full turn makes him complain out loud on the display.
+  poked({ count, spun }) {
+    if (spun && !this.busy && !this.talking) {
       this.say({ text: POKE_LINES[Math.floor(Math.random() * POKE_LINES.length)] });
       return;
     }
-    if (this.busy || this.talking) { this.animate("boing"); return; }
+    if (this.busy || this.talking) return;
     this.clear();
-    if (n >= 4) {
-      this.animate("giggle");
+    if (count >= 4) {
       this.face = [HALF, LAUGHING];
       this.later(900, () => this.idle());
     } else {
-      this.animate("boing");
       this.face = [SMALL, EXCITED];
       this.later(600, () => this.idle());
     }
@@ -2019,8 +2031,7 @@ class MoskoTab extends LitElement {
     return html`<div class="layout">
       <div class="side">
         <div class="card who">
-          <button class="poke ${this.anim ?? ""}" aria-label=${t("Poke Mosko")} @click=${() => this.poke()} @animationend=${() => { this.anim = ""; }}>
-            <ph-led .src=${faceURL(...this.face)} .label=${"Mosko"}></ph-led></button>
+          <ph-poke .label=${t("Poke Mosko")} @poke=${(e) => this.poked(e.detail)}><ph-led .src=${faceURL(...this.face)} .label=${"Mosko"}></ph-led></ph-poke>
           <b>Mosko</b>
           <span class="mood ${on ? "on" : ""}"><i></i>${mood}</span>
           <p>${t("Lives in the display and says whatever you tell him.")}</p>
