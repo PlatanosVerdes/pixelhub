@@ -107,6 +107,7 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `POST /api/channel` | Override the channel: `name`, optional `for`; without it, until the schedule changes |
 | `DELETE /api/channel` | Back to the schedule |
 | `POST /api/release`, `POST /api/claim` | Let the phone app have the display, and take it back (it comes back by itself after `release_for`) |
+| `POST /api/reconnect` | Look for the display now: the wait between connect attempts grows to a minute while it is away |
 | `GET /api/state` | Everything that is saved |
 | `PUT /api/settings` | Any of `location`, `brightness`, `release_for`, `default_channel`, `music`, `clock`; fields left out, nested ones too, stay as they are (`music` and `clock` are replaced whole) |
 | `GET /api/weather` | The weather the clock shows: `celsius`, `sky`, when it was read, and an `error` if the last read failed |

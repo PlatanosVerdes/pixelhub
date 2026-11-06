@@ -67,6 +67,7 @@ type Session struct {
 	log     *slog.Logger
 	paint   chan struct{}
 	control chan struct{}
+	retry   chan struct{}
 
 	mu          sync.Mutex
 	desired     display.Content
@@ -84,6 +85,7 @@ func New(opt Options, log *slog.Logger) *Session {
 		log:     log,
 		paint:   make(chan struct{}, 1),
 		control: make(chan struct{}, 1),
+		retry:   make(chan struct{}, 1),
 		status:  display.Status{Address: opt.Address},
 	}
 }
@@ -109,6 +111,9 @@ func (s *Session) Claim() {
 	s.mu.Unlock()
 	poke(s.control)
 }
+
+// Retry cuts short the wait before the next connect, which grows to a minute while the Evo is away.
+func (s *Session) Retry() { poke(s.retry) }
 
 func (s *Session) Status() display.Status {
 	s.mu.Lock()
@@ -162,23 +167,30 @@ func (s *Session) Run(ctx context.Context) {
 			backoff = s.opt.MinBackoff
 		}
 		s.log.Warn("bridge session down", "err", err, "retry_in", backoff.String())
-		s.pause(ctx, backoff)
+		if s.pause(ctx, backoff) {
+			s.log.Info("retry asked for")
+			backoff = s.opt.MinBackoff
+			continue
+		}
 		backoff = min(backoff*2, s.opt.MaxBackoff)
 	}
 }
 
-func (s *Session) pause(ctx context.Context, d time.Duration) {
+// pause waits d, or less if the display is released or a retry is asked for; retried says which.
+func (s *Session) pause(ctx context.Context, d time.Duration) (retried bool) {
 	t := time.NewTimer(d)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		case <-t.C:
-			return
+			return false
+		case <-s.retry:
+			return true
 		case <-s.control:
 			if s.isReleased() {
-				return
+				return false
 			}
 		}
 	}

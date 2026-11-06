@@ -1438,7 +1438,8 @@ class ConnectionCard extends LitElement {
     return html`<section class="card" aria-labelledby="co-h">
       <div class="head"><h2 id="co-h">${t("Connection")}</h2></div>
       <dl>
-        <dt>${t("Display")}</dt><dd>${chain(tone, s.connected)}${linkText}</dd>
+        <dt>${t("Display")}</dt><dd>${chain(tone, s.connected)}${linkText}${!s.connected && !released
+          ? html`<button class="btn small" ?disabled=${this.busy} title=${t("Look for the display now instead of at the next try")} @click=${() => this.call("reconnect")}>${t("Retry now")}</button>` : nothing}</dd>
         <dt>${t("Last answer")}</dt><dd>${ago(s.last_ack)}</dd>
         <dt>${t("Battery")}</dt><dd>${s.battery === undefined ? html`<span class="muted small">${t("This bridge cannot read it")}</span>`
           : html`${Math.min(100, (s.battery + 1) * 10)} %<span class="muted small">${ago(s.battery_at)}</span>`}</dd>
@@ -1499,6 +1500,8 @@ class PixelhubApp extends LitElement {
     .brand { font-family: var(--font-pixel); font-size: 20px; display: flex; align-items: center; gap: 10px; letter-spacing: .02em; }
     .brand img { width: 24px; height: 24px; }
     .link { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); white-space: nowrap; margin-left: auto; }
+    button.link { border: 0; background: none; font: inherit; font-size: 13px; cursor: pointer; padding: 6px 8px; margin-right: -8px; border-radius: 8px; }
+    button.link:hover { background: var(--chip); color: var(--ink); }
     nav { display: flex; gap: 4px; }
     nav button { border: 0; background: none; border-radius: 12px; color: var(--muted); cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; padding: 8px 12px; }
     nav button svg { width: 20px; height: 20px; }
@@ -1577,6 +1580,10 @@ class PixelhubApp extends LitElement {
   async pollStatus() {
     try { this.status = await api("GET", "status"); this.offline = false; } catch { this.offline = true; }
   }
+  async retry() {
+    try { this.status = await api("POST", "reconnect"); this.toasts.show({ text: t("Looking for the display") }); }
+    catch (e) { this.toasts.show({ text: e.message }); }
+  }
   async loadState() {
     try { this.st = await api("GET", "state"); } catch { /* the status poll shows the outage */ }
   }
@@ -1631,7 +1638,9 @@ class PixelhubApp extends LitElement {
       <header><div class="bar">
         <div class="brand"><img src="favicon.svg" alt="">pixelhub</div>
         ${this.nav("top")}
-        <div class="link" title=${linkText}>${chain(this.offline ? "bad" : tone, !this.offline && !!this.status?.connected)}<span>${this.offline ? t("No answer") : linkText}</span></div>
+        ${this.status && !this.offline && !this.status.connected && !this.status.released_until
+          ? html`<button class="link retry" title=${t("Look for the display now instead of at the next try")} @click=${() => this.retry()}>${chain(tone, false)}<span>${linkText} · ${t("Retry now")}</span></button>`
+          : html`<div class="link" title=${linkText}>${chain(this.offline ? "bad" : tone, !this.offline && !!this.status?.connected)}<span>${this.offline ? t("No answer") : linkText}</span></div>`}
       </div></header>
       <main>${this.page(view)}</main>
       <footer>pixelhub ${this.version ?? ""}</footer>
