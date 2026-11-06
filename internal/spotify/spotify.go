@@ -382,7 +382,7 @@ func (a *Account) cover(ctx context.Context, u string) (image.Image, error) {
 // forLEDs makes a shrunk photo read on a LED grid, where mid tones glow almost as bright as
 // highlights: it stretches the levels, adds saturation, then darkens mid tones with a gamma.
 func forLEDs(img *image.NRGBA) *image.NRGBA {
-	const saturation, gamma = 1.5, 2.2
+	const saturation, gamma = 1.5, 1.6
 	lo, hi := 255.0, 0.0
 	for i := 0; i < len(img.Pix); i += 4 {
 		l := luma(img.Pix[i : i+3])
