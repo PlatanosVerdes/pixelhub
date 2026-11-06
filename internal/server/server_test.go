@@ -513,7 +513,9 @@ func TestLists(t *testing.T) {
 		{"PUT", "/api/lists/Games", `{"name":"Retro games"}`, 200, `"name":"Retro games"`},
 		{"DELETE", "/api/lists/Retro%20games/items?file=group1/M00/mario", "", 200, `"items":[]`},
 		{"DELETE", "/api/lists/Retro%20games/items?file=group1/M00/mario", "", 404, "not in"},
-		{"DELETE", "/api/lists/Retro%20games", "", 200, `"lists":[]`},
+		{"DELETE", "/api/lists/Retro%20games", "", 200, `"lists":[{"name":"favorites","items":[]}]`},
+		{"DELETE", "/api/lists/favorites", "", 400, "always there"},
+		{"PUT", "/api/lists/favorites", `{"name":"Mine"}`, 400, "keeps its name"},
 	}
 	for _, tt := range tests {
 		rec := httptest.NewRecorder()

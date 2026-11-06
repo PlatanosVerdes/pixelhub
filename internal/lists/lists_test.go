@@ -17,8 +17,8 @@ func TestLists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Lists() == nil {
-		t.Error("no lists should be [], not nil")
+	if l := s.Lists(); len(l) != 1 || l[0].Name != Favorites || l[0].Items == nil {
+		t.Errorf("a fresh install: %+v, want only an empty favorites", l)
 	}
 	for _, name := range []string{"Halloween", "  Cats   and dogs "} {
 		if err := s.Create(name); err != nil {
@@ -44,7 +44,7 @@ func TestLists(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := reopened.Lists()
-	if len(got) != 2 || got[0].Name != "Halloween" || got[1].Name != "Cats and dogs" || len(got[0].Items) != 2 || got[0].Items[0].File != "group1/M00/ghost" {
+	if len(got) != 3 || got[0].Name != Favorites || got[1].Name != "Halloween" || got[2].Name != "Cats and dogs" || len(got[1].Items) != 2 || got[1].Items[0].File != "group1/M00/ghost" {
 		t.Fatalf("after a restart: %+v", got)
 	}
 
@@ -60,7 +60,7 @@ func TestLists(t *testing.T) {
 	if _, err := os.Stat(reopened.gifPath("group1/M00/pumpkin")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("no list holds it any more, its GIF should be gone: %v", err)
 	}
-	if err := reopened.Rename("Halloween", "Spooky"); err != nil || reopened.Lists()[0].Name != "Spooky" {
+	if err := reopened.Rename("Halloween", "Spooky"); err != nil || reopened.Lists()[1].Name != "Spooky" {
 		t.Errorf("rename: %v %+v", err, reopened.Lists())
 	}
 }
@@ -81,6 +81,36 @@ func TestListsReject(t *testing.T) {
 	}
 	if err := s.Remove("a", "missing"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("remove a missing picture: %v", err)
+	}
+}
+
+func TestFavoritesAreAlwaysThere(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// Lists from before Favorites existed, one of them the user's own favourites.
+	old := `[{"name":"Halloween","items":[]},{"name":"Favoritos","items":[{"file":"group1/M00/heart","name":"heart"}]}]`
+	if err := os.WriteFile(dir+"/lists.json", []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := s.Lists()
+	if len(got) != 2 || got[0].Name != Favorites || len(got[0].Items) != 1 || got[1].Name != "Halloween" {
+		t.Fatalf("the user's Favoritos should become favorites, first: %+v", got)
+	}
+	if err := s.Rename(Favorites, "Mine"); !errors.Is(err, ErrInvalid) {
+		t.Errorf("renaming favorites: %v", err)
+	}
+	if err := s.Delete(Favorites); !errors.Is(err, ErrInvalid) {
+		t.Errorf("deleting favorites: %v", err)
+	}
+	if err := s.Create("Favorites"); !errors.Is(err, ErrExists) {
+		t.Errorf("a second favorites: %v", err)
+	}
+	if reopened, _ := Open(dir); reopened.Lists()[0].Name != Favorites {
+		t.Errorf("after a restart: %+v", reopened.Lists())
 	}
 }
 
