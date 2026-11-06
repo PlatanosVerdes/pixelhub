@@ -164,8 +164,18 @@ func TestSignInFollowsPlayback(t *testing.T) {
 	if s := a.Status(); !slices.Equal(s.Devices, []string{"Kitchen", "Phone"}) {
 		t.Errorf("devices %v, want the listed and the playing ones", s.Devices)
 	}
-	if got := color.NRGBAModel.Convert(c.Frames[0].Image.At(3, 3)).(color.NRGBA); got.R < 200 || got.G > 10 || got.B > 10 {
+	if c.Key != "flip" || len(c.Frames) < 2 {
+		t.Errorf("a new cover shows %d frames with key %q, want the flip", len(c.Frames), c.Key)
+	}
+	cover := c.Frames[len(c.Frames)-1].Image
+	if got := color.NRGBAModel.Convert(cover.At(3, 3)).(color.NRGBA); got.R < 200 || got.G > 10 || got.B > 10 {
 		t.Errorf("cover pixel %v, want the cover's red, made purer", got)
+	}
+	a.mu.Lock()
+	a.flipAt = time.Now().Add(-flipFor)
+	a.mu.Unlock()
+	if c, _, _ := a.Content(); c.Key != "" || len(c.Frames) != 1 || c.Frames[0].Image != cover {
+		t.Errorf("after the flip: %d frames with key %q, want the cover alone", len(c.Frames), c.Key)
 	}
 }
 

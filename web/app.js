@@ -1493,6 +1493,7 @@ class CalendarTab extends LitElement {
     .switch[aria-checked=true]::after { transform: translateX(16px); background: var(--on-accent); }
     .switch:disabled { opacity: .5; cursor: default; }
     .account { display: flex; align-items: center; gap: 8px; justify-content: space-between; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .list { max-height: min(70vh, 640px); overflow-y: auto; margin-right: -10px; padding-right: 10px; scrollbar-width: thin; }
     .day { margin: 18px 0 6px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: capitalize; }
     .day:first-of-type { margin-top: 0; }
     .event { display: grid; grid-template-columns: 52px 4px minmax(0, 1fr); gap: 12px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); }
@@ -1583,13 +1584,13 @@ class CalendarTab extends LitElement {
     }
     return html`<section class="card" aria-labelledby="ev-h">
       <div class="head"><h2 id="ev-h">${t("Coming up")}</h2></div>
-      ${days.length ? days.map((d) => html`<h3 class="day">${d.name}</h3>${d.events.map((e) => html`<div class="event">
+      ${days.length ? html`<div class="list">${days.map((d) => html`<h3 class="day">${d.name}</h3>${d.events.map((e) => html`<div class="event">
         <span class="time">${hhmm(new Date(e.start))}</span>
         <span class="bar" style=${`background:${e.color || "var(--muted)"}`}></span>
         <div><b>${e.title || t("(no title)")}</b><div class="cal-name">${e.calendar}</div>
           <div class="chips">${(e.alarms ?? []).slice().reverse().map((m) => html`<span class="chip">${bell}${lead(m)}</span>`)}
             <span class="chip">${bell}${t("when it starts")}</span></div></div>
-      </div>`)}`)
+      </div>`)}`)}</div>`
       : html`<p class="muted empty">${t("Nothing in the next 7 days.")}</p>`}
       <p class="hint">${t("Each event warns at its reminders in Google Calendar, and again when it starts, with a chime except from 23:00 to 08:00. All-day, cancelled and declined events are left out.")}</p>
       ${i.error ? html`<p class="err">${i.error}</p>` : nothing}

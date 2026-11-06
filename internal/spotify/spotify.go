@@ -91,8 +91,11 @@ type Account struct {
 	now     Playing
 	lastErr string
 	devices map[string]bool
-	listed  time.Time
-	wake    chan struct{}
+	// previous and flipAt are the cover before the last change and when it changed, for the flip.
+	previous image.Image
+	flipAt   time.Time
+	listed   time.Time
+	wake     chan struct{}
 }
 
 // Open reads the saved link from path; a missing file is an account not set up yet.
@@ -311,6 +314,7 @@ func (a *Account) poll(ctx context.Context) time.Duration {
 			a.log.Warn("spotify cover", "err", err)
 		} else {
 			next.Cover, next.coverAt = cover, smallest
+			a.previous, a.flipAt = a.now.Cover, time.Now()
 		}
 	}
 	a.seen(next.Device)
@@ -427,13 +431,21 @@ func shrink(src image.Image, size int) *image.NRGBA {
 	return dst
 }
 
-// Content is the cover of the current track and its device; playing is false while paused.
+// Content is the cover of the current track and its device; playing is false while paused. For a
+// moment after the cover changes it is the flip from the old one, then the cover alone.
 func (a *Account) Content() (display.Content, string, bool) {
 	p, playing := a.Now()
 	if p.Cover == nil {
 		return display.Content{}, p.Device, false
 	}
-	return display.Content{Kind: display.Picture, Name: "♪ " + p.Track, Frames: []display.Frame{{Image: p.Cover}}}, p.Device, playing
+	c := display.Content{Kind: display.Picture, Name: "♪ " + p.Track, Frames: []display.Frame{{Image: p.Cover}}}
+	a.mu.Lock()
+	previous, flipping := a.previous, time.Since(a.flipAt) < flipFor
+	a.mu.Unlock()
+	if flipping {
+		c.Key, c.Frames = "flip", flip(previous, p.Cover)
+	}
+	return c, p.Device, playing
 }
 
 type rateLimited struct{ wait time.Duration }
