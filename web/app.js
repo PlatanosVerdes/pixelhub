@@ -96,10 +96,13 @@ const icons = {
   up: icon(svg`<path d="m6 15 6-6 6 6"/>`),
   down: icon(svg`<path d="m6 9 6 6 6-6"/>`),
   plus: icon(svg`<path d="M12 5v14M5 12h14"/>`),
+  check: icon(svg`<path d="m5 12.5 4.5 4.5L19 7.5"/>`),
   close: icon(svg`<path d="M6 6l12 12M18 6 6 18"/>`),
   upload: icon(svg`<path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>`),
   locate: icon(svg`<circle cx="12" cy="12" r="3.5"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>`),
   bookmark: icon(svg`<path d="M6 3.5h12v17l-6-4-6 4z"/>`),
+  heart: icon(svg`<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/>`),
+  heartFull: svg`<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/></svg>`,
   back: icon(svg`<path d="m15 18-6-6 6-6"/>`),
   link: icon(svg`<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>`),
   unlink: icon(svg`<path d="m18.84 12.25 1.72-1.71a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="m5.17 11.75-1.71 1.71a5 5 0 0 0 7.07 7.07l1.71-1.71"/><path d="M8 2v3M2 8h3M16 22v-3M22 16h-3"/>`),
@@ -766,11 +769,15 @@ const categoryName = (c) => ({ recommended: t("Recommended"), top: t("Top"), new
   creative: t("Creative"), daily: t("Everyday") })[c] ?? c;
 const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
 
+// The list that is always there; the page shows it under its name in the reader's language.
+const FAVORITES = "favorites";
+const listName = (l) => (l.name === FAVORITES ? t("Favorites") : l.name);
+
 class GalleryTab extends LitElement {
   static properties = { state: { attribute: false }, width: { state: true }, category: { state: true }, sort: { state: true }, items: { state: true }, page: { state: true },
     more: { state: true }, pages: { state: true }, loading: { state: true }, picked: { state: true }, busy: { state: true }, problem: { state: true },
     query: { state: true }, searched: { state: true }, indexing: { state: true }, lists: { state: true }, open: { state: true },
-    saving: { state: true }, newList: { state: true }, renaming: { state: true } };
+    saving: { state: true }, newList: { state: true }, creating: { state: true }, renaming: { state: true } };
   static styles = [base, css`
     .bar { display: grid; gap: 10px; margin-bottom: 14px; }
     .cats { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -803,9 +810,27 @@ class GalleryTab extends LitElement {
     .sheet select { max-width: 150px; }
     .meta { display: flex; gap: 12px; flex-wrap: wrap; }
     .save[aria-expanded=true] { border-color: var(--accent); color: var(--accent); }
-    .saveto { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 12px; display: grid; gap: 8px; }
-    .saveto label { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
-    .saveto input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
+    .fav { width: 36px; height: 36px; padding: 0; justify-content: center; }
+    .fav[aria-pressed=true] { color: #ff5d7a; border-color: color-mix(in srgb, #ff5d7a 50%, var(--line)); }
+    .sheet .btn.fav svg { width: 20px; height: 20px; flex: none; }
+    .btn.save svg { width: 16px; height: 16px; }
+    .kept.fav-mark { color: #ff5d7a; }
+    .menu-wrap { position: relative; }
+    .menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; width: 240px; max-height: 300px; overflow-y: auto; padding: 6px; display: grid; gap: 2px;
+      background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 16px 40px -10px rgba(0, 0, 0, .7); }
+    .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; padding: 0 10px; border: 0; border-radius: 10px; background: none;
+      color: var(--ink); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+    .menu-item:hover, .menu-item:focus-visible { background: var(--chip); outline: none; }
+    .menu-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .menu-item .n { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .menu-item svg { width: 16px; height: 16px; flex: none; }
+    .menu-item .tick { color: var(--accent); }
+    .menu-item.new { color: var(--muted); }
+    .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
+    .menu form { display: flex; padding: 2px; }
+    .menu input { flex: 1; min-width: 0; height: 34px; border-radius: 10px; padding: 0 10px; font-size: 14px; }
+    .card-list .fav-name { display: inline-flex; align-items: center; gap: 6px; }
+    .card-list .fav-name svg { width: 14px; height: 14px; color: #ff5d7a; }
     .make { display: flex; gap: 8px; }
     .make input { flex: 1; min-width: 0; }
     .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
@@ -819,7 +844,12 @@ class GalleryTab extends LitElement {
     .empty { padding: 30px 0; text-align: center; }
   `];
   constructor() { super(); this.category = "recommended"; this.sort = "likes"; this.items = []; this.page = 1; this.lists = []; this.buffer = []; }
-  connectedCallback() { super.connectedCallback(); this.loadLists(); if (!this.items.length) this.load(true); }
+  connectedCallback() {
+    super.connectedCallback(); this.loadLists(); if (!this.items.length) this.load(true);
+    this.closeMenu = () => { if (this.saving) this.saving = false; };
+    document.addEventListener("click", this.closeMenu);
+  }
+  disconnectedCallback() { super.disconnectedCallback(); document.removeEventListener("click", this.closeMenu); }
 
   async loadLists() { try { this.lists = (await api("GET", "lists")).lists; } catch { /* the status poll shows outages */ } }
   listsWith(file) { return this.lists.filter((l) => l.items.some((i) => i.file === file)).map((l) => l.name); }
@@ -977,32 +1007,52 @@ class GalleryTab extends LitElement {
 
   sheet(p) {
     const inLists = this.listsWith(p.file);
+    const fav = inLists.includes(FAVORITES), others = this.lists.filter((l) => l.name !== FAVORITES);
+    const inOthers = inLists.filter((n) => n !== FAVORITES).length;
     return html`<div class="sheet" role="dialog" aria-label=${p.name}>
       <img class="pix" src=${gifURL(p.file)} alt="">
       <div><h3>${p.name}</h3><span class="small muted meta"><span>${p.author}</span><span>${p.likes} ♥</span>
           ${p.category && CATEGORIES.includes(p.category) ? html`<button class="cat" style="height:24px;padding:0 10px" @click=${() => this.pick("category", p.category)}>${categoryName(p.category)}</button>` : nothing}</span>
         ${p.about ? html`<p class="about">${p.about}</p>` : nothing}
         <div class="acts">
-          <button class="btn small save" aria-expanded=${String(!!this.saving)} @click=${() => { this.saving = !this.saving; }}>
-            ${icons.bookmark}${inLists.length ? t("Saved in {n}", { n: inLists.length }) : t("Save")}</button>
+          <button class="btn small fav" aria-pressed=${String(fav)} ?disabled=${this.busy} title=${fav ? t("Remove from favorites") : t("Add to favorites")}
+            aria-label=${fav ? t("Remove from favorites") : t("Add to favorites")} @click=${() => this.keep(FAVORITES, p, !fav)}>${fav ? icons.heartFull : icons.heart}</button>
+          <div class="menu-wrap">
+            <button class="btn small save" aria-haspopup="menu" aria-expanded=${String(!!this.saving)} @click=${(e) => { e.stopPropagation(); this.saving = !this.saving; this.creating = false; }}>
+              ${icons.bookmark}${inOthers ? t("In {n} lists", { n: inOthers }) : t("Add to list")}</button>
+            ${this.saving ? this.listMenu(p, others, inLists) : nothing}
+          </div>
           <button class="btn primary small" ?disabled=${this.busy} @click=${() => this.show()}>${t("Show for 30 s")}</button>
           <button class="icon" aria-label=${t("Close")} @click=${() => { this.picked = null; this.saving = false; }}>${icons.close}</button>
         </div></div>
-      ${this.saving ? html`<div class="saveto">
-        ${this.lists.map((l) => html`<label><input type="checkbox" .checked=${inLists.includes(l.name)} ?disabled=${this.busy}
-          @change=${(e) => this.keep(l.name, p, e.target.checked)}>${l.name}<span class="small muted">${l.items.length}</span></label>`)}
-        <form class="make" @submit=${(e) => { e.preventDefault(); this.makeList(p); }}>
-          <input placeholder=${t("New list")} aria-label=${t("New list")} maxlength="40" .value=${this.newList ?? ""} @input=${(e) => { this.newList = e.target.value; }}>
-          <button class="btn small" type="submit" ?disabled=${this.busy || !(this.newList ?? "").trim()}>${t("Create and save")}</button>
-        </form></div>` : nothing}
+    </div>`;
+  }
+
+  // A small menu under Add to list, as apps have: a tap puts the drawing in a list or takes it out.
+  listMenu(p, others, inLists) {
+    return html`<div class="menu" role="menu" @click=${(e) => e.stopPropagation()} @keydown=${(e) => { if (e.key === "Escape") { this.saving = false; } }}>
+      ${others.map((l) => {
+        const on = inLists.includes(l.name);
+        return html`<button class="menu-item" role="menuitemcheckbox" aria-checked=${String(on)} ?disabled=${this.busy} @click=${() => this.keep(l.name, p, !on)}>
+          <span class="name">${l.name}</span><span class="n">${l.items.length}</span>${on ? html`<span class="tick">${icons.check}</span>` : html`<span style="width:16px"></span>`}</button>`;
+      })}
+      ${others.length ? html`<hr>` : nothing}
+      ${this.creating
+        ? html`<form @submit=${(e) => { e.preventDefault(); this.makeList(p); this.creating = false; }}>
+            <input placeholder=${t("List name")} aria-label=${t("New list")} maxlength="40" .value=${this.newList ?? ""} @input=${(e) => { this.newList = e.target.value; }}
+              @keydown=${(e) => { if (e.key === "Escape") { e.stopPropagation(); this.creating = false; } }}></form>`
+        : html`<button class="menu-item new" @click=${async () => { this.creating = true; await this.updateComplete; this.renderRoot.querySelector(".menu input")?.focus(); }}>
+            ${icons.plus}<span class="name">${t("New list")}</span></button>`}
     </div>`;
   }
 
   grid(items) {
     const p = this.picked;
-    const kept = new Set(this.lists.flatMap((l) => l.items.map((i) => i.file)));
+    const favs = new Set(this.lists.find((l) => l.name === FAVORITES)?.items.map((i) => i.file) ?? []);
+    const kept = new Set(this.lists.filter((l) => l.name !== FAVORITES).flatMap((l) => l.items.map((i) => i.file)));
     return html`<div class="grid" style="--cols:${this.cols}">${repeat(items, (i) => i.file, (i) => html`<button class="item" aria-pressed=${String(p?.file === i.file)} title=${i.name} aria-label=${i.name}
-      @click=${() => { this.picked = i; this.saving = false; }}><img class="pix" src=${gifURL(i.file)} alt="" loading="lazy" @error=${(e) => { e.target.parentElement.hidden = true; }}>${kept.has(i.file) ? html`<span class="kept" aria-label=${t("Saved")}>${icons.bookmark}</span>` : nothing}</button>`)}</div>`;
+      @click=${() => { this.picked = i; this.saving = false; }}><img class="pix" src=${gifURL(i.file)} alt="" loading="lazy" @error=${(e) => { e.target.parentElement.hidden = true; }}>${favs.has(i.file) ? html`<span class="kept fav-mark" aria-label=${t("Favorite")}>${icons.heartFull}</span>`
+        : kept.has(i.file) ? html`<span class="kept" aria-label=${t("In a list")}>${icons.bookmark}</span>` : nothing}</button>`)}</div>`;
   }
 
   myLists() {
@@ -1014,15 +1064,15 @@ class GalleryTab extends LitElement {
             ? html`<form class="make" style="flex:1" @submit=${(e) => { e.preventDefault(); this.renameList(); }}>
                 <input aria-label=${t("List name")} maxlength="40" .value=${this.renaming} @input=${(e) => { this.renaming = e.target.value; }}>
                 <button class="btn small" type="submit">${t("Rename")}</button><button class="btn small" type="button" @click=${() => { this.renaming = null; }}>${t("Cancel")}</button></form>`
-            : html`<h2>${l.name}</h2><span class="small muted">${t("{n} drawings", { n: l.items.length })}</span>
+            : html`<h2>${listName(l)}</h2><span class="small muted">${t("{n} drawings", { n: l.items.length })}</span>
                 ${this.onEvo(l) ? html`<span class="tag on">${t("On the Evo")}</span>`
                   : html`<button class="btn small primary" ?disabled=${this.busy || !l.items.length} @click=${() => this.play(l)}>${t("Show on the Evo")}</button>`}
                 <label class="btn small">${icons.plus ?? ""}${t("Upload a drawing")}<input type="file" accept="image/gif,image/png" hidden @change=${(e) => this.upload(l, e.target)}></label>
-                <button class="btn small" @click=${() => { this.renaming = l.name; }}>${t("Rename")}</button>
-                <button class="icon trash" aria-label=${t("Delete list")} @click=${() => this.deleteList()}>${icons.trash}</button>`}
+                ${l.name === FAVORITES ? nothing : html`<button class="btn small" @click=${() => { this.renaming = l.name; }}>${t("Rename")}</button>
+                <button class="icon trash" aria-label=${t("Delete list")} @click=${() => this.deleteList()}>${icons.trash}</button>`}`}
         </div>
         ${this.picked ? this.sheet(this.picked) : nothing}
-        ${l.items.length ? this.grid(l.items) : html`<p class="empty muted">${t("This list is empty. Open a drawing in the gallery and tap Save.")}</p>`}`;
+        ${l.items.length ? this.grid(l.items) : html`<p class="empty muted">${l.name === FAVORITES ? t("No favorites yet. Open a drawing in the gallery and tap the heart.") : t("This list is empty. Open a drawing in the gallery and tap Add to list.")}</p>`}`;
     }
     return html`
       <form class="make" style="margin-bottom:14px" @submit=${(e) => { e.preventDefault(); this.makeList(); }}>
@@ -1031,8 +1081,8 @@ class GalleryTab extends LitElement {
       </form>
       ${this.lists.length ? html`<div class="cards">${this.lists.map((x) => html`<button class="card-list" @click=${() => { this.open = x.name; this.picked = null; }}>
           <div class="thumbs">${[0, 1, 2, 3].map((k) => x.items[k] ? html`<img class="pix" src=${gifURL(x.items[k].file)} alt="" loading="lazy">` : html`<span></span>`)}</div>
-          <b>${x.name}</b><span class="small muted">${t("{n} drawings", { n: x.items.length })}</span></button>`)}</div>`
-        : html`<p class="empty muted">${t("No lists yet. Create one here, or open a drawing and tap Save.")}</p>`}`;
+          <b class=${x.name === FAVORITES ? "fav-name" : ""}>${x.name === FAVORITES ? icons.heartFull : nothing}${listName(x)}</b><span class="small muted">${t("{n} drawings", { n: x.items.length })}</span></button>`)}</div>`
+        : nothing}`;
   }
 
   render() {

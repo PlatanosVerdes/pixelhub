@@ -29,6 +29,13 @@ var (
 
 const maxName = 40
 
+// Favorites is the list that is always there, first, and cannot be renamed or deleted; the page shows
+// it under its own name in the reader's language.
+const Favorites = "favorites"
+
+// favoriteNames are lists made by hand before Favorites existed, which become it.
+var favoriteNames = []string{"favoritos", "favoritas", "favourites", "favs"}
+
 type Picture struct {
 	File   string    `json:"file"`
 	Name   string    `json:"name"`
@@ -54,14 +61,44 @@ func Open(dir string) (*Store, error) {
 	data, err := os.ReadFile(s.index())
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		return s, nil
+		return s, s.ensureFavorites()
 	case err != nil:
 		return nil, fmt.Errorf("read lists: %w", err)
 	}
 	if err := json.Unmarshal(data, &s.lists); err != nil {
 		return nil, fmt.Errorf("read lists: %w", err)
 	}
+	if err := s.ensureFavorites(); err != nil {
+		return nil, err
+	}
 	return s, nil
+}
+
+// ensureFavorites puts Favorites first, taking over a list of favourites made by hand; on a fresh
+// install it only lives in memory until something is saved.
+func (s *Store) ensureFavorites() error {
+	i := s.find(Favorites)
+	for _, name := range favoriteNames {
+		if i < 0 {
+			i = s.find(name)
+		}
+	}
+	next := clone(s.lists)
+	if i < 0 {
+		next = append([]List{{Name: Favorites, Items: []Picture{}}}, next...)
+		if len(s.lists) == 0 {
+			s.lists = next
+			return nil
+		}
+	} else {
+		fav := next[i]
+		fav.Name = Favorites
+		next = append([]List{fav}, slices.Delete(next, i, i+1)...)
+	}
+	if slices.EqualFunc(next, s.lists, func(a, b List) bool { return a.Name == b.Name && len(a.Items) == len(b.Items) }) {
+		return nil
+	}
+	return s.save(next)
 }
 
 // Lists is every list in the order made, newest picture first in each; never nil.
@@ -95,6 +132,9 @@ func (s *Store) Rename(from, to string) error {
 	if i < 0 {
 		return fmt.Errorf("%w: no list %q", ErrNotFound, from)
 	}
+	if s.lists[i].Name == Favorites {
+		return fmt.Errorf("%w: favorites keeps its name", ErrInvalid)
+	}
 	if j := s.find(to); j >= 0 && j != i {
 		return fmt.Errorf("%w: %q", ErrExists, to)
 	}
@@ -109,6 +149,9 @@ func (s *Store) Delete(name string) error {
 	i := s.find(name)
 	if i < 0 {
 		return fmt.Errorf("%w: no list %q", ErrNotFound, name)
+	}
+	if s.lists[i].Name == Favorites {
+		return fmt.Errorf("%w: favorites is always there", ErrInvalid)
 	}
 	gone := s.lists[i].Items
 	if err := s.save(slices.Delete(clone(s.lists), i, i+1)); err != nil {
