@@ -62,6 +62,7 @@ const (
 
 type Gallery interface {
 	List(ctx context.Context, category int, sort gallery.Sort, page, perPage int) ([]gallery.Item, error)
+	Search(ctx context.Context, words string, page, perPage int) ([]gallery.Item, error)
 	Download(ctx context.Context, fileID string) ([]byte, error)
 }
 
@@ -108,14 +109,26 @@ type cachedPage struct {
 }
 
 func (s *Server) listPage(ctx context.Context, category int, sort gallery.Sort, page int) ([]gallery.Item, error) {
-	key := fmt.Sprintf("%d/%d/%d", category, sort, page)
+	return s.cachedPage(fmt.Sprintf("%d/%d/%d", category, sort, page), func() ([]gallery.Item, error) {
+		return s.Gallery.List(ctx, category, sort, page, upstreamPage)
+	})
+}
+
+func (s *Server) searchPage(ctx context.Context, words string, page int) ([]gallery.Item, error) {
+	return s.cachedPage(fmt.Sprintf("search/%d/%s", page, words), func() ([]gallery.Item, error) {
+		return s.Gallery.Search(ctx, words, page, upstreamPage)
+	})
+}
+
+// cachedPage answers a gallery page from memory while it is fresh, and puts what it fetches in the index.
+func (s *Server) cachedPage(key string, fetch func() ([]gallery.Item, error)) ([]gallery.Item, error) {
 	s.lists.mu.Lock()
 	hit, ok := s.lists.pages[key]
 	s.lists.mu.Unlock()
 	if ok && time.Since(hit.at) < listFresh {
 		return hit.items, nil
 	}
-	items, err := s.Gallery.List(ctx, category, sort, page, upstreamPage)
+	items, err := fetch()
 	if err != nil {
 		return nil, err
 	}
@@ -259,6 +272,12 @@ func (s *Server) gallerySearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if items, more, err := s.searchDivoom(r.Context(), strings.TrimSpace(r.URL.Query().Get("q")), page); err == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"items": itemsOf(items), "page": page, "more": more, "source": "divoom"})
+		return
+	} else {
+		slog.Warn("gallery search falls back to the index", "err", err)
+	}
 	s.indexGallery()
 	total := len(gallery.Categories) * searchPages
 	s.index.mu.Lock()
@@ -274,7 +293,32 @@ func (s *Server) gallerySearch(w http.ResponseWriter, r *http.Request) {
 	pages := max(1, (len(found)+galleryPage-1)/galleryPage)
 	from := min(len(found), (page-1)*galleryPage)
 	found = found[from:min(len(found), from+galleryPage)]
-	writeJSON(w, http.StatusOK, map[string]any{"items": itemsOf(found), "page": page, "pages": pages, "more": page < pages, "indexed": done, "of": total})
+	writeJSON(w, http.StatusOK, map[string]any{"items": itemsOf(found), "page": page, "pages": pages, "more": page < pages, "indexed": done, "of": total, "source": "index"})
+}
+
+// searchDivoom asks the gallery's own search for a page, two of its pages long; more says whether
+// it had a full page left to give.
+func (s *Server) searchDivoom(ctx context.Context, words string, page int) ([]gallery.Item, bool, error) {
+	var items []gallery.Item
+	more := false
+	for up := 2*page - 1; up <= 2*page; up++ {
+		got, err := s.searchPage(ctx, words, up)
+		if err != nil {
+			return nil, false, err
+		}
+		items = append(items, got...)
+		more = len(got) >= upstreamPage
+		if !more {
+			break
+		}
+	}
+	seen := map[string]bool{}
+	items = slices.DeleteFunc(items, func(it gallery.Item) bool {
+		dup := seen[it.FileID]
+		seen[it.FileID] = true
+		return dup
+	})
+	return items, more, nil
 }
 
 // matches wants every word to start one of the item's words, so "cat" finds "cats" but not "vacation".

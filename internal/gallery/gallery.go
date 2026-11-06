@@ -86,11 +86,25 @@ func NewClient() *Client {
 // List returns one page of 16x16 pictures and animations of a category, page counted from 1.
 func (c *Client) List(ctx context.Context, category int, sort Sort, page, perPage int) ([]Item, error) {
 	start := (page-1)*perPage + 1
-	body, _ := json.Marshal(map[string]int{
+	return c.fileList(ctx, "GetCategoryFileListV2", "gallery list", map[string]any{
 		"StartNum": start, "EndNum": start + perPage - 1, "Classify": category,
 		"FileSize": size16, "FileType": typeAll, "FileSort": int(sort), "Version": 12, "RefreshIndex": 0,
 	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.API+"/GetCategoryFileListV2", bytes.NewReader(body))
+}
+
+// Search returns one page of 16x16 pictures whose names or tags hold words, as the app's search
+// finds them; it needs no account.
+func (c *Client) Search(ctx context.Context, words string, page, perPage int) ([]Item, error) {
+	start := (page-1)*perPage + 1
+	return c.fileList(ctx, "SearchGalleryV2", "gallery search", map[string]any{
+		"StartNum": start, "EndNum": start + perPage - 1, "Keywords": words,
+		"FileSize": size16, "FileType": typeAll, "Version": 12,
+	})
+}
+
+func (c *Client) fileList(ctx context.Context, command, what string, request map[string]any) ([]Item, error) {
+	body, _ := json.Marshal(request)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.API+"/"+command, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +118,7 @@ func (c *Client) List(ctx context.Context, category int, sort Sort, page, perPag
 		return nil, ErrRateLimited
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("gallery list: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("%s: HTTP %d", what, resp.StatusCode)
 	}
 	var out struct {
 		ReturnCode    int    `json:"ReturnCode"`
@@ -112,10 +126,10 @@ func (c *Client) List(ctx context.Context, category int, sort Sort, page, perPag
 		FileList      []Item `json:"FileList"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxFile)).Decode(&out); err != nil {
-		return nil, fmt.Errorf("gallery list: %w", err)
+		return nil, fmt.Errorf("%s: %w", what, err)
 	}
 	if out.ReturnCode != 0 {
-		return nil, fmt.Errorf("gallery list: code %d %s", out.ReturnCode, out.ReturnMessage)
+		return nil, fmt.Errorf("%s: code %d %s", what, out.ReturnCode, out.ReturnMessage)
 	}
 	return out.FileList, nil
 }

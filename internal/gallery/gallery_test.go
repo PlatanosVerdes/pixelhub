@@ -150,6 +150,32 @@ func TestListAndDownload(t *testing.T) {
 	}
 }
 
+func TestSearch(t *testing.T) {
+	t.Parallel()
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/SearchGalleryV2" {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &got)
+		w.Write([]byte(`{"ReturnCode":0,"FileListNum":1000,"FileList":[{"FileName":"Ghost Girl","LikeCnt":2,"FileId":"group1/M00/g"}]}`))
+	}))
+	defer srv.Close()
+	c := &Client{HTTP: srv.Client(), API: srv.URL, Files: srv.URL}
+	items, err := c.Search(context.Background(), "ghost girl", 3, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Name != "Ghost Girl" {
+		t.Errorf("items %+v", items)
+	}
+	if got["Keywords"] != "ghost girl" || got["StartNum"] != 61.0 || got["EndNum"] != 90.0 || got["FileSize"] != 1.0 {
+		t.Errorf("request %v", got)
+	}
+}
+
 func TestListReportsAPIErrors(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
