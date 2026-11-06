@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"image/png"
+	"image"
+	"image/color/palette"
+	"image/gif"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/PlatanosVerdes/pixelhub/internal/display"
 )
 
 var now = time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
@@ -241,17 +245,86 @@ func TestRejectsAClientThatIsNotGoogles(t *testing.T) {
 	}
 }
 
+func TestGlyphsFor(t *testing.T) {
+	t.Parallel()
+	name := func(g [][7]string) string {
+		out := ""
+		for _, x := range g {
+			switch x {
+			case bang:
+				out += "!"
+			case hours:
+				out += "h"
+			case days:
+				out += "d"
+			default:
+				for i, d := range digits {
+					if d == x {
+						out += fmt.Sprint(i)
+					}
+				}
+			}
+		}
+		return out
+	}
+	for minutes, want := range map[int]string{0: "!", 7: "7", 10: "10", 99: "99", 100: "1h", 599: "9h", 600: "1d", 19 * 60: "1d", 1440: "1d", 1441: "2d", 9 * 1440: "9d"} {
+		if got := name(glyphsFor(minutes)); got != want {
+			t.Errorf("%d minutes: %s, want %s", minutes, got, want)
+		}
+	}
+}
+
 func TestPicture(t *testing.T) {
 	t.Parallel()
-	for _, left := range []time.Duration{0, 30 * time.Second, 9 * time.Minute, 10 * time.Minute, 3 * time.Hour, 2 * 24 * time.Hour} {
-		c := Picture(left, 16)
-		if len(c.Frames) != 2 {
-			t.Fatalf("%s: %d frames", left, len(c.Frames))
+	for _, tt := range []struct {
+		left  time.Duration
+		title string
+	}{
+		{0, "Fisio Jorge"},
+		{9 * time.Minute, ""},
+		{19 * time.Hour, "Ara Malikian ¿en el Liceu?"},
+		{2 * 24 * time.Hour, strings.Repeat("Una reunión muy larga ", 6)},
+	} {
+		c := Picture(tt.left, tt.title, 16)
+		if n := len(c.Frames); n > maxFrames || n < slideIn+blinks {
+			t.Errorf("%s %q: %d frames, want %d-%d", tt.left, tt.title, n, slideIn+blinks, maxFrames)
 		}
-		if os.Getenv("CALENDAR_PNG") != "" {
-			f, _ := os.Create(filepath.Join(os.Getenv("CALENDAR_PNG"), c.Key+".png"))
-			png.Encode(f, c.Frames[0].Image)
-			f.Close()
+		if tt.title == "" && len(c.Frames) != slideIn+blinks {
+			t.Errorf("no title: %d frames, want only the page", len(c.Frames))
 		}
+		if dir := os.Getenv("CALENDAR_GIF"); dir != "" {
+			writeGIF(t, filepath.Join(dir, fmt.Sprintf("%d.gif", int(tt.left.Minutes()))), c)
+		}
+	}
+}
+
+func TestTitleSkipsAccentsAndUnknownLetters(t *testing.T) {
+	t.Parallel()
+	if got, want := len(titleColumns("¿Año ñ€?")), len(titleColumns("ANO N?")); got != want {
+		t.Errorf("%d columns, want %d", got, want)
+	}
+}
+
+func writeGIF(t *testing.T, path string, c display.Content) {
+	t.Helper()
+	out := &gif.GIF{}
+	for _, f := range c.Frames {
+		b := f.Image.Bounds()
+		big := image.NewPaletted(image.Rect(0, 0, b.Dx()*10, b.Dy()*10), palette.Plan9)
+		for y := range big.Rect.Dy() {
+			for x := range big.Rect.Dx() {
+				big.Set(x, y, f.Image.At(x/10, y/10))
+			}
+		}
+		out.Image = append(out.Image, big)
+		out.Delay = append(out.Delay, int(f.Delay/(10*time.Millisecond)))
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := gif.EncodeAll(file, out); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -111,8 +111,8 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 	if err != nil {
 		return err
 	}
-	cal.Warn = func(_ calendar.Event, left time.Duration) {
-		h.Notify(hub.Alert{Content: calendar.Picture(left, divoom.Size), Priority: calendarPriority, Duration: calendarAlert, Source: "calendar"})
+	cal.Warn = func(e calendar.Event, left time.Duration) {
+		h.Notify(hub.Alert{Content: calendar.Picture(left, e.Title, divoom.Size), Priority: calendarPriority, Duration: calendarAlert, Source: "calendar"})
 	}
 	go session.Run(ctx)
 	go h.Run(ctx)
