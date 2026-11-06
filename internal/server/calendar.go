@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/PlatanosVerdes/pixelhub/internal/calendar"
+	"github.com/PlatanosVerdes/pixelhub/internal/display"
 )
 
 const calendarShow = 15 * time.Second
@@ -88,14 +89,24 @@ func (s *Server) calendarRoutes(mux *http.ServeMux) {
 	})
 	// Shows the warning the next event will get, or a sample one, to see how it looks.
 	mux.HandleFunc("POST /api/google/show", func(w http.ResponseWriter, _ *http.Request) {
-		left, title := 10*time.Minute, "Example event"
-		if e, ok := s.Calendar.Next(); ok {
-			left, title = time.Until(e.Start), e.Title
-			if len(e.Alarms) > 0 {
-				left = min(left, time.Duration(e.Alarms[0])*time.Minute)
-			}
-		}
-		s.Hub.Show(calendar.Picture(left, title, s.Size), calendarShow)
+		s.Hub.Show(s.nextWarning(), calendarShow)
 		writeJSON(w, http.StatusAccepted, map[string]any{"showing": "calendar", "duration": calendarShow.String()})
 	})
+	// The page of that warning with its time left, as the display shows it before the title scrolls.
+	mux.HandleFunc("GET /api/google/preview.png", func(w http.ResponseWriter, _ *http.Request) {
+		c := s.nextWarning()
+		w.Header().Set("Cache-Control", "no-cache")
+		writePNG(w, c.Frames[min(len(c.Frames)-1, calendar.LabelFrame)].Image)
+	})
+}
+
+func (s *Server) nextWarning() display.Content {
+	left, title := 10*time.Minute, "Example event"
+	if e, ok := s.Calendar.Next(); ok {
+		left, title = time.Until(e.Start), e.Title
+		if len(e.Alarms) > 0 {
+			left = min(left, time.Duration(e.Alarms[0])*time.Minute)
+		}
+	}
+	return calendar.Picture(left, title, s.Size)
 }

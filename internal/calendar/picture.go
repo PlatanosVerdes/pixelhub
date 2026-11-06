@@ -82,6 +82,8 @@ const (
 	scrollStep = 120 * time.Millisecond
 	maxStep    = 2
 	textTop    = 7
+	// LabelFrame is the first frame with the page in place and the time left on it.
+	LabelFrame = slideIn
 )
 
 // Picture is a calendar page that slides in, blinks the time left (37, 3h, 2d, or ! once the event
