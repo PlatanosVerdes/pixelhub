@@ -55,7 +55,7 @@ func (s *Server) spotifyRoutes(mux *http.ServeMux) {
 		writePNG(w, c.Frames[0].Image)
 	})
 	mux.HandleFunc("GET /api/spotify/login", func(w http.ResponseWriter, r *http.Request) {
-		to, err := s.Spotify.LoginURL(callbackURL(r))
+		to, err := s.Spotify.LoginURL(callbackURL(r, "/api/spotify/callback"))
 		if err != nil {
 			code := http.StatusInternalServerError
 			if errors.Is(err, spotify.ErrNotConfigured) {
@@ -82,9 +82,9 @@ func (s *Server) spotifyRoutes(mux *http.ServeMux) {
 	})
 }
 
-// callbackURL is where Spotify sends the browser back: this same host, which the Spotify app must
+// callbackURL is where a sign-in sends the browser back: this same host, which the OAuth app must
 // list. Spotify refuses "localhost" but takes the loopback address.
-func callbackURL(r *http.Request) string {
+func callbackURL(r *http.Request, path string) string {
 	scheme := "http"
 	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 		scheme = "https"
@@ -95,5 +95,5 @@ func callbackURL(r *http.Request) string {
 	} else if host == "localhost" {
 		host = "127.0.0.1"
 	}
-	return scheme + "://" + host + "/api/spotify/callback"
+	return scheme + "://" + host + path
 }
