@@ -396,11 +396,12 @@ class LedMatrix extends LitElement {
 }
 customElements.define("ph-led", LedMatrix);
 
-// Pokable wraps something to click for fun: a bounce, a wobble after a few quick clicks, a full turn
-// after SPIN_AFTER. It sends "poke" with how many came in a row, and spun when it turned.
+// Pokable wraps something to click for fun: a bounce, a wobble after a few quick clicks, a full spin
+// after SPIN_AFTER. With turn, every click turns it round like a cover on the display instead.
+// It sends "poke" with how many came in a row, and spun when it spun.
 const SPIN_AFTER = 10;
 class Pokable extends LitElement {
-  static properties = { anim: { state: true }, label: {} };
+  static properties = { anim: { state: true }, label: {}, turn: { type: Boolean } };
   static styles = css`
     :host { display: block; }
     button { display: block; width: 100%; border: 0; background: none; padding: 0; cursor: pointer; color: inherit; -webkit-tap-highlight-color: transparent; }
@@ -408,9 +409,17 @@ class Pokable extends LitElement {
     .boing { animation: boing .35s ease-out; }
     .wobble { animation: wobble .5s ease-in-out; }
     .spin { animation: spin .9s cubic-bezier(.3, 1.4, .5, 1); }
+    .turn { animation: turn .64s; }
     @keyframes boing { 30% { transform: scale(.9, 1.08); } 60% { transform: scale(1.05, .95); } }
     @keyframes wobble { 20%, 60% { transform: rotate(-5deg); } 40%, 80% { transform: rotate(5deg); } }
     @keyframes spin { to { transform: rotate(360deg); } }
+    /* Two half turns, as the display draws them: faster towards the edge, the cover coming round unmirrored. */
+    @keyframes turn {
+      0%, 50% { transform: perspective(480px) rotateY(0); animation-timing-function: ease-in; }
+      25%, 75% { transform: perspective(480px) rotateY(90deg); animation-timing-function: steps(1, end); }
+      25.01%, 75.01% { transform: perspective(480px) rotateY(-90deg); animation-timing-function: ease-out; }
+      100% { transform: perspective(480px) rotateY(0); }
+    }
     @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
   `;
   poke() {
@@ -419,7 +428,7 @@ class Pokable extends LitElement {
     const count = this.pokes.length, spun = count >= SPIN_AFTER;
     if (spun) this.pokes = [];
     this.anim = "";
-    requestAnimationFrame(() => { this.anim = spun ? "spin" : count >= 4 ? "wobble" : "boing"; });
+    requestAnimationFrame(() => { this.anim = spun ? "spin" : this.turn ? "turn" : count >= 4 ? "wobble" : "boing"; });
     this.dispatchEvent(new CustomEvent("poke", { detail: { count, spun } }));
   }
   render() {
@@ -1273,7 +1282,7 @@ class MusicTab extends LitElement {
         <section class="card playing ${now ? "" : "idle"}" aria-labelledby="np-h">
           <div class="head" style="width:100%"><h2 id="np-h">${t("Now playing")}</h2></div>
           ${now ? html`
-            <ph-poke .label=${now.track}><ph-led .src=${`api/spotify/cover.png?t=${encodeURIComponent(now.track)}`} .label=${now.track}></ph-led></ph-poke>
+            <ph-poke turn .label=${now.track}><ph-led .src=${`api/spotify/cover.png?t=${encodeURIComponent(now.track)}`} .label=${now.track}></ph-led></ph-poke>
             <div><b>${now.track}</b><div class="who">${now.artists}</div><div class="small muted">${now.device}</div></div>
             <span class="state ${on ? "on" : ""}">${why}</span>`
           : html`<p class="muted">${this.info?.connected ? t("Nothing is playing.") : t("Connect Spotify below to see what plays.")}</p>`}
