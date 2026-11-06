@@ -1097,7 +1097,7 @@ class GalleryTab extends LitElement {
           <button class="cat mine" aria-pressed=${String(mine)} @click=${() => this.pick("category", "lists")}>${t("My lists")}</button>
           ${CATEGORIES.map((c) => html`<button class="cat" aria-pressed=${String(!this.searched && c === this.category)} @click=${() => this.pick("category", c)}>${categoryName(c)}</button>`)}</div>
         ${this.searched
-          ? html`<p class="small muted">${t("Results for “{q}” among the most liked of every category.", { q: this.searched })}
+          ? html`<p class="small muted">${t("Results for “{q}” among the most liked and newest of every category, and what you have browsed.", { q: this.searched })}
               ${this.indexing ? html`<br>${t("Still gathering the gallery ({n} of {of} pages); search again in a minute for more.", { n: this.indexing.indexed, of: this.indexing.of })}` : nothing}</p>`
           : mine ? nothing
           : html`<div>${segmented([["likes", t("Most liked")], ["new", t("Newest")]], this.sort, (v) => this.pick("sort", v))}</div>`}

@@ -33,8 +33,23 @@ import (
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
 )
 
+// crawlPasses are the pages of every category read for search: the most liked, and the newest,
+// which have few likes yet and would otherwise never be found.
+var crawlPasses = []struct {
+	sort  gallery.Sort
+	pages int
+}{{gallery.MostLiked, 16}, {gallery.Newest, 8}}
+
+// searchPages is how many pages of each category the crawl reads.
+var searchPages = func() int {
+	n := 0
+	for _, p := range crawlPasses {
+		n += p.pages
+	}
+	return n
+}()
+
 const (
-	searchPages  = 16
 	crawlPace    = 3 * time.Second
 	reindexEvery = 6 * time.Hour
 	listFresh    = 15 * time.Minute
@@ -110,10 +125,24 @@ func (s *Server) listPage(ctx context.Context, category int, sort gallery.Sort, 
 	}
 	s.lists.pages[key] = cachedPage{items: items, at: time.Now()}
 	s.lists.mu.Unlock()
+	s.remember(items)
 	return items, nil
 }
 
-// galleryIndex is a slowly built list of the most liked pages of every category, to search in:
+// remember adds pictures to the search index, so whatever was browsed can be found again.
+func (s *Server) remember(items []gallery.Item) {
+	s.index.mu.Lock()
+	defer s.index.mu.Unlock()
+	if s.index.items == nil {
+		s.index.items = map[string]gallery.Item{}
+	}
+	for _, it := range items {
+		s.index.items[it.FileID] = it
+	}
+}
+
+// galleryIndex is a slowly built list of the most liked and newest pages of every category, and of
+// every page browsed, to search in:
 // the gallery itself has no search without signing in, and answers 429 to bursts.
 type galleryIndex struct {
 	once  sync.Once
@@ -133,7 +162,9 @@ func (s *Server) indexGallery() {
 }
 
 type savedIndex struct {
-	At    time.Time      `json:"at"`
+	At time.Time `json:"at"`
+	// Pages is the searchPages it was built with; another number reads the gallery again at once.
+	Pages int            `json:"pages"`
 	Items []gallery.Item `json:"items"`
 }
 
@@ -154,6 +185,9 @@ func (s *Server) loadIndex() time.Duration {
 		s.index.items[it.FileID] = it
 	}
 	s.index.done = len(gallery.Categories) * searchPages
+	if saved.Pages != searchPages {
+		return 0
+	}
 	return max(reindexEvery-time.Since(saved.At), 0)
 }
 
@@ -162,7 +196,7 @@ func (s *Server) saveIndex() {
 		return
 	}
 	s.index.mu.Lock()
-	saved := savedIndex{At: time.Now(), Items: slices.Collect(maps.Values(s.index.items))}
+	saved := savedIndex{At: time.Now(), Pages: searchPages, Items: slices.Collect(maps.Values(s.index.items))}
 	s.index.mu.Unlock()
 	data, err := json.Marshal(saved)
 	if err == nil {
@@ -181,32 +215,28 @@ func (s *Server) crawl(ctx context.Context) {
 		rebuilding := s.index.done >= len(categories)*searchPages
 		s.index.mu.Unlock()
 		for _, c := range categories {
-			for page := 1; page <= searchPages; page++ {
-				items, err := s.listPage(ctx, c, gallery.MostLiked, page)
-				for errors.Is(err, gallery.ErrRateLimited) {
-					time.Sleep(pace * 200)
-					items, err = s.listPage(ctx, c, gallery.MostLiked, page)
-				}
-				s.index.mu.Lock()
-				if s.index.items == nil {
-					s.index.items = map[string]gallery.Item{}
-				}
-				for _, it := range items {
-					s.index.items[it.FileID] = it
-				}
-				if !rebuilding {
-					s.index.done++
-				}
-				s.index.mu.Unlock()
-				time.Sleep(pace)
-				if err == nil && len(items) == 0 {
-					// The category ran out: count its remaining pages as read.
+			for _, pass := range crawlPasses {
+				for page := 1; page <= pass.pages; page++ {
+					items, err := s.listPage(ctx, c, pass.sort, page)
+					for errors.Is(err, gallery.ErrRateLimited) {
+						time.Sleep(pace * 200)
+						items, err = s.listPage(ctx, c, pass.sort, page)
+					}
 					s.index.mu.Lock()
 					if !rebuilding {
-						s.index.done += searchPages - page
+						s.index.done++
 					}
 					s.index.mu.Unlock()
-					break
+					time.Sleep(pace)
+					if err == nil && len(items) == 0 {
+						// The category ran out: count its remaining pages as read.
+						s.index.mu.Lock()
+						if !rebuilding {
+							s.index.done += pass.pages - page
+						}
+						s.index.mu.Unlock()
+						break
+					}
 				}
 			}
 		}
