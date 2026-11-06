@@ -336,3 +336,34 @@ func TestNothingSentBeforeTheFirstShow(t *testing.T) {
 	s.Show(picture(1))
 	f.expect("frame:74", "frame:44", "frame:74")
 }
+
+func TestRetryCutsTheWaitShort(t *testing.T) {
+	t.Parallel()
+	f := newFakeBridge(t, true)
+	f.silent = true
+	opt := DefaultOptions(f.ln.Addr().String(), evoMAC, 1)
+	opt.ProbeTimeout = 100 * time.Millisecond
+	opt.Keepalive = time.Hour
+	opt.MinBackoff, opt.MaxBackoff = time.Hour, time.Hour
+	s := New(opt, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s.Show(picture(1))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		s.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	f.expect("unanswered:74", "unanswered:74", "unanswered:74")
+	// Past the last probe the session has given up and waits out its hour.
+	time.Sleep(200 * time.Millisecond)
+	f.mu.Lock()
+	f.silent = false
+	f.mu.Unlock()
+	f.expectQuiet(300 * time.Millisecond)
+	s.Retry()
+	f.expect("frame:74", "frame:44", "frame:74")
+}

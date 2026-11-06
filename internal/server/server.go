@@ -35,6 +35,7 @@ type Hub interface {
 	ClearChannel()
 	Release() time.Time
 	Claim()
+	Retry()
 	Status() hub.Status
 	State() state.State
 	Update(change func(*state.State) error) (state.State, error)
@@ -92,6 +93,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/channel", s.clearChannel)
 	mux.HandleFunc("POST /api/release", s.release)
 	mux.HandleFunc("POST /api/claim", s.claim)
+	mux.HandleFunc("POST /api/reconnect", func(w http.ResponseWriter, _ *http.Request) {
+		s.Hub.Retry()
+		writeJSON(w, http.StatusAccepted, s.Hub.Status())
+	})
 	mux.HandleFunc("GET /api/sprites", s.sprites)
 	mux.HandleFunc("GET /api/sprites/{file}", s.spritePNG)
 	mux.HandleFunc("GET /api/preview.png", s.previewPNG)

@@ -462,6 +462,10 @@ func (h *Hub) Claim() {
 	h.log.Info("display claimed")
 }
 
+func (h *Hub) Retry() {
+	h.display.Retry()
+}
+
 func (h *Hub) Status() Status {
 	h.mu.Lock()
 	defer h.mu.Unlock()
