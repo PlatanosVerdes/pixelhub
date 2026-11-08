@@ -628,6 +628,20 @@ class Automatic extends LitElement {
     .opt small { font-size: 12px; opacity: .8; }
     .opt:hover { color: var(--ink); }
     .opt[aria-pressed=true] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+    .opt.pick { flex-direction: column; align-items: flex-start; gap: 0; padding: 8px 14px; text-align: left; }
+    .opt.pick b { font-weight: 600; font-size: 14px; }
+    .kinds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    @media (max-width: 520px) { .kinds { grid-template-columns: minmax(0, 1fr); } }
+    .kind { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 10px; align-items: center; text-align: left;
+      border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 12px 14px; cursor: pointer; color: var(--ink); }
+    .kind svg { grid-row: span 2; width: 22px; height: 22px; color: var(--muted); }
+    .kind b { font-size: 14px; font-weight: 600; }
+    .kind span { font-size: 12px; color: var(--muted); }
+    .kind:hover:not(:disabled) { border-color: var(--muted); }
+    .kind:disabled { opacity: .5; cursor: default; }
+    .kind[aria-pressed=true] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+    .kind[aria-pressed=true] svg { color: var(--accent); }
+    .sub { margin-top: 14px; display: grid; gap: 6px; }
     .rows { display: grid; gap: 12px; margin-top: 14px; }
     .row { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: center; gap: 10px; }
     .row > span { font-size: 14px; color: var(--muted); }
@@ -648,16 +662,20 @@ class Automatic extends LitElement {
     return ok;
   }
   setAmbient(a) { return this.save({ ambient: { ...this.channel.ambient, ...a } }); }
+  kind(id, source, glyph, title, sub, pick, disabled = false) {
+    return html`<button class="kind" aria-pressed=${String(source === id)} ?disabled=${this.busy || disabled} @click=${() => { if (source !== id) pick(); }}>
+      ${glyph}<b>${title}</b><span>${sub}</span></button>`;
+  }
   whatOf(s) {
     if (s.brightness === 0) return t("Display off");
-    if (s.list) return s.list;
+    if (s.list) return surpriseName(s.list);
     if (s.view?.mode) return RULE_KINDS().find(([k]) => k === s.view.mode)?.[1] ?? modeName(s.view.mode);
     return s.sprite || t("Only the clock");
   }
   async add(e) {
     e.preventDefault();
     const d = this.draft;
-    const scene = { name: `${d.what.replace(/^list:/, "")} ${d.from}`, days: d.days, from: d.from, to: d.to };
+    const scene = { name: `${surpriseName(d.what.replace(/^list:/, ""))} ${d.from}`, days: d.days, from: d.from, to: d.to };
     if (d.what.startsWith("list:")) scene.list = d.what.slice(5);
     else if (d.what === "off") Object.assign(scene, { view: { mode: "clock" }, brightness: 0 });
     else scene.view = d.what === "light" ? { mode: "light", color: "#ffb547" } : { mode: d.what };
@@ -670,7 +688,7 @@ class Automatic extends LitElement {
       <div class="line">${t("from")} <input type="time" aria-label=${t("from")} .value=${d.from} @change=${(e) => { this.draft = { ...d, from: e.target.value }; }}>
         ${t("to")} <input type="time" aria-label=${t("to")} .value=${d.to} @change=${(e) => { this.draft = { ...d, to: e.target.value }; }}>
         ${t("show")} <select aria-label=${t("What to show")} @change=${(e) => { this.draft = { ...d, what: e.target.value }; }}>
-          ${lists.map((l) => html`<option value=${`list:${l.name}`} ?selected=${d.what === `list:${l.name}`}>${l.name}</option>`)}
+          ${[...Object.values(SURPRISE).map((v) => [v, surpriseName(v)]), ...lists.map((l) => [l.name, l.name])].map(([v, label]) => html`<option value=${`list:${v}`} ?selected=${d.what === `list:${v}`}>${label}</option>`)}
           ${RULE_KINDS().map(([k, label]) => html`<option value=${k} ?selected=${d.what === k}>${label}</option>`)}</select></div>
       <div class="line"><button class="btn primary" type="submit" ?disabled=${this.busy || d.from === d.to}>${t("Save")}</button>
         <button class="btn" type="button" @click=${() => { this.draft = null; }}>${t("Cancel")}</button></div>
@@ -682,18 +700,28 @@ class Automatic extends LitElement {
     const a = ch.ambient, lists = this.lists ?? [];
     const playing = a.list && seconds(a.pictures) > 0 ? a.list.toLowerCase() : "";
     const list = lists.find((l) => l.name.toLowerCase() === playing);
+    const source = !playing ? "clock" : Object.values(SURPRISE).includes(playing) ? "surprise" : "list";
     return html`<section class="card" aria-labelledby="au-h">
       <div class="head"><h2 id="au-h">${t("In automatic")}</h2></div>
       <div class="block">
         <h3>${t("Usually it shows")}</h3>
-        <div class="opts" role="group">
-          <button class="opt" aria-pressed=${String(!playing)} ?disabled=${this.busy} @click=${() => this.setAmbient({ pictures: "0s", list: "", clock: seconds(a.clock) ? a.clock : "1m" })}>${t("Only the clock")}</button>
-          ${lists.map((l) => html`<button class="opt" aria-pressed=${String(l.name.toLowerCase() === playing)} ?disabled=${this.busy}
-            @click=${() => this.setAmbient({ list: l.name, pictures: seconds(a.pictures) ? a.pictures : "1m" })}>${l.name}<small>${l.items.length}</small></button>`)}
+        <div class="kinds" role="group">
+          ${this.kind("clock", source, autoIcons.clock, t("Only the clock"), t("The clock all the time"),
+            () => this.setAmbient({ pictures: "0s", list: "", clock: seconds(a.clock) ? a.clock : "1m" }))}
+          ${this.kind("list", source, autoIcons.list, t("A list of mine"), lists.length ? t("Your drawings, in turn") : t("Make one in the Gallery first"),
+            () => this.setAmbient({ list: lists[0].name, pictures: seconds(a.pictures) ? a.pictures : "1m" }), !lists.length)}
+          ${this.kind("surprise", source, galleryIcons.sparkle, t("Surprise me"), t("Gallery pictures, picked for you"),
+            () => this.setAmbient({ list: SURPRISE.moment, pictures: seconds(a.pictures) ? a.pictures : "1m" }))}
         </div>
-        ${!lists.length ? html`<p class="small muted hint">${t("Your lists from the Gallery show up here.")}</p>` : nothing}
+        ${source === "list" ? html`<div class="sub"><span class="label">${t("Which list")}</span><div class="opts" role="group">
+          ${lists.map((l) => html`<button class="opt" aria-pressed=${String(l.name.toLowerCase() === playing)} ?disabled=${this.busy}
+            @click=${() => this.setAmbient({ list: l.name })}>${listName(l)}<small>${l.items.length}</small></button>`)}</div></div>` : nothing}
+        ${source === "surprise" ? html`<div class="sub"><span class="label">${t("Which pictures")}</span><div class="opts" role="group">
+          ${[[SURPRISE.moment, t("By the day, the hour and the weather")], [SURPRISE.random, t("The best of the gallery, by chance")]].map(([v, sub]) =>
+            html`<button class="opt pick" aria-pressed=${String(v === playing)} ?disabled=${this.busy} @click=${() => this.setAmbient({ list: v })}>
+              <b>${surpriseName(v)}</b><small>${sub}</small></button>`)}</div></div>` : nothing}
         ${playing ? html`
-          ${list && !list.items.length ? html`<p class="small muted hint">${t("The list {name} is empty, so only the clock shows.", { name: list.name })}</p>` : nothing}
+          ${list && !list.items.length ? html`<p class="small muted hint">${t("The list {name} is empty, so only the clock shows.", { name: listName(list) })}</p>` : nothing}
           <div class="rows">
             <div class="row"><span>${t("Each drawing")}</span><ph-duration .options=${STEPS} .value=${a.pictures} max="86400" @change=${(e) => this.setAmbient({ pictures: e.detail })}></ph-duration></div>
             <div class="row"><span>${t("Clock between")}</span><ph-duration .options=${[["0s", t("No")], ...STEPS]} .value=${a.clock} max="86400" @change=${(e) => this.setAmbient({ clock: e.detail })}></ph-duration></div>
@@ -796,7 +824,7 @@ class DisplayTab extends LitElement {
       <div class="stack">
         <section><h2 class="muted">${t("What the display shows")}</h2>
           <ph-modes .current=${this.state?.mode} .clock=${this.state?.clock} .styles=${this.styles}></ph-modes></section>
-        <ph-automatic .state=${this.state} .lists=${this.lists}></ph-automatic>
+        ${this.state && !this.state.mode ? html`<ph-automatic .state=${this.state} .lists=${this.lists}></ph-automatic>` : nothing}
       </div>
     </div>`;
   }
@@ -812,15 +840,26 @@ const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
 
 // The list that is always there; the page shows it under its name in the reader's language.
 const FAVORITES = "favorites";
+const SURPRISE = { random: "@random", moment: "@moment" };
+const autoIcons = {
+  clock: icon(svg`<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>`),
+  list: icon(svg`<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><path d="M14 16.5h6M17 13.5v6"/>`),
+};
+const surpriseName = (list) => (list === SURPRISE.random ? t("Random") : list === SURPRISE.moment ? t("For the moment") : list);
+const galleryIcons = {
+  dice: icon(svg`<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1" fill="currentColor"/><circle cx="15" cy="15" r="1" fill="currentColor"/><circle cx="15" cy="9" r="1" fill="currentColor"/><circle cx="9" cy="15" r="1" fill="currentColor"/>`),
+  sparkle: icon(svg`<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/>`),
+};
 const listName = (l) => (l.name === FAVORITES ? t("Favorites") : l.name);
 
 class GalleryTab extends LitElement {
-  static properties = { state: { attribute: false }, width: { state: true }, category: { state: true }, sort: { state: true }, items: { state: true }, page: { state: true },
+  static properties = { surprising: { state: true }, state: { attribute: false }, width: { state: true }, category: { state: true }, sort: { state: true }, items: { state: true }, page: { state: true },
     more: { state: true }, pages: { state: true }, loading: { state: true }, picked: { state: true }, busy: { state: true }, problem: { state: true },
     query: { state: true }, searched: { state: true }, indexing: { state: true }, source: { state: true }, lists: { state: true }, open: { state: true },
     saving: { state: true }, newList: { state: true }, creating: { state: true }, renaming: { state: true } };
   static styles = [base, css`
     .bar { display: grid; gap: 10px; margin-bottom: 14px; }
+    .lucky { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .cats { display: flex; gap: 6px; flex-wrap: wrap; }
     @media (max-width: 599px) {
       .cats { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px; scroll-padding: 16px; }
@@ -859,6 +898,15 @@ class GalleryTab extends LitElement {
     .menu-wrap { position: relative; }
     .menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; width: 240px; max-height: 300px; overflow-y: auto; padding: 6px; display: grid; gap: 2px;
       background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 16px 40px -10px rgba(0, 0, 0, .7); }
+    .menu.end { left: auto; right: 0; }
+    /* On a phone the menu rises from the bottom, above the tab bar, so it always fits and is in reach of the thumb. */
+    @media (max-width: 599px) {
+      .menu, .menu.end { position: fixed; left: 8px; right: 8px; top: auto; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); width: auto; max-height: 55vh;
+        padding: 8px; border-radius: 18px; box-shadow: 0 -10px 50px rgba(0, 0, 0, .6); animation: up .16s ease-out; }
+      .menu-item { min-height: 44px; font-size: 15px; }
+      .menu input { height: 42px; font-size: 16px; }
+    }
+    @keyframes up { from { transform: translateY(12px); opacity: 0; } }
     .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; padding: 0 10px; border: 0; border-radius: 10px; background: none;
       color: var(--ink); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
     .menu-item:hover, .menu-item:focus-visible { background: var(--chip); outline: none; }
@@ -1060,7 +1108,7 @@ class GalleryTab extends LitElement {
           <button class="btn small fav" aria-pressed=${String(fav)} ?disabled=${this.busy} title=${fav ? t("Remove from favorites") : t("Add to favorites")}
             aria-label=${fav ? t("Remove from favorites") : t("Add to favorites")} @click=${() => this.keep(FAVORITES, p, !fav)}>${fav ? icons.heartFull : icons.heart}</button>
           <div class="menu-wrap">
-            <button class="btn small save" aria-haspopup="menu" aria-expanded=${String(!!this.saving)} @click=${(e) => { e.stopPropagation(); this.saving = !this.saving; this.creating = false; }}>
+            <button class="btn small save" aria-haspopup="menu" aria-expanded=${String(!!this.saving)} @click=${(e) => { e.stopPropagation(); this.saving = !this.saving; this.creating = false; this.place(); }}>
               ${icons.bookmark}${inOthers ? t("In {n} lists", { n: inOthers }) : t("Add to list")}</button>
             ${this.saving ? this.listMenu(p, others, inLists) : nothing}
           </div>
@@ -1070,6 +1118,12 @@ class GalleryTab extends LitElement {
     </div>`;
   }
 
+  // The menu opens leftwards when there is no room for it on the right.
+  async place() {
+    await this.updateComplete;
+    const m = this.renderRoot.querySelector(".menu");
+    if (m && m.getBoundingClientRect().right > document.documentElement.clientWidth - 8) m.classList.add("end");
+  }
   // A small menu under Add to list, as apps have: a tap puts the drawing in a list or takes it out.
   listMenu(p, others, inLists) {
     return html`<div class="menu" role="menu" @click=${(e) => e.stopPropagation()} @keydown=${(e) => { if (e.key === "Escape") { this.saving = false; } }}>
@@ -1127,6 +1181,27 @@ class GalleryTab extends LitElement {
         : nothing}`;
   }
 
+  // A gallery picture picked by chance, or for the day and hour, shown now; the toast offers to keep it going.
+  async surprise(kind) {
+    this.surprising = kind;
+    try {
+      const r = await api("POST", "gallery/surprise", { kind });
+      send(this, "refresh");
+      const label = kind === "moment" ? `${r.theme} · ${r.showing}` : r.showing;
+      toast(this, label, { action: { label: t("Keep it going"), run: () => this.keepGoing(kind) } });
+    } catch (e) { toast(this, e.message); }
+    finally { this.surprising = null; }
+  }
+  async keepGoing(kind) {
+    const ch = defaultChannel(this.state);
+    if (!ch) return;
+    try { if (this.state.mode) await api("DELETE", "mode"); } catch (e) { toast(this, e.message); return; }
+    const a = ch.ambient;
+    if (await saveChannel(this, this.state, { ambient: { ...a, list: SURPRISE[kind], pictures: seconds(a.pictures) ? a.pictures : "1m" } })) {
+      toast(this, kind === "moment" ? t("In automatic it now shows things for the moment") : t("In automatic it now shows random pictures"));
+    }
+  }
+
   render() {
     const mine = this.category === "lists" && !this.searched;
     return html`
@@ -1135,6 +1210,11 @@ class GalleryTab extends LitElement {
           <input type="search" placeholder=${t("Search: cat, heart, pumpkin…")} aria-label=${t("Search the gallery")} .value=${this.query ?? ""} @input=${(e) => { this.query = e.target.value; }}>
           <button class="btn primary" type="submit">${t("Search")}</button>
         </form>
+        <div class="lucky">
+          <button class="btn" ?disabled=${!!this.surprising} @click=${() => this.surprise("random")}>${galleryIcons.dice}${t("Random")}</button>
+          <button class="btn" ?disabled=${!!this.surprising} @click=${() => this.surprise("moment")}>${galleryIcons.sparkle}${t("For the moment")}</button>
+          ${this.surprising ? html`<span class="small muted">${t("Looking…")}</span>` : nothing}
+        </div>
         <div class="cats" role="group" aria-label=${t("Categories")}>
           <button class="cat mine" aria-pressed=${String(mine)} @click=${() => this.pick("category", "lists")}>${t("My lists")}</button>
           ${CATEGORIES.map((c) => html`<button class="cat" aria-pressed=${String(!this.searched && c === this.category)} @click=${() => this.pick("category", c)}>${categoryName(c)}</button>`)}</div>
@@ -1770,6 +1850,7 @@ class MoskoTab extends LitElement {
   static properties = {
     state: { attribute: false }, text: { state: true }, busy: { state: true }, rec: { state: true },
     lag: { state: true }, pitch: { state: true }, effect: { state: true }, face: { state: true }, talking: { state: true },
+    playingSound: { state: true }, phrases: { state: true },
   };
   static styles = [base, css`
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
@@ -1832,14 +1913,29 @@ class MoskoTab extends LitElement {
     .effect:hover { border-color: var(--muted); }
     .effect[aria-pressed=true] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
     .effect[aria-pressed=true] b { color: var(--accent); }
+    .pads { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+    .pad { position: relative; min-height: 48px; text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 10px 12px; cursor: pointer; display: grid; gap: 4px; align-content: start; color: var(--ink); }
+    .pad:hover:not(:disabled) { border-color: var(--muted); }
+    .pad:active:not(:disabled) { transform: scale(.97); }
+    .pad:disabled { opacity: .5; cursor: default; }
+    .pad b { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+    .pad.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
   `];
-  constructor() { super(); this.text = ""; this.face = [HALF, CALM]; this.timers = []; }
+  constructor() {
+    super(); this.text = ""; this.face = [HALF, CALM]; this.timers = [];
+  }
   connectedCallback() {
     super.connectedCallback();
+    this.wait();
+    api("GET", "talk/phrases").then((r) => { this.phrases = r.phrases; }).catch(() => {});
+    api("POST", "talk/warm").catch(() => {});
     for (let s = 0; s <= 4; s++) for (let m = 0; m <= 4; m++) new Image().src = faceURL(s, m);
     this.idle();
   }
-  disconnectedCallback() { super.disconnectedCallback(); this.stopRecording(true); this.discard(); this.clear(); clearTimeout(this.saving); }
+  disconnectedCallback() {
+    super.disconnectedCallback(); this.stopRecording(true); this.discard(); this.clear(); clearTimeout(this.saving); clearTimeout(this.waiting);
+    api("DELETE", "show?key=mosko-idle", undefined, { keepalive: true }).then(() => send(this, "refresh")).catch(() => {});
+  }
   willUpdate(c) {
     if (c.has("state") && this.state && !this.editing) {
       const tune = this.state.talk ?? {};
@@ -1895,11 +1991,11 @@ class MoskoTab extends LitElement {
     this.later(t + 300, () => this.idle());
   }
 
-  async say(body) {
+  async say(body, path = "talk") {
     this.busy = true;
     this.thinking();
     try {
-      const r = await api("POST", "talk", body);
+      const r = await api("POST", path, body);
       this.play(r.faces ?? [], r.faces_after_ms ?? 0);
       send(this, "refresh");
       return true;
@@ -1909,6 +2005,24 @@ class MoskoTab extends LitElement {
   async sayText() {
     const text = this.text.trim();
     if (text && await this.say({ text })) this.text = "";
+  }
+  async quick(text) {
+    this.playingSound = text;
+    await this.say({ text });
+    this.playingSound = null;
+  }
+  quickPhrases() {
+    return html`<div class="card">
+      <div class="head"><h2>${t("Quick phrases")}</h2></div>
+      <div class="pads">${(this.phrases ?? []).map((text) => html`<button class="pad ${this.playingSound === text ? "on" : ""}"
+        ?disabled=${this.busy && this.playingSound !== text} @click=${() => this.quick(text)}><b>${text}</b></button>`)}</div>
+    </div>`;
+  }
+  // While this tab is open the display shows him waiting, blinking; the loop plays on the display by itself.
+  async wait() {
+    clearTimeout(this.waiting);
+    try { await api("POST", "talk/idle?for=2m"); send(this, "refresh"); } catch { /* the status shows the outage */ }
+    this.waiting = setTimeout(() => this.wait(), 90000);
   }
   get canRecord() { return !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder); }
   // A voice note, as in a chat: record with live levels, then listen, delete or send it.
@@ -2062,6 +2176,7 @@ class MoskoTab extends LitElement {
           <p class="hint">${t("Up to 30 seconds. The mouth follows the voice: shut in the pauses, wider the louder.")}</p>
           <p class="hint">${t("He gestures with the text: ! raises his eyebrows, ? raises one, ... makes him think, jaja makes him laugh.")}</p>
         </div>
+        ${this.quickPhrases()}
         <div class="card voice">
           <h2>${t("Voice")}</h2>
           <div class="field">
@@ -2096,9 +2211,557 @@ class MoskoTab extends LitElement {
 }
 customElements.define("ph-mosko", MoskoTab);
 
+// The drawing tab: animations drawn pixel by pixel, kept in pixelhub and shown on the display.
+const SIDE = 16;
+const BLACK = "#000000";
+// Palettes to start from; black is a LED switched off, so it is the eraser rather than a colour here.
+const PALETTES = [
+  ["vivid", "Vivid", ["#ffffff", "#ff0000", "#ff4d00", "#ff7a00", "#ffb000", "#ffd400", "#ffff00", "#c8ff00", "#7dff00", "#00ff3c", "#00d43a", "#00ffa0",
+    "#00e0b0", "#00ffff", "#00c8ff", "#0088ff", "#0050ff", "#2a00ff", "#5a2dff", "#8a00ff", "#b026ff", "#ff00ff", "#ff3fa4", "#ff0060"]],
+  ["pastel", "Pastel", ["#ffd1dc", "#ffb3c6", "#ffc8a2", "#ffe5a8", "#fff3b0", "#e2f0a9", "#c1f0c1", "#a8e6cf",
+    "#b5ead7", "#a0e7e5", "#b4d8ff", "#c7ceea", "#d5c6ff", "#e7c6ff", "#f6c6ea", "#ffffff"]],
+  ["retro", "Retro", ["#1d1d3b", "#3f2a6b", "#7b2d6e", "#c2355b", "#ff6b4a", "#ffb347", "#ffe066", "#9be564",
+    "#3cb371", "#2a7f62", "#1f4e79", "#3a86ff", "#7ad7f0", "#c0c0c0", "#f4f4f4", "#ffffff"]],
+  ["earth", "Earth", ["#ffe0bd", "#ffcd94", "#eac086", "#e0ac69", "#c68642", "#8d5524", "#5c3317", "#3b2314",
+    "#a0522d", "#d2b48c", "#6b8e23", "#556b2f", "#228b22", "#8fbc8f", "#87ceeb", "#4682b4"]],
+  ["greys", "Greys", ["#ffffff", "#e6e6e6", "#cccccc", "#b3b3b3", "#999999", "#808080", "#666666", "#4d4d4d", "#333333", "#1a1a1a"]],
+];
+const COLORS_KEY = "pixelhub.colors";
+const MAX_RECENT = 12;
+const SPEEDS = [[1000, "1"], [500, "2"], [250, "4"], [125, "8"], [83, "12"]];
+const MAX_FRAMES = 60;
+const DRAFT_KEY = "pixelhub.draft";
+const blank = () => Array(SIDE * SIDE).fill(BLACK);
+const toHex = (frame) => frame.map((c) => c.slice(1)).join("");
+const fromHex = (s) => Array.from({ length: SIDE * SIDE }, (_, i) => `#${s.slice(i * 6, i * 6 + 6)}`);
+const drawIcon = {
+  pen: icon(svg`<path d="M4 20l4-1L19 8l-3-3L5 16z"/><path d="m14 7 3 3"/>`),
+  eraser: icon(svg`<path d="m8 20 12-12-4-4L4 16l4 4h12"/><path d="m9 11 4 4"/>`),
+  fill: icon(svg`<path d="m11 4 8 8-7 7-8-8z"/><path d="M4 11h15M20 15s1.5 2 1.5 3a1.5 1.5 0 0 1-3 0c0-1 1.5-3 1.5-3z"/>`),
+  pick: icon(svg`<path d="m14 4 6 6-2 2-6-6zM12 8l-7 7v4h4l7-7"/>`),
+  mirror: icon(svg`<path d="M12 3v18" stroke-dasharray="2 2"/><path d="M9 7 4 12l5 5zM15 7l5 5-5 5z"/>`),
+  undo: icon(svg`<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>`),
+  redo: icon(svg`<path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/>`),
+  onion: icon(svg`<rect x="3" y="7" width="11" height="11" rx="2" stroke-dasharray="2 2"/><rect x="9" y="4" width="11" height="11" rx="2"/>`),
+  move: icon(svg`<path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/>`),
+  palette: icon(svg`<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.9 1.2-1.8-.5-1.1.2-2.2 1.4-2.2H17a4 4 0 0 0 4-4c0-5.5-4-10-9-10z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="14.5" cy="7" r="1.2" fill="currentColor"/>`),
+  copy: icon(svg`<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>`),
+  left: icon(svg`<path d="m15 18-6-6 6-6"/>`),
+  right: icon(svg`<path d="m9 18 6-6-6-6"/>`),
+};
+// The colours a drawing uses, the most used first.
+const colorsOf = (frames) => {
+  const count = new Map();
+  for (const f of frames) for (const c of f) if (c !== BLACK) count.set(c, (count.get(c) ?? 0) + 1);
+  return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c).slice(0, MAX_RECENT);
+};
+// A frame moved by whole pixels, wrapping round, so a drawing can scroll across the display.
+const shifted = (f, dx, dy) => {
+  const next = blank();
+  for (let y = 0; y < SIDE; y++) for (let x = 0; x < SIDE; x++) next[(((y + dy) % SIDE + SIDE) % SIDE) * SIDE + (((x + dx) % SIDE + SIDE) % SIDE)] = f[y * SIDE + x];
+  return next;
+};
+const decoded = new WeakMap();
+const framesOf = (d) => { let f = decoded.get(d); if (!f) decoded.set(d, (f = d.frames.map(fromHex))); return f; };
+const frameURLs = new Map();
+// A frame as a 16x16 PNG data URL, for thumbnails and the LED preview; kept, since frames repeat.
+const frameURL = (frame) => {
+  const key = frame.join("");
+  let url = frameURLs.get(key);
+  if (url) return url;
+  const c = document.createElement("canvas");
+  c.width = c.height = SIDE;
+  const ctx = c.getContext("2d");
+  const img = ctx.createImageData(SIDE, SIDE);
+  frame.forEach((hex, i) => {
+    const n = parseInt(hex.slice(1), 16);
+    img.data.set([n >> 16, (n >> 8) & 255, n & 255, 255], i * 4);
+  });
+  ctx.putImageData(img, 0, 0);
+  url = c.toDataURL();
+  if (frameURLs.size > 400) frameURLs.delete(frameURLs.keys().next().value);
+  frameURLs.set(key, url);
+  return url;
+};
+
+class DrawTab extends LitElement {
+  static properties = {
+    frames: { state: true }, cur: { state: true }, color: { state: true }, tool: { state: true }, mirror: { state: true }, onion: { state: true },
+    delay: { state: true }, name: { state: true }, id: { state: true }, dirty: { state: true }, busy: { state: true },
+    drawings: { state: true }, lists: { state: true }, beat: { state: true }, recent: { state: true },
+    mine: { state: true }, palette: { state: true }, editMine: { state: true },
+  };
+  static styles = [base, css`
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+    @media (min-width: 900px) { .layout { grid-template-columns: minmax(0, 560px) minmax(0, 1fr); align-items: start; } .side { position: sticky; top: 88px; } }
+    .main, .side { display: grid; gap: 14px; min-width: 0; align-content: start; }
+    .board { display: block; width: 100%; aspect-ratio: 1; border-radius: 12px; background: var(--case); touch-action: none; cursor: crosshair; }
+    .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+    .tools .sp { flex: 1; }
+    .tool { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+    .tool:hover:not(:disabled) { color: var(--ink); border-color: var(--muted); }
+    .tool[aria-pressed=true] { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+    .tool:disabled { opacity: .35; cursor: default; }
+    .tool svg { width: 20px; height: 20px; }
+    .group { display: inline-flex; gap: 4px; }
+    .colorbar { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+    .current { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 44px; padding: 0 10px 0 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; font-family: var(--font-data); font-size: 12px; }
+    .current:hover { border-color: var(--muted); }
+    .current i { width: 32px; height: 32px; border-radius: 8px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .15); }
+    .current svg { width: 18px; height: 18px; color: var(--muted); }
+    .link-btn { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; padding: 6px 0 0; }
+    .link-btn:hover { color: var(--ink); }
+    .tabs { flex: 1; min-width: 0; display: flex; gap: 2px; overflow-x: auto; background: var(--chip); border-radius: 10px; padding: 2px; scrollbar-width: none; }
+    .tabs button { flex: none; border: 0; background: none; height: 38px; padding: 0 12px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer; }
+    .tabs button[aria-selected=true] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+    .palette { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+    .big { display: grid; place-items: end start; height: 110px; border-radius: 14px; padding: 10px 12px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .15); cursor: pointer; }
+    .big span { font-size: 12px; font-weight: 600; color: #fff; background: rgba(0, 0, 0, .45); padding: 3px 8px; border-radius: 999px; }
+    dialog { border: 1px solid var(--line); border-radius: 18px; background: var(--surface); color: var(--ink); padding: 18px; width: min(460px, calc(100vw - 24px)); max-height: 88vh; overflow-y: auto; }
+    dialog::backdrop { background: rgba(5, 4, 12, .6); backdrop-filter: blur(2px); }
+    @media (max-width: 600px) { dialog { margin: auto 0 0; width: 100%; max-width: 100%; border-radius: 18px 18px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); } }
+    .sheet { display: grid; gap: 16px; }
+    .sheet h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+    .sheet h3 span { flex: 1; }
+    .now { display: flex; align-items: center; gap: 10px; }
+    .now input[type=text] { width: 110px; font-family: var(--font-data); text-transform: lowercase; }
+    .pickany { position: relative; overflow: hidden; }
+    .pickany input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+    .editing .swatch { animation: wobble .25s ease-in-out infinite alternate; }
+    @keyframes wobble { from { transform: rotate(-3deg); } to { transform: rotate(3deg); } }
+    .board.moving { cursor: grab; }
+    .swatch { aspect-ratio: 1; border-radius: 8px; border: 2px solid transparent; cursor: pointer; padding: 0; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12); }
+    .swatch[aria-pressed=true] { border-color: var(--ink); box-shadow: 0 0 0 2px var(--accent); }
+    .frames { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 8px; scroll-snap-type: x proximity; }
+    .frame { flex: none; width: 56px; display: grid; gap: 3px; justify-items: center; border: 0; background: none; cursor: pointer; padding: 0; color: var(--muted); font-size: 11px; font-family: var(--font-data); scroll-snap-align: start; }
+    .frame img { width: 56px; height: 56px; border-radius: 8px; border: 2px solid var(--line); background: #000; }
+    .frame[aria-current=true] img { border-color: var(--accent); }
+    .frame[aria-current=true] { color: var(--accent); }
+    .frame.add { width: 56px; height: 56px; border: 2px dashed var(--line); border-radius: 8px; align-content: center; }
+    .frame.add:hover { color: var(--ink); border-color: var(--muted); }
+    .frame-ops { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .frame-ops .count { margin-left: auto; font-size: 12px; color: var(--muted); font-family: var(--font-data); }
+    ph-led { width: min(100%, 260px); margin: 0 auto; }
+    .preview { display: grid; gap: 12px; justify-items: center; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .row input[type=text] { flex: 1 1 160px; }
+    .saved { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
+    .item { position: relative; display: grid; gap: 4px; border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 8px; cursor: pointer; text-align: left; color: var(--ink); }
+    .item[aria-current=true] { border-color: var(--accent); }
+    .item img { width: 100%; aspect-ratio: 1; border-radius: 6px; background: #000; }
+    .item b { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item span { font-size: 11px; color: var(--muted); }
+    .item .icon { position: absolute; top: 4px; right: 4px; background: color-mix(in srgb, var(--bg) 80%, transparent); }
+    .empty { font-size: 13px; color: var(--muted); margin: 0; }
+  `];
+
+  constructor() {
+    super();
+    this.color = "#ff0000"; this.tool = "pen"; this.mirror = false; this.onion = true;
+    this.drawings = null; this.lists = []; this.beat = 0;
+    this.undos = []; this.redos = [];
+    let colors = {};
+    try { colors = JSON.parse(localStorage.getItem(COLORS_KEY)) ?? {}; } catch { /* first visit */ }
+    this.mine = colors.mine ?? []; this.palette = colors.palette ?? "vivid";
+    let draft = null;
+    try { draft = JSON.parse(localStorage.getItem(DRAFT_KEY)); } catch { /* no draft */ }
+    if (draft?.frames?.length) this.load(draft, draft.dirty);
+    else this.fresh();
+  }
+  connectedCallback() {
+    super.connectedCallback();
+    api("GET", "drawings").then((r) => { this.drawings = r.drawings; }).catch((e) => { this.drawings = []; toast(this, e.message); });
+    api("GET", "lists").then((r) => { this.lists = r.lists; }).catch(() => {});
+    this.ticker = setInterval(() => { this.beat++; }, 50);
+    this.keys = (e) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" || e.composedPath()[0]?.tagName === "INPUT") return;
+      e.preventDefault();
+      if (e.shiftKey) this.redo(); else this.undo();
+    };
+    addEventListener("keydown", this.keys);
+    this.project();
+  }
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    clearInterval(this.ticker); clearTimeout(this.liveTimer); clearTimeout(this.draftTimer); clearTimeout(this.again);
+    api("DELETE", "show?key=drawing/", undefined, { keepalive: true }).then(() => send(this, "refresh")).catch(() => {});
+    removeEventListener("keydown", this.keys);
+    this.resize?.disconnect();
+  }
+  firstUpdated() {
+    const board = this.renderRoot.querySelector(".board");
+    this.resize = new ResizeObserver(() => this.paint());
+    this.resize.observe(board);
+  }
+  updated(c) {
+    if (c.has("frames") || c.has("cur") || c.has("onion")) this.paint();
+    if (c.has("frames") || c.has("delay") || c.has("name") || c.has("id")) this.keepDraft();
+  }
+
+  fresh() {
+    this.recent = [];
+    this.frames = [blank()]; this.cur = 0; this.delay = 250; this.name = ""; this.id = null; this.dirty = false;
+    this.undos = []; this.redos = [];
+  }
+  // A drawing brings back its own recent colours: the ones kept with its draft, or the ones it is made of.
+  load(d, dirty = false) {
+    this.frames = d.frames.map((f) => (typeof f === "string" ? fromHex(f) : [...f]));
+    this.recent = d.recent ?? colorsOf(this.frames);
+    this.cur = 0; this.delay = d.delay_ms ?? d.delay ?? 250; this.name = d.name ?? ""; this.id = d.id ?? null; this.dirty = dirty;
+    this.undos = []; this.redos = [];
+  }
+  keepDraft() {
+    clearTimeout(this.draftTimer);
+    this.draftTimer = setTimeout(() => {
+      try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ frames: this.frames.map(toHex), delay_ms: this.delay, name: this.name, id: this.id, dirty: this.dirty, recent: this.recent })); }
+      catch { /* the draft is a convenience */ }
+    }, 400);
+  }
+  confirmLeave() { return !this.dirty || confirm(t("Drop the changes to this drawing?")); }
+
+  // Every change goes through here: undo keeps the frames before it.
+  change(frames, cur = this.cur) {
+    this.undos = [...this.undos.slice(-49), { frames: this.frames, cur: this.cur }];
+    this.redos = [];
+    this.frames = frames; this.cur = Math.max(0, Math.min(cur, frames.length - 1)); this.dirty = true;
+    this.sendLive();
+  }
+  undo() {
+    const last = this.undos.at(-1);
+    if (!last) return;
+    this.redos = [...this.redos, { frames: this.frames, cur: this.cur }];
+    this.undos = this.undos.slice(0, -1);
+    this.frames = last.frames; this.cur = last.cur; this.dirty = true;
+    this.sendLive();
+  }
+  redo() {
+    const next = this.redos.at(-1);
+    if (!next) return;
+    this.undos = [...this.undos, { frames: this.frames, cur: this.cur }];
+    this.redos = this.redos.slice(0, -1);
+    this.frames = next.frames; this.cur = next.cur; this.dirty = true;
+    this.sendLive();
+  }
+
+  paint() {
+    const board = this.renderRoot.querySelector(".board");
+    if (!board || !this.frames) return;
+    const px = Math.round(board.clientWidth * devicePixelRatio) || 320;
+    if (board.width !== px) board.width = board.height = px;
+    const ctx = board.getContext("2d"), cell = px / SIDE, frame = this.stroke ?? this.frames[this.cur];
+    const under = this.onion && this.cur > 0 ? this.frames[this.cur - 1] : null;
+    ctx.fillStyle = "#07060d";
+    ctx.fillRect(0, 0, px, px);
+    // The frame before shows as a faint, smaller ghost under empty cells, so it never reads as drawn.
+    const inset = cell * 0.22;
+    for (let i = 0; i < SIDE * SIDE; i++) {
+      const x = (i % SIDE) * cell, y = Math.floor(i / SIDE) * cell;
+      if (frame[i] !== BLACK) { ctx.globalAlpha = 1; ctx.fillStyle = frame[i]; ctx.fillRect(x, y, cell, cell); }
+      else if (under && under[i] !== BLACK) { ctx.globalAlpha = 0.22; ctx.fillStyle = under[i]; ctx.fillRect(x + inset, y + inset, cell - 2 * inset, cell - 2 * inset); }
+    }
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "rgba(255,255,255,.07)";
+    ctx.lineWidth = Math.max(1, devicePixelRatio * 0.5);
+    ctx.beginPath();
+    for (let k = 1; k < SIDE; k++) { const p = Math.round(k * cell) + 0.5; ctx.moveTo(p, 0); ctx.lineTo(p, px); ctx.moveTo(0, p); ctx.lineTo(px, p); }
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,.16)";
+    ctx.beginPath();
+    const mid = Math.round(8 * cell) + 0.5;
+    ctx.moveTo(mid, 0); ctx.lineTo(mid, px); ctx.moveTo(0, mid); ctx.lineTo(px, mid);
+    ctx.stroke();
+  }
+
+  cellAt(e) {
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = Math.floor(((e.clientX - r.left) / r.width) * SIDE), y = Math.floor(((e.clientY - r.top) / r.height) * SIDE);
+    return x >= 0 && y >= 0 && x < SIDE && y < SIDE ? [x, y] : null;
+  }
+  plot(frame, x, y, c) {
+    frame[y * SIDE + x] = c;
+    if (this.mirror) frame[y * SIDE + (SIDE - 1 - x)] = c;
+  }
+  down(e) {
+    const at = this.cellAt(e);
+    if (!at || e.button > 0) return;
+    const [x, y] = at, frame = this.frames[this.cur];
+    if (this.tool === "pick") {
+      this.color = frame[y * SIDE + x]; this.tool = "pen";
+      return;
+    }
+    if (this.tool === "fill") {
+      const next = [...frame], from = frame[y * SIDE + x], to = this.color;
+      if (from === to) return;
+      const stack = [[x, y]];
+      while (stack.length) {
+        const [cx, cy] = stack.pop();
+        if (cx < 0 || cy < 0 || cx >= SIDE || cy >= SIDE || next[cy * SIDE + cx] !== from) continue;
+        next[cy * SIDE + cx] = to;
+        stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
+      }
+      this.change(this.frames.map((f, i) => (i === this.cur ? next : f)));
+      this.pickedColor();
+      return;
+    }
+    e.currentTarget.setPointerCapture(e.pointerId);
+    this.stroke = [...frame];
+    this.last = at;
+    if (this.tool === "move") { this.from = at; return; }
+    this.plot(this.stroke, x, y, this.tool === "eraser" ? BLACK : this.color);
+    this.paint();
+  }
+  move(e) {
+    if (!this.stroke) return;
+    const at = this.cellAt(e);
+    if (!at) return;
+    if (this.tool === "move") {
+      this.stroke = shifted(this.frames[this.cur], at[0] - this.from[0], at[1] - this.from[1]);
+      this.paint();
+      return;
+    }
+    const c = this.tool === "eraser" ? BLACK : this.color;
+    // A line from the last cell, so a fast stroke leaves no gaps.
+    let [x0, y0] = this.last;
+    const [x1, y1] = at, dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx + dy;
+    for (;;) {
+      this.plot(this.stroke, x0, y0, c);
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x0 += sx; }
+      if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+    this.last = at;
+    this.paint();
+  }
+  up() {
+    if (!this.stroke) return;
+    const done = this.stroke;
+    this.stroke = null;
+    if (done.join() !== this.frames[this.cur].join()) {
+      this.change(this.frames.map((f, i) => (i === this.cur ? done : f)));
+      if (this.tool === "pen") this.pickedColor();
+    }
+  }
+  pickedColor() {
+    if (this.color === BLACK || this.recent[0] === this.color) return;
+    this.recent = [this.color, ...this.recent.filter((c) => c !== this.color)].slice(0, MAX_RECENT);
+    this.keepDraft();
+  }
+  keepColors() {
+    try { localStorage.setItem(COLORS_KEY, JSON.stringify({ mine: this.mine, palette: this.palette })); } catch { /* a convenience */ }
+  }
+  useColor(c, close = true) {
+    this.color = c;
+    if (this.tool !== "fill") this.tool = "pen";
+    if (close) this.renderRoot.querySelector("dialog")?.close();
+  }
+  saveMine() {
+    if (this.mine.includes(this.color)) return;
+    this.mine = [...this.mine, this.color].slice(-32);
+    this.keepColors();
+  }
+  dropMine(c) {
+    this.mine = this.mine.filter((x) => x !== c);
+    if (!this.mine.length) this.editMine = false;
+    this.keepColors();
+  }
+  colorTabs() {
+    return [["recent", t("Recent")], ...PALETTES.map(([id, label]) => [id, t(label)]), ["mine", t("Mine")]];
+  }
+  swatches(list) {
+    return list.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c}
+      aria-pressed=${String(this.color === c && this.tool !== "eraser")} @click=${() => this.useColor(c)}></button>`);
+  }
+  colorGrid() {
+    const list = this.palette === "recent" ? this.recent : this.palette === "mine" ? this.mine : (PALETTES.find(([id]) => id === this.palette) ?? PALETTES[0])[2];
+    const clear = this.palette === "recent" && list.length
+      ? html`<button class="link-btn" @click=${() => { this.recent = []; this.keepDraft(); }}>${t("Clear the colours")}</button>` : nothing;
+    if (list.length) return html`<div class="palette">${this.swatches(list)}</div>${clear}`;
+    return html`<p class="hint">${this.palette === "recent" ? t("The colours of this drawing show up here, custom ones too; a new drawing starts without any.") : t("Save colours here from the custom colour button.")}</p>`;
+  }
+  // A colour of one's own: any colour or a code, kept among Mine to find again.
+  colorSheet() {
+    return html`<dialog @click=${(e) => { if (e.target.tagName === "DIALOG") e.target.close(); }} @close=${() => { this.editMine = false; }}>
+      <div class="sheet">
+        <div class="head" style="margin:0"><h2>${t("Custom colour")}</h2>
+          <button class="icon" aria-label=${t("Close")} @click=${(e) => e.target.closest("dialog").close()}>${icons.close}</button></div>
+        <label class="big pickany" style="background:${this.color}"><span>${t("Tap to choose")}</span><input type="color" .value=${this.color} @input=${(e) => this.useColor(e.target.value, false)}></label>
+        <div class="now">
+          <input type="text" maxlength="7" aria-label=${t("Colour code")} .value=${this.color}
+            @change=${(e) => { const v = e.target.value.trim().toLowerCase().replace(/^([0-9a-f]{6})$/, "#$1"); if (/^#[0-9a-f]{6}$/.test(v)) this.useColor(v, false); else e.target.value = this.color; }}>
+          <button class="btn" ?disabled=${this.mine.includes(this.color)} @click=${() => this.saveMine()}>${icons.plus}${t("Keep in Mine")}</button>
+          <button class="btn primary" style="margin-left:auto" @click=${(e) => { this.useColor(this.color); }}>${t("Use it")}</button>
+        </div>
+        ${this.mine.length ? html`<div>
+          <h3><span>${t("Mine")}</span><button class="btn small" @click=${() => { this.editMine = !this.editMine; }}>${this.editMine ? t("Done") : t("Edit")}</button></h3>
+          <div class="palette ${this.editMine ? "editing" : ""}" style="margin-top:10px">${this.mine.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c}
+            aria-pressed=${String(this.color === c)} @click=${() => (this.editMine ? this.dropMine(c) : this.useColor(c, false))}></button>`)}</div>
+          ${this.editMine ? html`<p class="hint">${t("Tap a colour to remove it.")}</p>` : nothing}
+        </div>` : nothing}
+      </div>
+    </dialog>`;
+  }
+
+  addFrame(copy) {
+    if (this.frames.length >= MAX_FRAMES) { toast(this, t("The display plays up to {n} frames", { n: MAX_FRAMES })); return; }
+    const f = copy ? [...this.frames[this.cur]] : blank();
+    this.change([...this.frames.slice(0, this.cur + 1), f, ...this.frames.slice(this.cur + 1)], this.cur + 1);
+  }
+  dropFrame() {
+    if (this.frames.length === 1) { this.change([blank()], 0); return; }
+    this.change(this.frames.filter((_, i) => i !== this.cur), this.cur - (this.cur === this.frames.length - 1 ? 1 : 0));
+  }
+  moveFrame(by) {
+    const to = this.cur + by;
+    if (to < 0 || to >= this.frames.length) return;
+    const next = [...this.frames];
+    [next[this.cur], next[to]] = [next[to], next[this.cur]];
+    this.change(next, to);
+  }
+
+  body() { return { name: this.name.trim() || t("Untitled"), delay_ms: this.delay, frames: this.frames.map(toHex) }; }
+  async save() {
+    this.busy = true;
+    try {
+      const body = this.body();
+      const r = this.id ? await api("PUT", `drawings/${this.id}`, body) : await api("POST", "drawings", body);
+      this.drawings = r.drawings; this.id = r.drawing.id; this.name = r.drawing.name; this.dirty = false;
+      toast(this, t("Saved"));
+      return true;
+    } catch (e) { toast(this, e.message); return false; }
+    finally { this.busy = false; }
+  }
+  // While this tab is open the display shows what is being drawn, every change a moment after it is made.
+  async project() {
+    clearTimeout(this.again);
+    try { await api("POST", "drawings/show", { ...this.body(), for: "10m" }); send(this, "refresh"); }
+    catch (e) { toast(this, e.message); }
+    this.again = setTimeout(() => this.project(), 5 * 60000);
+  }
+  sendLive() {
+    clearTimeout(this.liveTimer);
+    this.liveTimer = setTimeout(() => this.project(), 250);
+  }
+  async addToList(list) {
+    if (!list) return;
+    if ((this.dirty || !this.id) && !(await this.save())) return;
+    try {
+      this.lists = (await api("POST", `drawings/${this.id}/list`, { list })).lists;
+      const l = this.lists.find((x) => x.name === list);
+      toast(this, t("Added to {list}", { list: l ? listName(l) : list }));
+    } catch (e) { toast(this, e.message); }
+  }
+  open(d) {
+    if (d.id === this.id && !this.dirty) return;
+    if (!this.confirmLeave()) return;
+    this.load(d);
+    scrollTo({ top: 0, behavior: "smooth" });
+    this.sendLive();
+  }
+  startNew() {
+    if (!this.confirmLeave()) return;
+    this.fresh();
+    this.sendLive();
+  }
+  async deleteDrawing(d) {
+    if (!confirm(t("Delete {name}?", { name: d.name }))) return;
+    try {
+      this.drawings = (await api("DELETE", `drawings/${d.id}`)).drawings;
+      if (d.id === this.id) { this.id = null; this.dirty = true; }
+    } catch (e) { toast(this, e.message); }
+  }
+  // The frame a looping animation is on now, from the shared 50 ms beat.
+  playing(frames, delay) { return frames[Math.floor((this.beat * 50) / Math.max(delay, 50)) % frames.length]; }
+
+  render() {
+    const frames = this.frames, n = frames.length;
+    const tools = [["pen", t("Pencil"), drawIcon.pen], ["eraser", t("Eraser"), drawIcon.eraser], ["fill", t("Fill"), drawIcon.fill], ["pick", t("Pick a colour"), drawIcon.pick], ["move", t("Move the drawing"), drawIcon.move]];
+    return html`<div class="layout">
+      <div class="main">
+        <div class="card">
+          <canvas class="board ${this.tool === "move" ? "moving" : ""}" role="img" aria-label=${t("Frame {i} of {n}", { i: this.cur + 1, n })}
+            @pointerdown=${(e) => this.down(e)} @pointermove=${(e) => this.move(e)} @pointerup=${() => this.up()} @pointercancel=${() => this.up()}
+            @contextmenu=${(e) => e.preventDefault()}></canvas>
+          <div class="tools">
+            <div class="group" role="group" aria-label=${t("Tool")}>${tools.map(([id, label, glyph]) =>
+              html`<button class="tool" title=${label} aria-label=${label} aria-pressed=${String(this.tool === id)} @click=${() => { this.tool = id; }}>${glyph}</button>`)}</div>
+            <button class="tool" title=${t("Mirror")} aria-label=${t("Mirror")} aria-pressed=${String(this.mirror)} @click=${() => { this.mirror = !this.mirror; }}>${drawIcon.mirror}</button>
+            <button class="tool" title=${t("See the frame before")} aria-label=${t("See the frame before")} aria-pressed=${String(this.onion)} @click=${() => { this.onion = !this.onion; }}>${drawIcon.onion}</button>
+            <span class="sp"></span>
+            <button class="tool" title=${t("Undo")} aria-label=${t("Undo")} ?disabled=${!this.undos.length} @click=${() => this.undo()}>${drawIcon.undo}</button>
+            <button class="tool" title=${t("Redo")} aria-label=${t("Redo")} ?disabled=${!this.redos.length} @click=${() => this.redo()}>${drawIcon.redo}</button>
+          </div>
+          <div class="colorbar">
+            <button class="current" title=${t("Custom colour")} aria-label=${t("Custom colour")} @click=${() => this.renderRoot.querySelector("dialog").showModal()}>
+              <i style="background:${this.tool === "eraser" ? BLACK : this.color}"></i>${drawIcon.palette}</button>
+            <div class="tabs" role="tablist">${this.colorTabs().map(([id, label]) => html`<button role="tab" aria-selected=${String(this.palette === id)}
+              @click=${() => { this.palette = id; this.keepColors(); }}>${label}</button>`)}</div>
+          </div>
+          ${this.colorGrid()}
+          ${this.colorSheet()}
+        </div>
+        <div class="card">
+          <div class="head"><h2>${t("Frames")}</h2></div>
+          <div class="frames">
+            ${frames.map((f, i) => html`<button class="frame" aria-current=${String(i === this.cur)} @click=${() => { this.cur = i; }}><img class="pix" src=${frameURL(f)} alt=""><span>${i + 1}</span></button>`)}
+            <button class="frame add" title=${t("New empty frame")} aria-label=${t("New empty frame")} @click=${() => this.addFrame(false)}>${icons.plus}</button>
+          </div>
+          <div class="frame-ops">
+            <button class="btn small" @click=${() => this.addFrame(false)}>${icons.plus}${t("New frame")}</button>
+            <button class="btn small" title=${t("A new frame equal to this one")} @click=${() => this.addFrame(true)}>${drawIcon.copy}${t("Duplicate")}</button>
+            <button class="icon" aria-label=${t("Move it before")} ?disabled=${this.cur === 0} @click=${() => this.moveFrame(-1)}>${drawIcon.left}</button>
+            <button class="icon" aria-label=${t("Move it after")} ?disabled=${this.cur === n - 1} @click=${() => this.moveFrame(1)}>${drawIcon.right}</button>
+            <button class="icon trash" aria-label=${t("Delete this frame")} @click=${() => this.dropFrame()}>${icons.trash}</button>
+            <span class="count">${this.cur + 1}/${n}</span>
+          </div>
+        </div>
+      </div>
+      <div class="side">
+        <div class="card preview">
+          <ph-led .src=${frameURL(this.stroke && n === 1 ? this.stroke : this.playing(frames, this.delay))} .label=${t("Preview")}></ph-led>
+          <span class="small muted">${t("The display shows it as you draw, while this tab is open.")}</span>
+          ${n > 1 ? html`<div class="row"><span class="small muted">${t("Frames per second")}</span>
+            ${segmented(SPEEDS, this.delay, (v) => { this.delay = v; this.dirty = true; this.sendLive(); })}</div>` : nothing}
+        </div>
+        <div class="card">
+          <div class="head"><h2>${this.id ? t("Editing") : t("New drawing")}</h2>${this.dirty ? html`<span class="tag on">${t("Not saved")}</span>` : nothing}</div>
+          <div class="row">
+            <input type="text" maxlength="40" .value=${this.name} placeholder=${t("Name")} aria-label=${t("Name")}
+              @input=${(e) => { this.name = e.target.value; this.dirty = true; }} @keydown=${(e) => { if (e.key === "Enter") this.save(); }}>
+            <button class="btn primary" ?disabled=${this.busy} @click=${() => this.save()}>${t("Save")}</button>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <select aria-label=${t("Add to a list")} @change=${(e) => { const v = e.target.value; e.target.value = ""; this.addToList(v); }}>
+              <option value="">${t("Add to a list…")}</option>
+              ${this.lists.map((l) => html`<option value=${l.name}>${listName(l)}</option>`)}
+            </select>
+            <button class="btn" @click=${() => this.startNew()}>${icons.plus}${t("New drawing")}</button>
+          </div>
+          <p class="hint">${t("In a list, it joins the pictures the display shows in automatic.")}</p>
+        </div>
+        <div class="card">
+          <div class="head"><h2>${t("Your drawings")}</h2></div>
+          ${this.drawings === null ? html`<p class="empty">${t("Loading")}</p>` : !this.drawings.length ? html`<p class="empty">${t("Nothing saved yet.")}</p>` : html`<div class="saved">
+            ${repeat(this.drawings, (d) => d.id, (d) => {
+              const fs = framesOf(d);
+              return html`<div class="item" role="button" tabindex="0" aria-current=${String(d.id === this.id)} @click=${() => this.open(d)} @keydown=${(e) => { if (e.key === "Enter") this.open(d); }}>
+                <img class="pix" src=${frameURL(this.playing(fs, d.delay_ms))} alt="">
+                <b>${d.name}</b><span>${t("{n} frames", { n: fs.length })}</span>
+                <button class="icon trash" aria-label=${t("Delete")} @click=${(e) => { e.stopPropagation(); this.deleteDrawing(d); }}>${icons.trash}</button>
+              </div>`;
+            })}</div>`}
+        </div>
+      </div>
+    </div>`;
+  }
+}
+customElements.define("ph-draw", DrawTab);
+
 const TABS = [
   ["display", "Display", icon(svg`<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 8.5h.01M12 8.5h.01M15.5 8.5h.01M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 15.5h.01M12 15.5h.01M15.5 15.5h.01" stroke-width="2.6"/>`)],
   ["gallery", "Gallery", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="m14 20 2.5-3.5 2 2.5 1.5-2"/>`)],
+  ["draw", "Draw", icon(svg`<path d="M4 20l4-1L19 8l-3-3L5 16z"/><path d="m14 7 3 3M15 20h5"/>`)],
   ["music", "Music", icon(svg`<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>`)],
   ["calendar", "Calendar", icon(svg`<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>`)],
   ["mosko", "Mosko", icon(svg`<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M7 9.5h3M14 9.5h3M9 15h6"/>`)],
@@ -2107,7 +2770,7 @@ const TABS = [
 ];
 
 class PixelhubApp extends LitElement {
-  static properties = { st: { state: true }, status: { state: true }, sprites: { state: true }, modes: { state: true }, version: { state: true }, offline: { state: true }, gone: { state: true }, tab: { state: true } };
+  static properties = { st: { state: true }, status: { state: true }, sprites: { state: true }, modes: { state: true }, version: { state: true }, offline: { state: true }, gone: { state: true }, tab: { state: true }, typing: { state: true } };
   static styles = [base, css`
     header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: blur(12px); }
     .bar { max-width: 1120px; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; gap: 16px; }
@@ -2123,12 +2786,15 @@ class PixelhubApp extends LitElement {
     nav button[aria-current=page] { color: var(--ink); background: var(--chip); }
     nav button[aria-current=page] svg { color: var(--accent); }
     .top { margin-left: 8px; }
+    @media (max-width: 1279px) { .bar { gap: 10px; } nav button { padding: 8px 9px; gap: 6px; } .link > span:last-child { display: none; } }
     .bottom { display: none; }
-    @media (max-width: 759px) {
+    @media (max-width: 1023px) {
       .top { display: none; }
-      .bottom { display: grid; grid-template-columns: repeat(7, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
+      .bottom { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
         padding: 6px 8px max(8px, env(safe-area-inset-bottom, 0px)); background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--line); }
-      .bottom button { flex-direction: column; gap: 3px; font-size: 11px; padding: 6px 2px; }
+      .bottom button { flex-direction: column; gap: 3px; font-size: 10.5px; padding: 6px 0; min-width: 0; }
+      .bottom button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .bottom.typing { display: none; }
       .bottom button[aria-current=page] { background: none; }
       main { padding-bottom: 96px !important; }
     }
@@ -2137,11 +2803,11 @@ class PixelhubApp extends LitElement {
     .tab.two { grid-template-columns: minmax(0, 1fr); }
     @media (min-width: 900px) { .tab.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
     footer { max-width: 1120px; margin: 0 auto; padding: 0 16px 32px; font-size: 12px; color: var(--muted); }
-    @media (max-width: 759px) { footer { padding-bottom: 96px; } }
+    @media (max-width: 1023px) { footer { padding-bottom: 96px; } }
     .toast { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); bottom: max(16px, env(safe-area-inset-bottom, 0px)); z-index: 10; max-width: min(440px, calc(100vw - 32px));
       display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 14px; font-size: 13px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 12px;
       box-shadow: 0 12px 40px rgba(0, 0, 0, .35); animation: rise .18s ease-out; }
-    @media (max-width: 759px) { .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); } }
+    @media (max-width: 1023px) { .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); } }
     @keyframes rise { from { transform: translateY(8px); opacity: 0; } }
     .toast span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
     .toast button { border: 0; background: none; cursor: pointer; flex: none; }
@@ -2162,6 +2828,17 @@ class PixelhubApp extends LitElement {
     this.addEventListener("refresh", () => this.pollStatus());
     this.addEventListener("remove-channel", (e) => this.removeChannel(e.detail));
     this.visible = () => { if (!document.hidden) { this.pollStatus(); this.loadState(); } };
+    // iOS leaves fixed bars where the keyboard pushed them once it closes; hide the bar while typing and nudge the page after.
+    const typingIn = (e) => {
+      const el = e.composedPath()[0];
+      return el?.tagName === "TEXTAREA" || el?.tagName === "SELECT" || (el?.tagName === "INPUT" && !["button", "checkbox", "radio", "range", "color", "file"].includes(el.type));
+    };
+    this.focusIn = (e) => { if (typingIn(e)) { clearTimeout(this.unfocus); this.typing = true; } };
+    this.focusOut = (e) => {
+      if (!typingIn(e)) return;
+      clearTimeout(this.unfocus);
+      this.unfocus = setTimeout(() => { this.typing = false; requestAnimationFrame(() => { scrollBy(0, 1); scrollBy(0, -1); }); }, 300);
+    };
     this.leave = () => this.toasts.flush();
   }
 
@@ -2182,6 +2859,8 @@ class PixelhubApp extends LitElement {
     this.timers = [setInterval(() => { if (!document.hidden) this.pollStatus(); }, STATUS_MS), setInterval(() => { if (!document.hidden) this.loadState(); }, STATE_MS)];
     document.addEventListener("visibilitychange", this.visible);
     addEventListener("pagehide", this.leave);
+    document.addEventListener("focusin", this.focusIn);
+    document.addEventListener("focusout", this.focusOut);
     this.hash = () => { const id = location.hash.slice(1); if (TABS.some(([t]) => t === id)) this.tab = id; };
     addEventListener("hashchange", this.hash);
   }
@@ -2190,6 +2869,8 @@ class PixelhubApp extends LitElement {
     this.timers.forEach(clearInterval);
     document.removeEventListener("visibilitychange", this.visible);
     removeEventListener("pagehide", this.leave);
+    document.removeEventListener("focusin", this.focusIn);
+    document.removeEventListener("focusout", this.focusOut);
     removeEventListener("hashchange", this.hash);
   }
 
@@ -2245,6 +2926,7 @@ class PixelhubApp extends LitElement {
       case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<ph-connection .status=${this.status} .state=${view}></ph-connection></div>${gallery}`;
       case "calendar": return html`<ph-calendar></ph-calendar>${gallery}`;
       case "mosko": return html`<ph-mosko .state=${view}></ph-mosko>${gallery}`;
+      case "draw": return html`<ph-draw></ph-draw>${gallery}`;
       default: return html`<ph-display .status=${this.status} .state=${view} .sprites=${this.sprites} .styles=${this.modes} ?offline=${this.offline}></ph-display>${gallery}`;
     }
   }
@@ -2262,7 +2944,7 @@ class PixelhubApp extends LitElement {
       </div></header>
       <main>${this.page(view)}</main>
       <footer>pixelhub ${this.version ?? ""}</footer>
-      ${this.nav("bottom")}
+      ${this.nav(this.typing ? "bottom typing" : "bottom")}
       ${this.toasts.view()}`;
   }
 }

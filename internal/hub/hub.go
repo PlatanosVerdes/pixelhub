@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -417,6 +418,14 @@ func (h *Hub) Show(c display.Content, d time.Duration) {
 	now := h.now()
 	h.alerts.drop(shownSource, now)
 	h.alerts.push(Alert{Content: c, Priority: showPriority, Duration: d, Source: shownSource}, now)
+	h.mu.Unlock()
+	h.poke()
+}
+
+// Unshow takes off what was shown by hand, if it is still on and its key starts with prefix.
+func (h *Hub) Unshow(prefix string) {
+	h.mu.Lock()
+	h.alerts.dropFunc(func(a Alert) bool { return a.Source == shownSource && strings.HasPrefix(a.Content.Key, prefix) }, h.now())
 	h.mu.Unlock()
 	h.poke()
 }

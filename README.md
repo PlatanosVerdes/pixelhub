@@ -90,7 +90,7 @@ The environment only says where the hardware is; everything else is state, edite
 | `PIXELHUB_DEVICE_MAC` | required | The display's Bluetooth address |
 | `PIXELHUB_CHANNEL` | `1` | The display's RFCOMM channel |
 | `PIXELHUB_PORT` | `8000` | HTTP port |
-| `PIXELHUB_DATA_DIR` | `/data` | Holds `state.json`, `spotify.json`, `lists/`, `gallery-index.json`, `sprites/` and `ambient/` |
+| `PIXELHUB_DATA_DIR` | `/data` | Holds `state.json`, `spotify.json`, `lists/`, `drawings/`, `speech/` (what the voice read, a sentence at a time, the newest 400 per voice), `gallery-index.json`, `sprites/` and `ambient/` |
 | `PIXELHUB_LOG_JSON` | | `1` logs JSON (set in the image) |
 | `PIXELHUB_CHIME` | | `1` asks pixelbridge for a chime when a calendar event starts, except 23:00-08:00, and lets Mosko talk; the ESP32 bridge cannot play sound |
 | `PIXELHUB_SPEECH` | | A [Wyoming](https://github.com/rhasspy/wyoming) text-to-speech server's `host:port`, such as `wyoming-piper`, for Mosko to read text |
@@ -112,6 +112,9 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `GET /healthz` | 200 while the process runs, even with the display unreachable |
 | `GET /api/status` | Channel and why (`override` or `schedule`), layer, what is showing, `preview_version`, connection, last ack, `released_until` |
 | `POST /api/notify` | Show an alert: `sprite` or `color`, `priority` 0-10, `duration` up to `1h`, `source` |
+| `POST /api/talk/idle?for=` | Mosko waiting on the display, blinking, for up to 10 minutes (2 by default); the page shows him while his tab is open |
+| `GET /api/talk/phrases` | The quick phrases the Mosko tab offers |
+| `POST /api/talk/warm` | Read the quick phrases now, for a speech server that was away at start; they are read at start too |
 | `POST /api/talk` | Mosko says `{"text": ...}` or a multipart `audio` recording, his mouth and eyes moving with it |
 | `POST /api/channel` | Override the channel: `name`, optional `for`; without it, until the schedule changes |
 | `DELETE /api/channel` | Back to the schedule |
@@ -137,6 +140,12 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `GET /api/lists`, `POST /api/lists` | Your lists of gallery pictures, and a new one (`{"name"}`); GIFs are kept in `/data/lists/`, so they stay if the gallery drops them |
 | `PUT /api/lists/{name}`, `DELETE /api/lists/{name}` | Rename (`{"name"}`), delete |
 | `POST /api/lists/{name}/items`, `DELETE /api/lists/{name}/items?file=` | Add a gallery picture (`{"file", "name", "author", "likes"}`), remove one |
+| `GET /api/drawings`, `POST /api/drawings` | Animations drawn in the page (Draw tab): `name`, `delay_ms` 20-5000, `frames` (1-60, each 256 pixels as `rrggbb`, row by row); list, create |
+| `PUT /api/drawings/{id}`, `DELETE /api/drawings/{id}` | Replace, delete |
+| `POST /api/drawings/show` | A drawing, saved or not, plus `for` (30 s by default): show it now, like a gallery picture |
+| `POST /api/drawings/{id}/list` | `{"list"}`: put a saved drawing in a list, so the automatic rotation shows it; again after an edit updates it |
+| `DELETE /api/show?key=` | Take off what was shown by hand, only if its key starts with `key` (`drawing/`, `mosko-idle`; all without it) |
+| `POST /api/gallery/surprise` | `{"kind": "random"\|"moment", "for"}`: show a gallery picture picked by chance, or one that suits the day and hour (`theme` says why) |
 | `GET /api/spotify` | Whether a Spotify app and account are linked, and what plays now |
 | `PUT /api/spotify` | `{"client_id": ...}` of your Spotify app; a new one forgets the signed-in account |
 | `GET /api/spotify/login` | Sends the browser to Spotify to sign in; it comes back to `/api/spotify/callback` on the same host |
@@ -170,7 +179,9 @@ Times are `HH:MM` (`24:00` ends a range at midnight); a range past midnight belo
 starts on. Days are `mon-fri`, `sat,sun`, `daily`. Durations are Go durations like `90s` or `2m`. A
 scene's `brightness` is 0-100 or `"off"`; without it the sun decides, and a scene without a sprite
 shows the clock. An ambient `pictures` or `clock` of `0s` skips that part. An ambient or a scene
-with `"list"` shows the pictures of that list in turn instead (the web uses the default channel
+with `"list"` shows the pictures of that list in turn instead; `"@random"` shows gallery pictures picked by
+chance, and `"@moment"` ones that suit the moment (a festivity such as Halloween or Christmas, the time of day,
+the weekend, the season and the weather), both fetched a few ahead and shown as they are ready (the web uses the default channel
 this way: its ambient list and its scenes are "In automatic" and "Schedule" on the Display tab). An alert without a source
 only shows on channels that accept `*`, and a channel with no sources is a quiet one; a dropped
 alert answers 200 with `"dropped": true`. A channel created without `ambient` alternates 2 minutes of

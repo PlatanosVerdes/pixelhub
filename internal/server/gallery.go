@@ -358,6 +358,7 @@ func (s *Server) galleryRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/gallery/search", s.gallerySearch)
 	mux.HandleFunc("POST /api/gallery/show", s.galleryShow)
 	mux.HandleFunc("POST /api/gallery/save", s.gallerySave)
+	mux.HandleFunc("POST /api/gallery/surprise", s.surpriseShow)
 	if s.Lists != nil {
 		s.listRoutes(mux)
 	}

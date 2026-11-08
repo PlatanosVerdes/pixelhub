@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -21,6 +22,7 @@ import (
 	"github.com/PlatanosVerdes/pixelhub/internal/demo"
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
 	"github.com/PlatanosVerdes/pixelhub/internal/divoom"
+	"github.com/PlatanosVerdes/pixelhub/internal/drawings"
 	"github.com/PlatanosVerdes/pixelhub/internal/gallery"
 	"github.com/PlatanosVerdes/pixelhub/internal/hub"
 	"github.com/PlatanosVerdes/pixelhub/internal/lists"
@@ -110,7 +112,13 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 	if err != nil {
 		return err
 	}
-	h.Lists = hub.ListFunc(func(list string, turn int) (display.Content, bool, error) { return kept.Pick(list, turn, divoom.Size) })
+	var api *server.Server
+	h.Lists = hub.ListFunc(func(list string, turn int) (display.Content, bool, error) {
+		if list == server.Random || list == server.Moment {
+			return api.Surprise(list)
+		}
+		return kept.Pick(list, turn, divoom.Size)
+	})
 	cal, err := calendar.Open(filepath.Join(cfg.DataDir, "google.json"), log)
 	if err != nil {
 		return err
@@ -121,13 +129,7 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 			h.Chime()
 		}
 	}
-	go session.Run(ctx)
-	go h.Run(ctx)
-	go music.Run(ctx)
-	go station.Run(ctx)
-	go cal.Run(ctx)
-
-	api := &server.Server{Hub: h, Sprites: sprites, Spotify: music, Calendar: cal, Weather: station, Gallery: gallery.NewClient(), Lists: kept, IndexPath: filepath.Join(cfg.DataDir, "gallery-index.json"), Size: divoom.Size, Version: buildVersion}
+	api = &server.Server{Hub: h, Sprites: sprites, Spotify: music, Calendar: cal, Weather: station, Gallery: gallery.NewClient(), Lists: kept, IndexPath: filepath.Join(cfg.DataDir, "gallery-index.json"), Size: divoom.Size, Version: buildVersion}
 	if ffmpeg, err := exec.LookPath("ffmpeg"); err == nil {
 		api.Decoder = talk.Decoder{FFmpeg: ffmpeg}
 	} else {
@@ -135,8 +137,19 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 	}
 	if cfg.Speech != "" {
 		api.Voice = talk.Speaker{Addr: cfg.Speech, Voice: cfg.Voice}
+		// Each voice keeps its own reads, so changing it never plays the old one.
+		api.SpeechDir = filepath.Join(cfg.DataDir, "speech", cmp.Or(cfg.Voice, "default"))
 	}
+	if api.Drawings, err = drawings.Open(filepath.Join(cfg.DataDir, "drawings"), divoom.Size); err != nil {
+		return err
+	}
+	go session.Run(ctx)
+	go h.Run(ctx)
+	go music.Run(ctx)
+	go station.Run(ctx)
+	go cal.Run(ctx)
 	go api.WarmGallery(ctx)
+	go api.RunSurprises(ctx)
 	srv := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),
 		Handler:           api.Handler(),
@@ -146,6 +159,7 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    16 << 10,
 	}
+	go api.WarmSpeech(ctx)
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)

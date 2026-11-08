@@ -30,6 +30,7 @@ const (
 type Hub interface {
 	Notify(hub.Alert) (channel string, accepted bool)
 	Show(c display.Content, d time.Duration)
+	Unshow(prefix string)
 	Sense(light *int, sound bool)
 	SetChannel(name string, d time.Duration) error
 	ClearChannel()
@@ -73,18 +74,27 @@ type Server struct {
 	// GalleryPace is the pause between the gallery pages read for search; 0 means 3 s.
 	GalleryPace time.Duration
 	gifs        gifCache
+	surprises   surprises
 	lists       listCache
 	index       galleryIndex
+	// Drawings, when set, keeps the animations drawn in the page under /api/drawings.
+	Drawings Drawings
 	// Voice and Decoder, when set, let Mosko talk under /api/talk: Voice reads text, Decoder takes recordings.
 	Voice   Voice
 	Decoder Decoder
 	talking talking
+	voice   *keptVoice
+	// SpeechDir, when set, keeps what the voice read across restarts.
+	SpeechDir string
 	// Size is the display's side in pixels, for drawing previews.
 	Size    int
 	Version string
 }
 
 func (s *Server) Handler() http.Handler {
+	if s.Voice != nil && s.voice == nil {
+		s.voice = newKeptVoice(s.Voice, s.SpeechDir)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": s.Version})
@@ -94,6 +104,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/weather/show", s.showWeather)
 	mux.HandleFunc("POST /api/sensors", s.sense)
 	mux.HandleFunc("POST /api/notify", s.notify)
+	mux.HandleFunc("DELETE /api/show", func(w http.ResponseWriter, r *http.Request) {
+		s.Hub.Unshow(r.URL.Query().Get("key"))
+		writeJSON(w, http.StatusOK, s.Hub.Status())
+	})
 	mux.HandleFunc("POST /api/channel", s.setChannel)
 	mux.HandleFunc("DELETE /api/channel", s.clearChannel)
 	mux.HandleFunc("POST /api/release", s.release)
@@ -104,6 +118,9 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("POST /api/talk", s.talk)
 	mux.HandleFunc("GET /api/talk/mosko.png", s.moskoPNG)
+	mux.HandleFunc("POST /api/talk/idle", s.idle)
+	mux.HandleFunc("POST /api/talk/warm", s.warmUp)
+	mux.HandleFunc("GET /api/talk/phrases", s.phrases)
 	mux.HandleFunc("GET /api/sprites", s.sprites)
 	mux.HandleFunc("GET /api/sprites/{file}", s.spritePNG)
 	mux.HandleFunc("GET /api/preview.png", s.previewPNG)
@@ -131,6 +148,9 @@ func (s *Server) Handler() http.Handler {
 	}
 	if s.Gallery != nil {
 		s.galleryRoutes(mux)
+	}
+	if s.Drawings != nil {
+		s.drawingRoutes(mux)
 	}
 	return s.withWeb(mux)
 }

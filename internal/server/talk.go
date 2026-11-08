@@ -39,6 +39,12 @@ type Decoder interface {
 // talking lets one clip be made at a time: the Pi has no room for two speech runs at once.
 type talking struct{ sync.Mutex }
 
+// idleFor is how long Mosko waits on the display; the page asks again while it stays open.
+const (
+	idleFor    = 2 * time.Minute
+	maxIdleFor = 10 * time.Minute
+)
+
 type talkRequest struct {
 	Text string `json:"text"`
 }
@@ -123,7 +129,7 @@ func (s *Server) spoken(ctx context.Context, text string, tune state.Talk) (talk
 	if s.Voice == nil {
 		return talk.PCM{}, nil, http.StatusServiceUnavailable, errors.New("no speech server set up")
 	}
-	pcm, spans, err := talk.Speak(ctx, s.Voice, lines)
+	pcm, spans, err := talk.Speak(ctx, s.voice, lines)
 	if err != nil {
 		return talk.PCM{}, nil, http.StatusBadGateway, err
 	}
@@ -135,6 +141,20 @@ func (s *Server) spoken(ctx context.Context, text string, tune state.Talk) (talk
 		pcm, spans = out, talk.Stretch(spans, pcm.Duration(), out.Duration())
 	}
 	return pcm, spans, 0, nil
+}
+
+// idle shows Mosko waiting, blinking, for ?for= (2 minutes by default).
+func (s *Server) idle(w http.ResponseWriter, r *http.Request) {
+	d := idleFor
+	if q := r.URL.Query().Get("for"); q != "" {
+		var err error
+		if d, err = time.ParseDuration(q); err != nil || d <= 0 || d > maxIdleFor {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("for %q: want something like 2m, at most %s", q, maxIdleFor))
+			return
+		}
+	}
+	s.Hub.Show(talk.Idle(), d)
+	writeJSON(w, http.StatusAccepted, map[string]string{"showing": "Mosko", "duration": d.String()})
 }
 
 // moskoPNG draws one of Mosko's faces, ?shape=0-4&mood=0-4, mid-word and calm by default.
