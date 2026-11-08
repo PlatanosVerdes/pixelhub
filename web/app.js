@@ -628,6 +628,20 @@ class Automatic extends LitElement {
     .opt small { font-size: 12px; opacity: .8; }
     .opt:hover { color: var(--ink); }
     .opt[aria-pressed=true] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+    .opt.pick { flex-direction: column; align-items: flex-start; gap: 0; padding: 8px 14px; text-align: left; }
+    .opt.pick b { font-weight: 600; font-size: 14px; }
+    .kinds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    @media (max-width: 520px) { .kinds { grid-template-columns: minmax(0, 1fr); } }
+    .kind { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 10px; align-items: center; text-align: left;
+      border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 12px 14px; cursor: pointer; color: var(--ink); }
+    .kind svg { grid-row: span 2; width: 22px; height: 22px; color: var(--muted); }
+    .kind b { font-size: 14px; font-weight: 600; }
+    .kind span { font-size: 12px; color: var(--muted); }
+    .kind:hover:not(:disabled) { border-color: var(--muted); }
+    .kind:disabled { opacity: .5; cursor: default; }
+    .kind[aria-pressed=true] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+    .kind[aria-pressed=true] svg { color: var(--accent); }
+    .sub { margin-top: 14px; display: grid; gap: 6px; }
     .rows { display: grid; gap: 12px; margin-top: 14px; }
     .row { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: center; gap: 10px; }
     .row > span { font-size: 14px; color: var(--muted); }
@@ -648,6 +662,10 @@ class Automatic extends LitElement {
     return ok;
   }
   setAmbient(a) { return this.save({ ambient: { ...this.channel.ambient, ...a } }); }
+  kind(id, source, glyph, title, sub, pick, disabled = false) {
+    return html`<button class="kind" aria-pressed=${String(source === id)} ?disabled=${this.busy || disabled} @click=${() => { if (source !== id) pick(); }}>
+      ${glyph}<b>${title}</b><span>${sub}</span></button>`;
+  }
   whatOf(s) {
     if (s.brightness === 0) return t("Display off");
     if (s.list) return surpriseName(s.list);
@@ -682,20 +700,28 @@ class Automatic extends LitElement {
     const a = ch.ambient, lists = this.lists ?? [];
     const playing = a.list && seconds(a.pictures) > 0 ? a.list.toLowerCase() : "";
     const list = lists.find((l) => l.name.toLowerCase() === playing);
+    const source = !playing ? "clock" : Object.values(SURPRISE).includes(playing) ? "surprise" : "list";
     return html`<section class="card" aria-labelledby="au-h">
       <div class="head"><h2 id="au-h">${t("In automatic")}</h2></div>
       <div class="block">
         <h3>${t("Usually it shows")}</h3>
-        <div class="opts" role="group">
-          <button class="opt" aria-pressed=${String(!playing)} ?disabled=${this.busy} @click=${() => this.setAmbient({ pictures: "0s", list: "", clock: seconds(a.clock) ? a.clock : "1m" })}>${t("Only the clock")}</button>
-          ${Object.values(SURPRISE).map((v) => html`<button class="opt" aria-pressed=${String(v === playing)} ?disabled=${this.busy}
-            @click=${() => this.setAmbient({ list: v, pictures: seconds(a.pictures) ? a.pictures : "1m" })}>${surpriseName(v)}</button>`)}
-          ${lists.map((l) => html`<button class="opt" aria-pressed=${String(l.name.toLowerCase() === playing)} ?disabled=${this.busy}
-            @click=${() => this.setAmbient({ list: l.name, pictures: seconds(a.pictures) ? a.pictures : "1m" })}>${l.name}<small>${l.items.length}</small></button>`)}
+        <div class="kinds" role="group">
+          ${this.kind("clock", source, autoIcons.clock, t("Only the clock"), t("The clock all the time"),
+            () => this.setAmbient({ pictures: "0s", list: "", clock: seconds(a.clock) ? a.clock : "1m" }))}
+          ${this.kind("list", source, autoIcons.list, t("A list of mine"), lists.length ? t("Your drawings, in turn") : t("Make one in the Gallery first"),
+            () => this.setAmbient({ list: lists[0].name, pictures: seconds(a.pictures) ? a.pictures : "1m" }), !lists.length)}
+          ${this.kind("surprise", source, galleryIcons.sparkle, t("Surprise me"), t("Gallery pictures, picked for you"),
+            () => this.setAmbient({ list: SURPRISE.moment, pictures: seconds(a.pictures) ? a.pictures : "1m" }))}
         </div>
-        ${!lists.length ? html`<p class="small muted hint">${t("Your lists from the Gallery show up here.")}</p>` : nothing}
+        ${source === "list" ? html`<div class="sub"><span class="label">${t("Which list")}</span><div class="opts" role="group">
+          ${lists.map((l) => html`<button class="opt" aria-pressed=${String(l.name.toLowerCase() === playing)} ?disabled=${this.busy}
+            @click=${() => this.setAmbient({ list: l.name })}>${listName(l)}<small>${l.items.length}</small></button>`)}</div></div>` : nothing}
+        ${source === "surprise" ? html`<div class="sub"><span class="label">${t("Which pictures")}</span><div class="opts" role="group">
+          ${[[SURPRISE.moment, t("By the day, the hour and the weather")], [SURPRISE.random, t("The best of the gallery, by chance")]].map(([v, sub]) =>
+            html`<button class="opt pick" aria-pressed=${String(v === playing)} ?disabled=${this.busy} @click=${() => this.setAmbient({ list: v })}>
+              <b>${surpriseName(v)}</b><small>${sub}</small></button>`)}</div></div>` : nothing}
         ${playing ? html`
-          ${list && !list.items.length ? html`<p class="small muted hint">${t("The list {name} is empty, so only the clock shows.", { name: list.name })}</p>` : nothing}
+          ${list && !list.items.length ? html`<p class="small muted hint">${t("The list {name} is empty, so only the clock shows.", { name: listName(list) })}</p>` : nothing}
           <div class="rows">
             <div class="row"><span>${t("Each drawing")}</span><ph-duration .options=${STEPS} .value=${a.pictures} max="86400" @change=${(e) => this.setAmbient({ pictures: e.detail })}></ph-duration></div>
             <div class="row"><span>${t("Clock between")}</span><ph-duration .options=${[["0s", t("No")], ...STEPS]} .value=${a.clock} max="86400" @change=${(e) => this.setAmbient({ clock: e.detail })}></ph-duration></div>
@@ -815,6 +841,10 @@ const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
 // The list that is always there; the page shows it under its name in the reader's language.
 const FAVORITES = "favorites";
 const SURPRISE = { random: "@random", moment: "@moment" };
+const autoIcons = {
+  clock: icon(svg`<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>`),
+  list: icon(svg`<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><path d="M14 16.5h6M17 13.5v6"/>`),
+};
 const surpriseName = (list) => (list === SURPRISE.random ? t("Random") : list === SURPRISE.moment ? t("For the moment") : list);
 const galleryIcons = {
   dice: icon(svg`<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1" fill="currentColor"/><circle cx="15" cy="15" r="1" fill="currentColor"/><circle cx="15" cy="9" r="1" fill="currentColor"/><circle cx="9" cy="15" r="1" fill="currentColor"/>`),
@@ -1774,8 +1804,6 @@ const POKE_LINES = [
   "¡Vale, vale! Ya estoy despierto.",
   "Si me sigues tocando, me pongo el reloj y no te hablo más.",
 ];
-const QUICK = ["¡Hola!", "Sí.", "No.", "Vale.", "¡Gracias!", "¡Adiós!", "¿Qué tal?", "¡Buenos días!", "Buenas noches...", "¡A comer!",
-  "¡Bravo!", "Jajaja", "¿En serio?", "Ni idea...", "¡Cuidado!", "¡Te quiero!", "¡Socorro!", "Mmm... déjame pensar."];
 const SYNC = { min: -1000, max: 1500, step: 10, rest: 0 };
 const PITCH = { min: 50, max: 200, step: 5, rest: 100 };
 const BARS = 40;
@@ -1807,7 +1835,7 @@ class MoskoTab extends LitElement {
   static properties = {
     state: { attribute: false }, text: { state: true }, busy: { state: true }, rec: { state: true },
     lag: { state: true }, pitch: { state: true }, effect: { state: true }, face: { state: true }, talking: { state: true },
-    playingSound: { state: true },
+    playingSound: { state: true }, phrases: { state: true },
   };
   static styles = [base, css`
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
@@ -1884,7 +1912,8 @@ class MoskoTab extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this.wait();
-    api("POST", "talk/warm", { texts: QUICK }).catch(() => {});
+    api("GET", "talk/phrases").then((r) => { this.phrases = r.phrases; }).catch(() => {});
+    api("POST", "talk/warm").catch(() => {});
     for (let s = 0; s <= 4; s++) for (let m = 0; m <= 4; m++) new Image().src = faceURL(s, m);
     this.idle();
   }
@@ -1970,9 +1999,8 @@ class MoskoTab extends LitElement {
   quickPhrases() {
     return html`<div class="card">
       <div class="head"><h2>${t("Quick phrases")}</h2></div>
-      <div class="pads">${QUICK.map((text) => html`<button class="pad ${this.playingSound === text ? "on" : ""}"
+      <div class="pads">${(this.phrases ?? []).map((text) => html`<button class="pad ${this.playingSound === text ? "on" : ""}"
         ?disabled=${this.busy && this.playingSound !== text} @click=${() => this.quick(text)}><b>${text}</b></button>`)}</div>
-      <p class="hint">${t("The first time each one takes a moment; then it comes out at once.")}</p>
     </div>`;
   }
   // While this tab is open the display shows him waiting, blinking; the loop plays on the display by itself.

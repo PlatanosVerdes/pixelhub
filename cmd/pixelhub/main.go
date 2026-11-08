@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -136,6 +137,8 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 	}
 	if cfg.Speech != "" {
 		api.Voice = talk.Speaker{Addr: cfg.Speech, Voice: cfg.Voice}
+		// Each voice keeps its own reads, so changing it never plays the old one.
+		api.SpeechDir = filepath.Join(cfg.DataDir, "speech", cmp.Or(cfg.Voice, "default"))
 	}
 	if api.Drawings, err = drawings.Open(filepath.Join(cfg.DataDir, "drawings"), divoom.Size); err != nil {
 		return err
@@ -156,6 +159,7 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    16 << 10,
 	}
+	go api.WarmSpeech(ctx)
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)

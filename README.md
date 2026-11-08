@@ -90,7 +90,7 @@ The environment only says where the hardware is; everything else is state, edite
 | `PIXELHUB_DEVICE_MAC` | required | The display's Bluetooth address |
 | `PIXELHUB_CHANNEL` | `1` | The display's RFCOMM channel |
 | `PIXELHUB_PORT` | `8000` | HTTP port |
-| `PIXELHUB_DATA_DIR` | `/data` | Holds `state.json`, `spotify.json`, `lists/`, `drawings/`, `gallery-index.json`, `sprites/` and `ambient/` |
+| `PIXELHUB_DATA_DIR` | `/data` | Holds `state.json`, `spotify.json`, `lists/`, `drawings/`, `speech/` (what the voice read, a sentence at a time, the newest 400 per voice), `gallery-index.json`, `sprites/` and `ambient/` |
 | `PIXELHUB_LOG_JSON` | | `1` logs JSON (set in the image) |
 | `PIXELHUB_CHIME` | | `1` asks pixelbridge for a chime when a calendar event starts, except 23:00-08:00, and lets Mosko talk; the ESP32 bridge cannot play sound |
 | `PIXELHUB_SPEECH` | | A [Wyoming](https://github.com/rhasspy/wyoming) text-to-speech server's `host:port`, such as `wyoming-piper`, for Mosko to read text |
@@ -113,7 +113,8 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `GET /api/status` | Channel and why (`override` or `schedule`), layer, what is showing, `preview_version`, connection, last ack, `released_until` |
 | `POST /api/notify` | Show an alert: `sprite` or `color`, `priority` 0-10, `duration` up to `1h`, `source` |
 | `POST /api/talk/idle?for=` | Mosko waiting on the display, blinking, for up to 10 minutes (2 by default); the page shows him while his tab is open |
-| `POST /api/talk/warm` | `{"texts": [...]}`: read phrases ahead, so they come out at once; what the voice reads is kept a sentence at a time |
+| `GET /api/talk/phrases` | The quick phrases the Mosko tab offers |
+| `POST /api/talk/warm` | Read the quick phrases now, for a speech server that was away at start; they are read at start too |
 | `POST /api/talk` | Mosko says `{"text": ...}` or a multipart `audio` recording, his mouth and eyes moving with it |
 | `POST /api/channel` | Override the channel: `name`, optional `for`; without it, until the schedule changes |
 | `DELETE /api/channel` | Back to the schedule |

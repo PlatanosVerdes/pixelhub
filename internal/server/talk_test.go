@@ -156,3 +156,19 @@ func TestIdleAndKeptSpeech(t *testing.T) {
 		}
 	}
 }
+
+func TestSpeechKeptOnDisk(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	var said string
+	first := newKeptVoice(fakeVoice{&said}, dir)
+	if _, err := first.Say(context.Background(), "hola"); err != nil || said != "hola" {
+		t.Fatalf("first read: %v, said %q", err, said)
+	}
+	said = ""
+	again := newKeptVoice(fakeVoice{&said}, dir)
+	p, err := again.Say(context.Background(), "hola")
+	if err != nil || said != "" || p.Rate != talk.Rate || len(p.Samples) != talk.Rate {
+		t.Errorf("after a restart: %v, read aloud %q, got %d Hz %d samples", err, said, p.Rate, len(p.Samples))
+	}
+}

@@ -551,7 +551,6 @@ const es = {
 
   // Mosko's quick phrases
   "Quick phrases": "Frases rápidas",
-  "The first time each one takes a moment; then it comes out at once.": "La primera vez cada una tarda un poco; después sale al momento.",
 
   // Surprises
   "Random": "Aleatorio",
@@ -560,4 +559,14 @@ const es = {
   "Keep it going": "Que siga así",
   "In automatic it now shows things for the moment": "En automático ahora salen cosas del momento",
   "In automatic it now shows random pictures": "En automático ahora salen dibujos aleatorios",
+  "The clock all the time": "El reloj todo el rato",
+  "A list of mine": "Una lista mía",
+  "Your drawings, in turn": "Tus dibujos, uno tras otro",
+  "Make one in the Gallery first": "Crea una antes en la Galería",
+  "Surprise me": "Sorpréndeme",
+  "Gallery pictures, picked for you": "Dibujos de la galería elegidos para ti",
+  "Which list": "Qué lista",
+  "Which pictures": "Qué dibujos",
+  "By the day, the hour and the weather": "Según el día, la hora y el tiempo",
+  "The best of the gallery, by chance": "Lo mejor de la galería, al azar",
 };

@@ -39,67 +39,6 @@ type Decoder interface {
 // talking lets one clip be made at a time: the Pi has no room for two speech runs at once.
 type talking struct{ sync.Mutex }
 
-// keptVoice remembers what the voice read, a sentence at a time, so a repeated phrase needs no speech run;
-// one run at a time, shared by requests and warm-ups.
-type keptVoice struct {
-	Voice
-	one  chan struct{}
-	mu   sync.Mutex
-	kept map[string]talk.PCM
-}
-
-const keptLines = 256
-
-func newKeptVoice(v Voice) *keptVoice {
-	return &keptVoice{Voice: v, one: make(chan struct{}, 1), kept: map[string]talk.PCM{}}
-}
-
-func (k *keptVoice) cached(text string) (talk.PCM, bool) {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	p, ok := k.kept[text]
-	return p, ok
-}
-
-func (k *keptVoice) Say(ctx context.Context, text string) (talk.PCM, error) {
-	if p, ok := k.cached(text); ok {
-		return p, nil
-	}
-	select {
-	case k.one <- struct{}{}:
-	case <-ctx.Done():
-		return talk.PCM{}, ctx.Err()
-	}
-	defer func() { <-k.one }()
-	if p, ok := k.cached(text); ok {
-		return p, nil
-	}
-	p, err := k.Voice.Say(ctx, text)
-	if err != nil {
-		return talk.PCM{}, err
-	}
-	k.mu.Lock()
-	if len(k.kept) >= keptLines {
-		clear(k.kept)
-	}
-	k.kept[text] = p
-	k.mu.Unlock()
-	return p, nil
-}
-
-// warm reads texts ahead, in the background, so they come out at once when asked for.
-func (k *keptVoice) warm(texts []string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	for _, text := range texts {
-		for _, l := range talk.Script(text) {
-			if _, err := k.Say(ctx, l.Text); err != nil {
-				return
-			}
-		}
-	}
-}
-
 // idleFor is how long Mosko waits on the display; the page asks again while it stays open.
 const (
 	idleFor    = 2 * time.Minute
@@ -202,27 +141,6 @@ func (s *Server) spoken(ctx context.Context, text string, tune state.Talk) (talk
 		pcm, spans = out, talk.Stretch(spans, pcm.Duration(), out.Duration())
 	}
 	return pcm, spans, 0, nil
-}
-
-type warmRequest struct {
-	Texts []string `json:"texts"`
-}
-
-// warmUp reads phrases the page offers before they are asked for.
-func (s *Server) warmUp(w http.ResponseWriter, r *http.Request) {
-	var req warmRequest
-	if !decode(w, r, &req, largeBody) {
-		return
-	}
-	if s.voice == nil {
-		writeError(w, http.StatusServiceUnavailable, errors.New("no speech server set up"))
-		return
-	}
-	if len(req.Texts) > 64 {
-		req.Texts = req.Texts[:64]
-	}
-	go s.voice.warm(req.Texts)
-	writeJSON(w, http.StatusAccepted, map[string]int{"warming": len(req.Texts)})
 }
 
 // idle shows Mosko waiting, blinking, for ?for= (2 minutes by default).

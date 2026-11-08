@@ -84,6 +84,8 @@ type Server struct {
 	Decoder Decoder
 	talking talking
 	voice   *keptVoice
+	// SpeechDir, when set, keeps what the voice read across restarts.
+	SpeechDir string
 	// Size is the display's side in pixels, for drawing previews.
 	Size    int
 	Version string
@@ -91,7 +93,7 @@ type Server struct {
 
 func (s *Server) Handler() http.Handler {
 	if s.Voice != nil && s.voice == nil {
-		s.voice = newKeptVoice(s.Voice)
+		s.voice = newKeptVoice(s.Voice, s.SpeechDir)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -118,6 +120,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/talk/mosko.png", s.moskoPNG)
 	mux.HandleFunc("POST /api/talk/idle", s.idle)
 	mux.HandleFunc("POST /api/talk/warm", s.warmUp)
+	mux.HandleFunc("GET /api/talk/phrases", s.phrases)
 	mux.HandleFunc("GET /api/sprites", s.sprites)
 	mux.HandleFunc("GET /api/sprites/{file}", s.spritePNG)
 	mux.HandleFunc("GET /api/preview.png", s.previewPNG)
