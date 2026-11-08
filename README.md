@@ -137,7 +137,7 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `POST /api/gallery/show` | `{"file", "name", "for"}`: show it now, like an alert that every profile accepts (30 s by default) |
 | `POST /api/gallery/save` | `{"file", "name", "channel"}`: keep it among a profile's ambient pictures |
 | `POST /api/lists/{name}/upload` | A GIF or PNG of your own into a list (multipart field `file`) |
-| `GET /api/lists`, `POST /api/lists` | Your lists of gallery pictures, and a new one (`{"name"}`); GIFs are kept in `/data/lists/`, so they stay if the gallery drops them |
+| `GET /api/lists`, `POST /api/lists` | Your lists of gallery pictures, and a new one (`{"name"}`); GIFs are kept in `/data/lists/`, so they stay if the gallery drops them. A smart list (`{"name", "search": [...]}` or `{"name", "category"}`) keeps no pictures: it plays what the gallery finds for one of its words, the best liked first, or the most liked of its category, a different one each turn |
 | `PUT /api/lists/{name}`, `DELETE /api/lists/{name}` | Rename (`{"name"}`), delete |
 | `POST /api/lists/{name}/items`, `DELETE /api/lists/{name}/items?file=` | Add a gallery picture (`{"file", "name", "author", "likes"}`), remove one |
 | `GET /api/drawings`, `POST /api/drawings` | Animations drawn in the page (Draw tab): `name`, `delay_ms` 20-5000, `frames` (1-60, each 256 pixels as `rrggbb`, row by row); list, create |
@@ -145,7 +145,7 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `POST /api/drawings/show` | A drawing, saved or not, plus `for` (30 s by default): show it now, like a gallery picture |
 | `POST /api/drawings/{id}/list` | `{"list"}`: put a saved drawing in a list, so the automatic rotation shows it; again after an edit updates it |
 | `DELETE /api/show?key=` | Take off what was shown by hand, only if its key starts with `key` (`drawing/`, `mosko-idle`; all without it) |
-| `POST /api/gallery/surprise` | `{"kind": "random"\|"moment", "for"}`: show a gallery picture picked by chance, or one that suits the day and hour (`theme` says why) |
+| `POST /api/gallery/surprise` | `{"kind": "random"\|"moment", "for"}` or `{"list": <smart list>}`: show a gallery picture picked by chance, or one that suits the day and hour (`theme` says why) |
 | `GET /api/spotify` | Whether a Spotify app and account are linked, and what plays now |
 | `PUT /api/spotify` | `{"client_id": ...}` of your Spotify app; a new one forgets the signed-in account |
 | `GET /api/spotify/login` | Sends the browser to Spotify to sign in; it comes back to `/api/spotify/callback` on the same host |
