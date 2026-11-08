@@ -531,7 +531,7 @@ const es = {
   "Move it after": "Mover después",
   "Delete this frame": "Eliminar este fotograma",
   "Preview": "Vista previa",
-  "The display shows it as you draw, while this tab is open.": "La pantalla lo muestra mientras dibujas, mientras estés en esta pestaña.",
+  "The display shows it as you draw, while this tab is open; a blank canvas leaves the display as it was.": "La pantalla lo muestra mientras dibujas, mientras estés en esta pestaña; con el lienzo vacío la pantalla sigue como estaba.",
   "Frames per second": "Fotogramas por segundo",
   "Editing": "Editando",
   "New drawing": "Dibujo nuevo",
