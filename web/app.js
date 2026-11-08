@@ -2199,8 +2199,20 @@ customElements.define("ph-mosko", MoskoTab);
 // The drawing tab: animations drawn pixel by pixel, kept in pixelhub and shown on the display.
 const SIDE = 16;
 const BLACK = "#000000";
-const PALETTE = ["#ffffff", "#ff0000", "#ff7a00", "#ffd400", "#9dff00", "#00d43a", "#00e0b0", "#00c8ff",
-  "#0050ff", "#5a2dff", "#b026ff", "#ff3fa4", "#ffb38a", "#8a4b1c", "#7a7a7a", BLACK];
+// Palettes to start from; black is a LED switched off, so it is the eraser rather than a colour here.
+const PALETTES = [
+  ["vivid", "Vivid", ["#ffffff", "#ff0000", "#ff4d00", "#ff7a00", "#ffb000", "#ffd400", "#ffff00", "#c8ff00", "#7dff00", "#00ff3c", "#00d43a", "#00ffa0",
+    "#00e0b0", "#00ffff", "#00c8ff", "#0088ff", "#0050ff", "#2a00ff", "#5a2dff", "#8a00ff", "#b026ff", "#ff00ff", "#ff3fa4", "#ff0060"]],
+  ["pastel", "Pastel", ["#ffd1dc", "#ffb3c6", "#ffc8a2", "#ffe5a8", "#fff3b0", "#e2f0a9", "#c1f0c1", "#a8e6cf",
+    "#b5ead7", "#a0e7e5", "#b4d8ff", "#c7ceea", "#d5c6ff", "#e7c6ff", "#f6c6ea", "#ffffff"]],
+  ["retro", "Retro", ["#1d1d3b", "#3f2a6b", "#7b2d6e", "#c2355b", "#ff6b4a", "#ffb347", "#ffe066", "#9be564",
+    "#3cb371", "#2a7f62", "#1f4e79", "#3a86ff", "#7ad7f0", "#c0c0c0", "#f4f4f4", "#ffffff"]],
+  ["earth", "Earth", ["#ffe0bd", "#ffcd94", "#eac086", "#e0ac69", "#c68642", "#8d5524", "#5c3317", "#3b2314",
+    "#a0522d", "#d2b48c", "#6b8e23", "#556b2f", "#228b22", "#8fbc8f", "#87ceeb", "#4682b4"]],
+  ["greys", "Greys", ["#ffffff", "#e6e6e6", "#cccccc", "#b3b3b3", "#999999", "#808080", "#666666", "#4d4d4d", "#333333", "#1a1a1a"]],
+];
+const COLORS_KEY = "pixelhub.colors";
+const MAX_RECENT = 12;
 const SPEEDS = [[1000, "1"], [500, "2"], [250, "4"], [125, "8"], [83, "12"]];
 const MAX_FRAMES = 60;
 const DRAFT_KEY = "pixelhub.draft";
@@ -2216,9 +2228,17 @@ const drawIcon = {
   undo: icon(svg`<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>`),
   redo: icon(svg`<path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/>`),
   onion: icon(svg`<rect x="3" y="7" width="11" height="11" rx="2" stroke-dasharray="2 2"/><rect x="9" y="4" width="11" height="11" rx="2"/>`),
+  move: icon(svg`<path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/>`),
+  palette: icon(svg`<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.9 1.2-1.8-.5-1.1.2-2.2 1.4-2.2H17a4 4 0 0 0 4-4c0-5.5-4-10-9-10z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="14.5" cy="7" r="1.2" fill="currentColor"/>`),
   copy: icon(svg`<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>`),
   left: icon(svg`<path d="m15 18-6-6 6-6"/>`),
   right: icon(svg`<path d="m9 18 6-6-6-6"/>`),
+};
+// A frame moved by whole pixels, wrapping round, so a drawing can scroll across the display.
+const shifted = (f, dx, dy) => {
+  const next = blank();
+  for (let y = 0; y < SIDE; y++) for (let x = 0; x < SIDE; x++) next[(((y + dy) % SIDE + SIDE) % SIDE) * SIDE + (((x + dx) % SIDE + SIDE) % SIDE)] = f[y * SIDE + x];
+  return next;
 };
 const decoded = new WeakMap();
 const framesOf = (d) => { let f = decoded.get(d); if (!f) decoded.set(d, (f = d.frames.map(fromHex))); return f; };
@@ -2248,6 +2268,7 @@ class DrawTab extends LitElement {
     frames: { state: true }, cur: { state: true }, color: { state: true }, tool: { state: true }, mirror: { state: true }, onion: { state: true },
     delay: { state: true }, name: { state: true }, id: { state: true }, dirty: { state: true }, busy: { state: true },
     drawings: { state: true }, lists: { state: true }, beat: { state: true }, recent: { state: true },
+    mine: { state: true }, palette: { state: true }, editMine: { state: true },
   };
   static styles = [base, css`
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
@@ -2262,12 +2283,31 @@ class DrawTab extends LitElement {
     .tool:disabled { opacity: .35; cursor: default; }
     .tool svg { width: 20px; height: 20px; }
     .group { display: inline-flex; gap: 4px; }
-    .palette { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+    .colorbar { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+    .current { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px 0 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; font-family: var(--font-data); font-size: 12px; }
+    .current:hover { border-color: var(--muted); }
+    .current i { width: 32px; height: 32px; border-radius: 8px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .15); }
+    .current svg { width: 18px; height: 18px; color: var(--muted); }
+    .strip { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; padding: 3px; }
+    .strip .swatch { flex: none; width: 34px; }
+    .strip .none { font-size: 12px; color: var(--muted); align-self: center; }
+    .palette { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+    dialog { border: 1px solid var(--line); border-radius: 18px; background: var(--surface); color: var(--ink); padding: 18px; width: min(460px, calc(100vw - 24px)); max-height: 88vh; overflow-y: auto; }
+    dialog::backdrop { background: rgba(5, 4, 12, .6); backdrop-filter: blur(2px); }
+    @media (max-width: 600px) { dialog { margin: auto 0 0; width: 100%; max-width: 100%; border-radius: 18px 18px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); } }
+    .sheet { display: grid; gap: 16px; }
+    .sheet h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+    .sheet h3 span { flex: 1; }
+    .now { display: flex; align-items: center; gap: 10px; }
+    .now i { width: 44px; height: 44px; border-radius: 10px; flex: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .15); }
+    .now input[type=text] { width: 110px; font-family: var(--font-data); text-transform: lowercase; }
+    .pickany { position: relative; overflow: hidden; }
+    .pickany input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+    .editing .swatch { animation: wobble .25s ease-in-out infinite alternate; }
+    @keyframes wobble { from { transform: rotate(-3deg); } to { transform: rotate(3deg); } }
+    .board.moving { cursor: grab; }
     .swatch { aspect-ratio: 1; border-radius: 8px; border: 2px solid transparent; cursor: pointer; padding: 0; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12); }
     .swatch[aria-pressed=true] { border-color: var(--ink); box-shadow: 0 0 0 2px var(--accent); }
-    .custom { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
-    .custom .recent { display: flex; gap: 6px; }
-    .custom .recent .swatch { width: 28px; }
     .frames { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 8px; scroll-snap-type: x proximity; }
     .frame { flex: none; width: 56px; display: grid; gap: 3px; justify-items: center; border: 0; background: none; cursor: pointer; padding: 0; color: var(--muted); font-size: 11px; font-family: var(--font-data); scroll-snap-align: start; }
     .frame img { width: 56px; height: 56px; border-radius: 8px; border: 2px solid var(--line); background: #000; }
@@ -2296,7 +2336,9 @@ class DrawTab extends LitElement {
     this.color = "#ff0000"; this.tool = "pen"; this.mirror = false; this.onion = true;
     this.drawings = null; this.lists = []; this.beat = 0;
     this.undos = []; this.redos = [];
-    this.recent = [];
+    let colors = {};
+    try { colors = JSON.parse(localStorage.getItem(COLORS_KEY)) ?? {}; } catch { /* first visit */ }
+    this.recent = colors.recent ?? []; this.mine = colors.mine ?? []; this.palette = colors.palette ?? "vivid";
     let draft = null;
     try { draft = JSON.parse(localStorage.getItem(DRAFT_KEY)); } catch { /* no draft */ }
     if (draft?.frames?.length) this.load(draft, draft.dirty);
@@ -2437,6 +2479,7 @@ class DrawTab extends LitElement {
     e.currentTarget.setPointerCapture(e.pointerId);
     this.stroke = [...frame];
     this.last = at;
+    if (this.tool === "move") { this.from = at; return; }
     this.plot(this.stroke, x, y, this.tool === "eraser" ? BLACK : this.color);
     this.paint();
   }
@@ -2444,6 +2487,11 @@ class DrawTab extends LitElement {
     if (!this.stroke) return;
     const at = this.cellAt(e);
     if (!at) return;
+    if (this.tool === "move") {
+      this.stroke = shifted(this.frames[this.cur], at[0] - this.from[0], at[1] - this.from[1]);
+      this.paint();
+      return;
+    }
     const c = this.tool === "eraser" ? BLACK : this.color;
     // A line from the last cell, so a fast stroke leaves no gaps.
     let [x0, y0] = this.last;
@@ -2469,8 +2517,58 @@ class DrawTab extends LitElement {
     }
   }
   pickedColor() {
-    if (PALETTE.includes(this.color)) return;
-    this.recent = [this.color, ...this.recent.filter((c) => c !== this.color)].slice(0, 6);
+    if (this.color === BLACK || this.recent[0] === this.color) return;
+    this.recent = [this.color, ...this.recent.filter((c) => c !== this.color)].slice(0, MAX_RECENT);
+    this.keepColors();
+  }
+  keepColors() {
+    try { localStorage.setItem(COLORS_KEY, JSON.stringify({ recent: this.recent, mine: this.mine, palette: this.palette })); } catch { /* a convenience */ }
+  }
+  useColor(c, close = true) {
+    this.color = c;
+    if (this.tool !== "fill") this.tool = "pen";
+    if (close) this.renderRoot.querySelector("dialog")?.close();
+  }
+  saveMine() {
+    if (this.mine.includes(this.color)) return;
+    this.mine = [...this.mine, this.color].slice(-32);
+    this.keepColors();
+  }
+  dropMine(c) {
+    this.mine = this.mine.filter((x) => x !== c);
+    if (!this.mine.length) this.editMine = false;
+    this.keepColors();
+  }
+  colorSheet() {
+    const swatches = (list, onPick) => list.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c}
+      aria-pressed=${String(this.color === c)} @click=${() => onPick(c)}></button>`);
+    const pal = PALETTES.find(([id]) => id === this.palette) ?? PALETTES[0];
+    return html`<dialog @click=${(e) => { if (e.target.tagName === "DIALOG") e.target.close(); }} @close=${() => { this.editMine = false; }}>
+      <div class="sheet">
+        <div class="head" style="margin:0"><h2>${t("Colours")}</h2>
+          <button class="icon" aria-label=${t("Close")} @click=${(e) => e.target.closest("dialog").close()}>${icons.close}</button></div>
+        <div class="now">
+          <i style="background:${this.color}"></i>
+          <input type="text" maxlength="7" aria-label=${t("Colour code")} .value=${this.color}
+            @change=${(e) => { const v = e.target.value.trim().toLowerCase().replace(/^([0-9a-f]{6})$/, "#$1"); if (/^#[0-9a-f]{6}$/.test(v)) this.useColor(v, false); else e.target.value = this.color; }}>
+          <label class="btn pickany">${drawIcon.palette}${t("Any colour")}<input type="color" .value=${this.color} @input=${(e) => this.useColor(e.target.value, false)}></label>
+        </div>
+        <div>
+          ${segmented(PALETTES.map(([id, label]) => [id, t(label)]), pal[0], (v) => { this.palette = v; this.keepColors(); })}
+          <div class="palette" style="margin-top:10px">${swatches(pal[2], (c) => this.useColor(c))}</div>
+        </div>
+        <div>
+          <h3><span>${t("My colours")}</span>
+            ${this.mine.length ? html`<button class="btn small" @click=${() => { this.editMine = !this.editMine; }}>${this.editMine ? t("Done") : t("Edit")}</button>` : nothing}
+            <button class="btn small" ?disabled=${this.mine.includes(this.color)} @click=${() => this.saveMine()}>${icons.plus}${t("Save this one")}</button></h3>
+          ${this.mine.length ? html`<div class="palette ${this.editMine ? "editing" : ""}" style="margin-top:10px">${swatches(this.mine, (c) => (this.editMine ? this.dropMine(c) : this.useColor(c)))}</div>`
+            : html`<p class="hint">${t("Save the colours you use most, to have them at hand.")}</p>`}
+          ${this.editMine ? html`<p class="hint">${t("Tap a colour to remove it.")}</p>` : nothing}
+        </div>
+        ${this.recent.length ? html`<div><h3><span>${t("Recent")}</span></h3>
+          <div class="palette" style="margin-top:10px">${swatches(this.recent, (c) => this.useColor(c))}</div></div>` : nothing}
+      </div>
+    </dialog>`;
   }
 
   addFrame(copy) {
@@ -2488,12 +2586,6 @@ class DrawTab extends LitElement {
     const next = [...this.frames];
     [next[this.cur], next[to]] = [next[to], next[this.cur]];
     this.change(next, to);
-  }
-  // Moves the whole frame a pixel, wrapping round: handy for scrolling animations.
-  shift(dx, dy) {
-    const f = this.frames[this.cur], next = blank();
-    for (let y = 0; y < SIDE; y++) for (let x = 0; x < SIDE; x++) next[((y + dy + SIDE) % SIDE) * SIDE + ((x + dx + SIDE) % SIDE)] = f[y * SIDE + x];
-    this.change(this.frames.map((g, i) => (i === this.cur ? next : g)));
   }
 
   body() { return { name: this.name.trim() || t("Untitled"), delay_ms: this.delay, frames: this.frames.map(toHex) }; }
@@ -2552,11 +2644,11 @@ class DrawTab extends LitElement {
 
   render() {
     const frames = this.frames, n = frames.length;
-    const tools = [["pen", t("Pencil"), drawIcon.pen], ["eraser", t("Eraser"), drawIcon.eraser], ["fill", t("Fill"), drawIcon.fill], ["pick", t("Pick a colour"), drawIcon.pick]];
+    const tools = [["pen", t("Pencil"), drawIcon.pen], ["eraser", t("Eraser"), drawIcon.eraser], ["fill", t("Fill"), drawIcon.fill], ["pick", t("Pick a colour"), drawIcon.pick], ["move", t("Move the drawing"), drawIcon.move]];
     return html`<div class="layout">
       <div class="main">
         <div class="card">
-          <canvas class="board" role="img" aria-label=${t("Frame {i} of {n}", { i: this.cur + 1, n })}
+          <canvas class="board ${this.tool === "move" ? "moving" : ""}" role="img" aria-label=${t("Frame {i} of {n}", { i: this.cur + 1, n })}
             @pointerdown=${(e) => this.down(e)} @pointermove=${(e) => this.move(e)} @pointerup=${() => this.up()} @pointercancel=${() => this.up()}
             @contextmenu=${(e) => e.preventDefault()}></canvas>
           <div class="tools">
@@ -2568,18 +2660,15 @@ class DrawTab extends LitElement {
             <button class="tool" title=${t("Undo")} aria-label=${t("Undo")} ?disabled=${!this.undos.length} @click=${() => this.undo()}>${drawIcon.undo}</button>
             <button class="tool" title=${t("Redo")} aria-label=${t("Redo")} ?disabled=${!this.redos.length} @click=${() => this.redo()}>${drawIcon.redo}</button>
           </div>
-          <div class="palette">${PALETTE.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c} aria-pressed=${String(this.color === c && this.tool !== "eraser")}
-            @click=${() => { this.color = c; if (this.tool !== "fill") this.tool = "pen"; }}></button>`)}</div>
-          <div class="custom">
-            <input type="color" aria-label=${t("Another colour")} .value=${this.color} @input=${(e) => { this.color = e.target.value; if (this.tool !== "fill") this.tool = "pen"; }}>
-            <div class="recent">${this.recent.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c} aria-pressed=${String(this.color === c)} @click=${() => { this.color = c; }}></button>`)}</div>
-            <span class="sp" style="flex:1"></span>
-            <div class="group" role="group" aria-label=${t("Move the frame")}>
-              <button class="tool" aria-label=${t("Shift left")} @click=${() => this.shift(-1, 0)}>${drawIcon.left}</button>
-              <button class="tool" aria-label=${t("Shift up")} @click=${() => this.shift(0, -1)}>${icons.up}</button>
-              <button class="tool" aria-label=${t("Shift down")} @click=${() => this.shift(0, 1)}>${icons.down}</button>
-              <button class="tool" aria-label=${t("Shift right")} @click=${() => this.shift(1, 0)}>${drawIcon.right}</button>
-            </div>
+          <div class="colorbar">
+            <button class="current" title=${t("Colours")} @click=${() => this.renderRoot.querySelector("dialog").showModal()}>
+              <i style="background:${this.color}"></i>${this.color}${drawIcon.palette}</button>
+            <div class="strip" aria-label=${t("Recent")}>${this.recent.length
+              ? this.recent.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c} aria-pressed=${String(this.color === c && this.tool !== "eraser")} @click=${() => this.useColor(c, false)}></button>`)
+              : html`<span class="none">${t("The colours you use show up here.")}</span>`}</div>
+          </div>
+          ${this.colorSheet()}
+        </div>
           </div>
         </div>
         <div class="card">
