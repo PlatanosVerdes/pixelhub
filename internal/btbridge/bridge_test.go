@@ -40,7 +40,11 @@ func TestBridge(t *testing.T) {
 		after time.Duration
 	}
 	said := make(chan sound, 2)
-	b.Say = func(ctx context.Context, _ [6]byte, wav []byte, after time.Duration) { said <- sound{ctx, wav, after} }
+	sayErr := make(chan error, 2)
+	b.Say = func(ctx context.Context, _ [6]byte, wav []byte, after time.Duration) error {
+		said <- sound{ctx, wav, after}
+		return <-sayErr
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -95,6 +99,8 @@ func TestBridge(t *testing.T) {
 	faceA, faceB := []byte{0x01, 0x0a}, []byte{0x01, 0x0b}
 	start := time.Now()
 	say := talkOp(250*time.Millisecond, 30*time.Millisecond, wav, face{40 * time.Millisecond, faceA}, face{0, faceB})
+	sayErr <- nil
+	sayErr <- ErrNoSpeaker
 	c.Write(say[:3000]) // a talk split across reads, then a frame behind it
 	c.Write(append(say[3000:], frame...))
 	var first sound
@@ -113,6 +119,9 @@ func TestBridge(t *testing.T) {
 	}
 	if took := time.Since(start); took < 70*time.Millisecond {
 		t.Errorf("both faces painted in %s, want them 30 ms and 70 ms in", took)
+	}
+	if got := read(2); !bytes.Equal(got, []byte{opSpeaker, 1}) {
+		t.Errorf("after a talk the speaker played: %x", got)
 	}
 
 	c.Write(talkOp(0, 0, wav, face{300 * time.Millisecond, faceA}, face{0, faceB}))
@@ -135,6 +144,9 @@ func TestBridge(t *testing.T) {
 	case got := <-link.written:
 		t.Errorf("painted %x after the talk was stopped", got)
 	case <-time.After(400 * time.Millisecond):
+	}
+	if got := read(2); !bytes.Equal(got, []byte{opSpeaker, 0}) {
+		t.Errorf("after a talk with no speaker: %x", got)
 	}
 	answer := []byte{0x01, 0x06, 0x00, 0x04, 0x32, 0x55, 0x50, 0xe1, 0x00, 0x02}
 	go w.Write(answer)

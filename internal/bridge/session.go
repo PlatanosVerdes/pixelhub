@@ -328,7 +328,7 @@ func (l *link) hold() error {
 			if ev.lost {
 				return errLinkLost
 			}
-			if ev.battery > 0 || ev.light > 0 || ev.sound {
+			if ev.battery > 0 || ev.light > 0 || ev.sound || ev.speaker > 0 {
 				l.sensed(ev)
 				continue
 			}
@@ -362,7 +362,7 @@ func (l *link) next(deadline time.Time) (event, error) {
 			if ev.err != nil {
 				return event{}, fmt.Errorf("read bridge: %w", ev.err)
 			}
-			if ev.battery > 0 || ev.light > 0 || ev.sound {
+			if ev.battery > 0 || ev.light > 0 || ev.sound || ev.speaker > 0 {
 				l.sensed(ev)
 				continue
 			}
@@ -529,6 +529,13 @@ func (s *Session) sensed(ev event) {
 	}
 	if ev.sound {
 		s.status.SoundAt = time.Now()
+	}
+	if ev.speaker > 0 {
+		heard := ev.speaker == 2
+		s.status.Speaker, s.status.SpeakerAt = &heard, time.Now()
+		if !heard {
+			s.log.Warn("the display's speaker is not connected: a talk went unheard")
+		}
 	}
 }
 

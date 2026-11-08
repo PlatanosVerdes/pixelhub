@@ -89,6 +89,9 @@ type Status struct {
 	Light   *int      `json:"light,omitempty"`
 	LightAt time.Time `json:"light_at,omitzero"`
 	SoundAt time.Time `json:"sound_at,omitzero"`
+	// Speaker says whether the display's speaker played the last talk, when the bridge can tell.
+	Speaker   *bool     `json:"speaker,omitempty"`
+	SpeakerAt time.Time `json:"speaker_at,omitzero"`
 }
 
 // Display drives a physical screen. Show only records what should be on screen: the driver

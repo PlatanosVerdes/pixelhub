@@ -70,6 +70,16 @@ func TestParserBattery(t *testing.T) {
 	}
 }
 
+func TestParserSpeaker(t *testing.T) {
+	t.Parallel()
+	var p parser
+	got := p.feed([]byte{0x41})
+	got = append(got, p.feed([]byte{0x00, 0x41, 0x01})...)
+	if len(got) != 2 || got[0].speaker != 1 || got[1].speaker != 2 {
+		t.Errorf("no speaker split over reads, then a talk heard: %+v", got)
+	}
+}
+
 func TestParserSensors(t *testing.T) {
 	t.Parallel()
 	var p parser
