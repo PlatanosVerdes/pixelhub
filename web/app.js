@@ -2234,6 +2234,12 @@ const drawIcon = {
   left: icon(svg`<path d="m15 18-6-6 6-6"/>`),
   right: icon(svg`<path d="m9 18 6-6-6-6"/>`),
 };
+// The colours a drawing uses, the most used first.
+const colorsOf = (frames) => {
+  const count = new Map();
+  for (const f of frames) for (const c of f) if (c !== BLACK) count.set(c, (count.get(c) ?? 0) + 1);
+  return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c).slice(0, MAX_RECENT);
+};
 // A frame moved by whole pixels, wrapping round, so a drawing can scroll across the display.
 const shifted = (f, dx, dy) => {
   const next = blank();
@@ -2284,14 +2290,18 @@ class DrawTab extends LitElement {
     .tool svg { width: 20px; height: 20px; }
     .group { display: inline-flex; gap: 4px; }
     .colorbar { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
-    .current { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px 0 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; font-family: var(--font-data); font-size: 12px; }
+    .current { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 44px; padding: 0 10px 0 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; font-family: var(--font-data); font-size: 12px; }
     .current:hover { border-color: var(--muted); }
     .current i { width: 32px; height: 32px; border-radius: 8px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .15); }
     .current svg { width: 18px; height: 18px; color: var(--muted); }
-    .strip { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; padding: 3px; }
-    .strip .swatch { flex: none; width: 34px; }
-    .strip .none { font-size: 12px; color: var(--muted); align-self: center; }
-    .palette { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+    .link-btn { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; padding: 6px 0 0; }
+    .link-btn:hover { color: var(--ink); }
+    .tabs { flex: 1; min-width: 0; display: flex; gap: 2px; overflow-x: auto; background: var(--chip); border-radius: 10px; padding: 2px; scrollbar-width: none; }
+    .tabs button { flex: none; border: 0; background: none; height: 38px; padding: 0 12px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer; }
+    .tabs button[aria-selected=true] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+    .palette { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+    .big { display: grid; place-items: end start; height: 110px; border-radius: 14px; padding: 10px 12px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .15); cursor: pointer; }
+    .big span { font-size: 12px; font-weight: 600; color: #fff; background: rgba(0, 0, 0, .45); padding: 3px 8px; border-radius: 999px; }
     dialog { border: 1px solid var(--line); border-radius: 18px; background: var(--surface); color: var(--ink); padding: 18px; width: min(460px, calc(100vw - 24px)); max-height: 88vh; overflow-y: auto; }
     dialog::backdrop { background: rgba(5, 4, 12, .6); backdrop-filter: blur(2px); }
     @media (max-width: 600px) { dialog { margin: auto 0 0; width: 100%; max-width: 100%; border-radius: 18px 18px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); } }
@@ -2299,7 +2309,6 @@ class DrawTab extends LitElement {
     .sheet h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 8px; }
     .sheet h3 span { flex: 1; }
     .now { display: flex; align-items: center; gap: 10px; }
-    .now i { width: 44px; height: 44px; border-radius: 10px; flex: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .15); }
     .now input[type=text] { width: 110px; font-family: var(--font-data); text-transform: lowercase; }
     .pickany { position: relative; overflow: hidden; }
     .pickany input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
@@ -2338,7 +2347,7 @@ class DrawTab extends LitElement {
     this.undos = []; this.redos = [];
     let colors = {};
     try { colors = JSON.parse(localStorage.getItem(COLORS_KEY)) ?? {}; } catch { /* first visit */ }
-    this.recent = colors.recent ?? []; this.mine = colors.mine ?? []; this.palette = colors.palette ?? "vivid";
+    this.mine = colors.mine ?? []; this.palette = colors.palette ?? "vivid";
     let draft = null;
     try { draft = JSON.parse(localStorage.getItem(DRAFT_KEY)); } catch { /* no draft */ }
     if (draft?.frames?.length) this.load(draft, draft.dirty);
@@ -2375,18 +2384,21 @@ class DrawTab extends LitElement {
   }
 
   fresh() {
+    this.recent = [];
     this.frames = [blank()]; this.cur = 0; this.delay = 250; this.name = ""; this.id = null; this.dirty = false;
     this.undos = []; this.redos = [];
   }
+  // A drawing brings back its own recent colours: the ones kept with its draft, or the ones it is made of.
   load(d, dirty = false) {
     this.frames = d.frames.map((f) => (typeof f === "string" ? fromHex(f) : [...f]));
+    this.recent = d.recent ?? colorsOf(this.frames);
     this.cur = 0; this.delay = d.delay_ms ?? d.delay ?? 250; this.name = d.name ?? ""; this.id = d.id ?? null; this.dirty = dirty;
     this.undos = []; this.redos = [];
   }
   keepDraft() {
     clearTimeout(this.draftTimer);
     this.draftTimer = setTimeout(() => {
-      try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ frames: this.frames.map(toHex), delay_ms: this.delay, name: this.name, id: this.id, dirty: this.dirty })); }
+      try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ frames: this.frames.map(toHex), delay_ms: this.delay, name: this.name, id: this.id, dirty: this.dirty, recent: this.recent })); }
       catch { /* the draft is a convenience */ }
     }, 400);
   }
@@ -2519,10 +2531,10 @@ class DrawTab extends LitElement {
   pickedColor() {
     if (this.color === BLACK || this.recent[0] === this.color) return;
     this.recent = [this.color, ...this.recent.filter((c) => c !== this.color)].slice(0, MAX_RECENT);
-    this.keepColors();
+    this.keepDraft();
   }
   keepColors() {
-    try { localStorage.setItem(COLORS_KEY, JSON.stringify({ recent: this.recent, mine: this.mine, palette: this.palette })); } catch { /* a convenience */ }
+    try { localStorage.setItem(COLORS_KEY, JSON.stringify({ mine: this.mine, palette: this.palette })); } catch { /* a convenience */ }
   }
   useColor(c, close = true) {
     this.color = c;
@@ -2539,34 +2551,39 @@ class DrawTab extends LitElement {
     if (!this.mine.length) this.editMine = false;
     this.keepColors();
   }
+  colorTabs() {
+    return [["recent", t("Recent")], ...PALETTES.map(([id, label]) => [id, t(label)]), ["mine", t("Mine")]];
+  }
+  swatches(list) {
+    return list.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c}
+      aria-pressed=${String(this.color === c && this.tool !== "eraser")} @click=${() => this.useColor(c)}></button>`);
+  }
+  colorGrid() {
+    const list = this.palette === "recent" ? this.recent : this.palette === "mine" ? this.mine : (PALETTES.find(([id]) => id === this.palette) ?? PALETTES[0])[2];
+    const clear = this.palette === "recent" && list.length
+      ? html`<button class="link-btn" @click=${() => { this.recent = []; this.keepDraft(); }}>${t("Clear the colours")}</button>` : nothing;
+    if (list.length) return html`<div class="palette">${this.swatches(list)}</div>${clear}`;
+    return html`<p class="hint">${this.palette === "recent" ? t("The colours of this drawing show up here, custom ones too; a new drawing starts without any.") : t("Save colours here from the custom colour button.")}</p>`;
+  }
+  // A colour of one's own: any colour or a code, kept among Mine to find again.
   colorSheet() {
-    const swatches = (list, onPick) => list.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c}
-      aria-pressed=${String(this.color === c)} @click=${() => onPick(c)}></button>`);
-    const pal = PALETTES.find(([id]) => id === this.palette) ?? PALETTES[0];
     return html`<dialog @click=${(e) => { if (e.target.tagName === "DIALOG") e.target.close(); }} @close=${() => { this.editMine = false; }}>
       <div class="sheet">
-        <div class="head" style="margin:0"><h2>${t("Colours")}</h2>
+        <div class="head" style="margin:0"><h2>${t("Custom colour")}</h2>
           <button class="icon" aria-label=${t("Close")} @click=${(e) => e.target.closest("dialog").close()}>${icons.close}</button></div>
+        <label class="big pickany" style="background:${this.color}"><span>${t("Tap to choose")}</span><input type="color" .value=${this.color} @input=${(e) => this.useColor(e.target.value, false)}></label>
         <div class="now">
-          <i style="background:${this.color}"></i>
           <input type="text" maxlength="7" aria-label=${t("Colour code")} .value=${this.color}
             @change=${(e) => { const v = e.target.value.trim().toLowerCase().replace(/^([0-9a-f]{6})$/, "#$1"); if (/^#[0-9a-f]{6}$/.test(v)) this.useColor(v, false); else e.target.value = this.color; }}>
-          <label class="btn pickany">${drawIcon.palette}${t("Any colour")}<input type="color" .value=${this.color} @input=${(e) => this.useColor(e.target.value, false)}></label>
+          <button class="btn" ?disabled=${this.mine.includes(this.color)} @click=${() => this.saveMine()}>${icons.plus}${t("Keep in Mine")}</button>
+          <button class="btn primary" style="margin-left:auto" @click=${(e) => { this.useColor(this.color); }}>${t("Use it")}</button>
         </div>
-        <div>
-          ${segmented(PALETTES.map(([id, label]) => [id, t(label)]), pal[0], (v) => { this.palette = v; this.keepColors(); })}
-          <div class="palette" style="margin-top:10px">${swatches(pal[2], (c) => this.useColor(c))}</div>
-        </div>
-        <div>
-          <h3><span>${t("My colours")}</span>
-            ${this.mine.length ? html`<button class="btn small" @click=${() => { this.editMine = !this.editMine; }}>${this.editMine ? t("Done") : t("Edit")}</button>` : nothing}
-            <button class="btn small" ?disabled=${this.mine.includes(this.color)} @click=${() => this.saveMine()}>${icons.plus}${t("Save this one")}</button></h3>
-          ${this.mine.length ? html`<div class="palette ${this.editMine ? "editing" : ""}" style="margin-top:10px">${swatches(this.mine, (c) => (this.editMine ? this.dropMine(c) : this.useColor(c)))}</div>`
-            : html`<p class="hint">${t("Save the colours you use most, to have them at hand.")}</p>`}
+        ${this.mine.length ? html`<div>
+          <h3><span>${t("Mine")}</span><button class="btn small" @click=${() => { this.editMine = !this.editMine; }}>${this.editMine ? t("Done") : t("Edit")}</button></h3>
+          <div class="palette ${this.editMine ? "editing" : ""}" style="margin-top:10px">${this.mine.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c}
+            aria-pressed=${String(this.color === c)} @click=${() => (this.editMine ? this.dropMine(c) : this.useColor(c, false))}></button>`)}</div>
           ${this.editMine ? html`<p class="hint">${t("Tap a colour to remove it.")}</p>` : nothing}
-        </div>
-        ${this.recent.length ? html`<div><h3><span>${t("Recent")}</span></h3>
-          <div class="palette" style="margin-top:10px">${swatches(this.recent, (c) => this.useColor(c))}</div></div>` : nothing}
+        </div>` : nothing}
       </div>
     </dialog>`;
   }
@@ -2661,15 +2678,13 @@ class DrawTab extends LitElement {
             <button class="tool" title=${t("Redo")} aria-label=${t("Redo")} ?disabled=${!this.redos.length} @click=${() => this.redo()}>${drawIcon.redo}</button>
           </div>
           <div class="colorbar">
-            <button class="current" title=${t("Colours")} @click=${() => this.renderRoot.querySelector("dialog").showModal()}>
-              <i style="background:${this.color}"></i>${this.color}${drawIcon.palette}</button>
-            <div class="strip" aria-label=${t("Recent")}>${this.recent.length
-              ? this.recent.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c} aria-pressed=${String(this.color === c && this.tool !== "eraser")} @click=${() => this.useColor(c, false)}></button>`)
-              : html`<span class="none">${t("The colours you use show up here.")}</span>`}</div>
+            <button class="current" title=${t("Custom colour")} aria-label=${t("Custom colour")} @click=${() => this.renderRoot.querySelector("dialog").showModal()}>
+              <i style="background:${this.tool === "eraser" ? BLACK : this.color}"></i>${drawIcon.palette}</button>
+            <div class="tabs" role="tablist">${this.colorTabs().map(([id, label]) => html`<button role="tab" aria-selected=${String(this.palette === id)}
+              @click=${() => { this.palette = id; this.keepColors(); }}>${label}</button>`)}</div>
           </div>
+          ${this.colorGrid()}
           ${this.colorSheet()}
-        </div>
-          </div>
         </div>
         <div class="card">
           <div class="head"><h2>${t("Frames")}</h2></div>
@@ -2756,8 +2771,9 @@ class PixelhubApp extends LitElement {
     nav button[aria-current=page] { color: var(--ink); background: var(--chip); }
     nav button[aria-current=page] svg { color: var(--accent); }
     .top { margin-left: 8px; }
+    @media (max-width: 1279px) { .bar { gap: 10px; } nav button { padding: 8px 9px; gap: 6px; } .link > span:last-child { display: none; } }
     .bottom { display: none; }
-    @media (max-width: 759px) {
+    @media (max-width: 1023px) {
       .top { display: none; }
       .bottom { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
         padding: 6px 8px max(8px, env(safe-area-inset-bottom, 0px)); background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--line); }
@@ -2772,11 +2788,11 @@ class PixelhubApp extends LitElement {
     .tab.two { grid-template-columns: minmax(0, 1fr); }
     @media (min-width: 900px) { .tab.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
     footer { max-width: 1120px; margin: 0 auto; padding: 0 16px 32px; font-size: 12px; color: var(--muted); }
-    @media (max-width: 759px) { footer { padding-bottom: 96px; } }
+    @media (max-width: 1023px) { footer { padding-bottom: 96px; } }
     .toast { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); bottom: max(16px, env(safe-area-inset-bottom, 0px)); z-index: 10; max-width: min(440px, calc(100vw - 32px));
       display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 14px; font-size: 13px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 12px;
       box-shadow: 0 12px 40px rgba(0, 0, 0, .35); animation: rise .18s ease-out; }
-    @media (max-width: 759px) { .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); } }
+    @media (max-width: 1023px) { .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); } }
     @keyframes rise { from { transform: translateY(8px); opacity: 0; } }
     .toast span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
     .toast button { border: 0; background: none; cursor: pointer; flex: none; }
