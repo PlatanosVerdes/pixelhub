@@ -30,7 +30,7 @@ const (
 type Hub interface {
 	Notify(hub.Alert) (channel string, accepted bool)
 	Show(c display.Content, d time.Duration)
-	Unshow()
+	Unshow(prefix string)
 	Sense(light *int, sound bool)
 	SetChannel(name string, d time.Duration) error
 	ClearChannel()
@@ -82,12 +82,16 @@ type Server struct {
 	Voice   Voice
 	Decoder Decoder
 	talking talking
+	voice   *keptVoice
 	// Size is the display's side in pixels, for drawing previews.
 	Size    int
 	Version string
 }
 
 func (s *Server) Handler() http.Handler {
+	if s.Voice != nil && s.voice == nil {
+		s.voice = newKeptVoice(s.Voice)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": s.Version})
@@ -97,8 +101,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/weather/show", s.showWeather)
 	mux.HandleFunc("POST /api/sensors", s.sense)
 	mux.HandleFunc("POST /api/notify", s.notify)
-	mux.HandleFunc("DELETE /api/show", func(w http.ResponseWriter, _ *http.Request) {
-		s.Hub.Unshow()
+	mux.HandleFunc("DELETE /api/show", func(w http.ResponseWriter, r *http.Request) {
+		s.Hub.Unshow(r.URL.Query().Get("key"))
 		writeJSON(w, http.StatusOK, s.Hub.Status())
 	})
 	mux.HandleFunc("POST /api/channel", s.setChannel)
@@ -112,6 +116,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/talk", s.talk)
 	mux.HandleFunc("GET /api/talk/mosko.png", s.moskoPNG)
 	mux.HandleFunc("POST /api/talk/idle", s.idle)
+	mux.HandleFunc("POST /api/talk/warm", s.warmUp)
 	mux.HandleFunc("GET /api/sprites", s.sprites)
 	mux.HandleFunc("GET /api/sprites/{file}", s.spritePNG)
 	mux.HandleFunc("GET /api/preview.png", s.previewPNG)

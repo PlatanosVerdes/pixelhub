@@ -796,7 +796,7 @@ class DisplayTab extends LitElement {
       <div class="stack">
         <section><h2 class="muted">${t("What the display shows")}</h2>
           <ph-modes .current=${this.state?.mode} .clock=${this.state?.clock} .styles=${this.styles}></ph-modes></section>
-        <ph-automatic .state=${this.state} .lists=${this.lists}></ph-automatic>
+        ${this.state && !this.state.mode ? html`<ph-automatic .state=${this.state} .lists=${this.lists}></ph-automatic>` : nothing}
       </div>
     </div>`;
   }
@@ -1772,7 +1772,7 @@ class MoskoTab extends LitElement {
   static properties = {
     state: { attribute: false }, text: { state: true }, busy: { state: true }, rec: { state: true },
     lag: { state: true }, pitch: { state: true }, effect: { state: true }, face: { state: true }, talking: { state: true },
-    playingSound: { state: true }, onDisplay: { state: true },
+    playingSound: { state: true },
   };
   static styles = [base, css`
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
@@ -1845,17 +1845,17 @@ class MoskoTab extends LitElement {
   `];
   constructor() {
     super(); this.text = ""; this.face = [HALF, CALM]; this.timers = [];
-    try { this.onDisplay = localStorage.getItem("pixelhub.moskoOnDisplay") !== "0"; } catch { this.onDisplay = true; }
   }
   connectedCallback() {
     super.connectedCallback();
     this.wait();
+    api("POST", "talk/warm", { texts: QUICK }).catch(() => {});
     for (let s = 0; s <= 4; s++) for (let m = 0; m <= 4; m++) new Image().src = faceURL(s, m);
     this.idle();
   }
   disconnectedCallback() {
     super.disconnectedCallback(); this.stopRecording(true); this.discard(); this.clear(); clearTimeout(this.saving); clearTimeout(this.waiting);
-    if (this.onDisplay) api("DELETE", "show", undefined, { keepalive: true }).then(() => send(this, "refresh")).catch(() => {});
+    api("DELETE", "show?key=mosko-idle", undefined, { keepalive: true }).then(() => send(this, "refresh")).catch(() => {});
   }
   willUpdate(c) {
     if (c.has("state") && this.state && !this.editing) {
@@ -1943,15 +1943,8 @@ class MoskoTab extends LitElement {
   // While this tab is open the display shows him waiting, blinking; the loop plays on the display by itself.
   async wait() {
     clearTimeout(this.waiting);
-    if (!this.onDisplay) return;
     try { await api("POST", "talk/idle?for=2m"); send(this, "refresh"); } catch { /* the status shows the outage */ }
     this.waiting = setTimeout(() => this.wait(), 90000);
-  }
-  toggleDisplay() {
-    this.onDisplay = !this.onDisplay;
-    try { localStorage.setItem("pixelhub.moskoOnDisplay", this.onDisplay ? "1" : "0"); } catch { /* a convenience */ }
-    if (this.onDisplay) this.wait();
-    else { clearTimeout(this.waiting); api("DELETE", "show").then(() => send(this, "refresh")).catch(() => {}); }
   }
   get canRecord() { return !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder); }
   // A voice note, as in a chat: record with live levels, then listen, delete or send it.
@@ -2089,7 +2082,6 @@ class MoskoTab extends LitElement {
           <b>Mosko</b>
           <span class="mood ${on ? "on" : ""}"><i></i>${mood}</span>
           <p>${t("Lives in the display and says whatever you tell him.")}</p>
-          <button class="btn small" aria-pressed=${String(!!this.onDisplay)} @click=${() => this.toggleDisplay()}>${this.onDisplay ? t("On the display: yes") : t("On the display: no")}</button>
         </div>
       </div>
       <div class="main">
@@ -2147,7 +2139,6 @@ const BLACK = "#000000";
 const PALETTE = ["#ffffff", "#ff0000", "#ff7a00", "#ffd400", "#9dff00", "#00d43a", "#00e0b0", "#00c8ff",
   "#0050ff", "#5a2dff", "#b026ff", "#ff3fa4", "#ffb38a", "#8a4b1c", "#7a7a7a", BLACK];
 const SPEEDS = [[1000, "1"], [500, "2"], [250, "4"], [125, "8"], [83, "12"]];
-const PROJECT_FOR = [["1m", "1 min"], ["10m", "10 min"], ["1h", "1 h"]];
 const MAX_FRAMES = 60;
 const DRAFT_KEY = "pixelhub.draft";
 const blank = () => Array(SIDE * SIDE).fill(BLACK);
@@ -2165,9 +2156,6 @@ const drawIcon = {
   copy: icon(svg`<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>`),
   left: icon(svg`<path d="m15 18-6-6 6-6"/>`),
   right: icon(svg`<path d="m9 18 6-6-6-6"/>`),
-  cast: icon(svg`<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>`),
-  live: icon(svg`<circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/>`),
-  stop: icon(svg`<rect x="6" y="6" width="12" height="12" rx="2"/>`),
 };
 const decoded = new WeakMap();
 const framesOf = (d) => { let f = decoded.get(d); if (!f) decoded.set(d, (f = d.frames.map(fromHex))); return f; };
@@ -2195,8 +2183,8 @@ const frameURL = (frame) => {
 class DrawTab extends LitElement {
   static properties = {
     frames: { state: true }, cur: { state: true }, color: { state: true }, tool: { state: true }, mirror: { state: true }, onion: { state: true },
-    delay: { state: true }, name: { state: true }, id: { state: true }, dirty: { state: true }, live: { state: true }, busy: { state: true },
-    drawings: { state: true }, lists: { state: true }, showFor: { state: true }, beat: { state: true }, recent: { state: true },
+    delay: { state: true }, name: { state: true }, id: { state: true }, dirty: { state: true }, busy: { state: true },
+    drawings: { state: true }, lists: { state: true }, beat: { state: true }, recent: { state: true },
   };
   static styles = [base, css`
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
@@ -2230,9 +2218,6 @@ class DrawTab extends LitElement {
     .preview { display: grid; gap: 12px; justify-items: center; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .row input[type=text] { flex: 1 1 160px; }
-    .live[aria-pressed=true] { background: color-mix(in srgb, var(--bad) 18%, var(--surface)); border-color: var(--bad); color: var(--ink); }
-    .live[aria-pressed=true] svg { color: var(--bad); animation: pulse 1.2s ease-in-out infinite; }
-    @keyframes pulse { 50% { opacity: .3; } }
     .saved { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
     .item { position: relative; display: grid; gap: 4px; border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 8px; cursor: pointer; text-align: left; color: var(--ink); }
     .item[aria-current=true] { border-color: var(--accent); }
@@ -2245,8 +2230,8 @@ class DrawTab extends LitElement {
 
   constructor() {
     super();
-    this.color = "#ff0000"; this.tool = "pen"; this.mirror = false; this.onion = true; this.showFor = "10m";
-    this.drawings = null; this.lists = []; this.beat = 0; this.live = false;
+    this.color = "#ff0000"; this.tool = "pen"; this.mirror = false; this.onion = true;
+    this.drawings = null; this.lists = []; this.beat = 0;
     this.undos = []; this.redos = [];
     this.recent = [];
     let draft = null;
@@ -2265,10 +2250,12 @@ class DrawTab extends LitElement {
       if (e.shiftKey) this.redo(); else this.undo();
     };
     addEventListener("keydown", this.keys);
+    this.project();
   }
   disconnectedCallback() {
     super.disconnectedCallback();
-    clearInterval(this.ticker); clearTimeout(this.liveTimer); clearTimeout(this.draftTimer);
+    clearInterval(this.ticker); clearTimeout(this.liveTimer); clearTimeout(this.draftTimer); clearTimeout(this.again);
+    api("DELETE", "show?key=drawing/", undefined, { keepalive: true }).then(() => send(this, "refresh")).catch(() => {});
     removeEventListener("keydown", this.keys);
     this.resize?.disconnect();
   }
@@ -2439,11 +2426,6 @@ class DrawTab extends LitElement {
     [next[this.cur], next[to]] = [next[to], next[this.cur]];
     this.change(next, to);
   }
-  // Starts this frame over from the one before: what the ghost shows, made real.
-  copyBefore() {
-    if (this.cur === 0) return;
-    this.change(this.frames.map((f, i) => (i === this.cur ? [...this.frames[this.cur - 1]] : f)));
-  }
   // Moves the whole frame a pixel, wrapping round: handy for scrolling animations.
   shift(dx, dy) {
     const f = this.frames[this.cur], next = blank();
@@ -2463,25 +2445,16 @@ class DrawTab extends LitElement {
     } catch (e) { toast(this, e.message); return false; }
     finally { this.busy = false; }
   }
-  async project(body = this.body(), quiet = false) {
-    try {
-      await api("POST", "drawings/show", { ...body, for: this.live ? "10m" : this.showFor });
-      send(this, "refresh");
-      if (!quiet) toast(this, t("On the display for {d}", { d: PROJECT_FOR.find(([v]) => v === this.showFor)?.[1] ?? this.showFor }));
-    } catch (e) { toast(this, e.message); }
-  }
-  async stop() {
-    this.live = false;
-    try { await api("DELETE", "show"); send(this, "refresh"); } catch (e) { toast(this, e.message); }
-  }
-  toggleLive() {
-    this.live = !this.live;
-    if (this.live) this.project(this.body(), true); else this.stop();
+  // While this tab is open the display shows what is being drawn, every change a moment after it is made.
+  async project() {
+    clearTimeout(this.again);
+    try { await api("POST", "drawings/show", { ...this.body(), for: "10m" }); send(this, "refresh"); }
+    catch (e) { toast(this, e.message); }
+    this.again = setTimeout(() => this.project(), 5 * 60000);
   }
   sendLive() {
-    if (!this.live) return;
     clearTimeout(this.liveTimer);
-    this.liveTimer = setTimeout(() => this.project(this.body(), true), 350);
+    this.liveTimer = setTimeout(() => this.project(), 250);
   }
   async addToList(list) {
     if (!list) return;
@@ -2555,7 +2528,6 @@ class DrawTab extends LitElement {
           <div class="frame-ops">
             <button class="btn small" @click=${() => this.addFrame(false)}>${icons.plus}${t("New frame")}</button>
             <button class="btn small" title=${t("A new frame equal to this one")} @click=${() => this.addFrame(true)}>${drawIcon.copy}${t("Duplicate")}</button>
-            <button class="btn small" title=${t("Replace this frame with the one before")} ?disabled=${this.cur === 0} @click=${() => this.copyBefore()}>${t("Copy the one before")}</button>
             <button class="icon" aria-label=${t("Move it before")} ?disabled=${this.cur === 0} @click=${() => this.moveFrame(-1)}>${drawIcon.left}</button>
             <button class="icon" aria-label=${t("Move it after")} ?disabled=${this.cur === n - 1} @click=${() => this.moveFrame(1)}>${drawIcon.right}</button>
             <button class="icon trash" aria-label=${t("Delete this frame")} @click=${() => this.dropFrame()}>${icons.trash}</button>
@@ -2566,18 +2538,9 @@ class DrawTab extends LitElement {
       <div class="side">
         <div class="card preview">
           <ph-led .src=${frameURL(this.stroke && n === 1 ? this.stroke : this.playing(frames, this.delay))} .label=${t("Preview")}></ph-led>
+          <span class="small muted">${t("The display shows it as you draw, while this tab is open.")}</span>
           ${n > 1 ? html`<div class="row"><span class="small muted">${t("Frames per second")}</span>
             ${segmented(SPEEDS, this.delay, (v) => { this.delay = v; this.dirty = true; this.sendLive(); })}</div>` : nothing}
-        </div>
-        <div class="card">
-          <div class="head"><h2>${t("On the display")}</h2></div>
-          <div class="row">
-            <button class="btn live" aria-pressed=${String(this.live)} @click=${() => this.toggleLive()}>${drawIcon.live}${this.live ? t("Live: on") : t("Live")}</button>
-            <button class="btn primary" @click=${() => this.project()}>${drawIcon.cast}${t("Show it")}</button>
-            ${segmented(PROJECT_FOR, this.showFor, (v) => { this.showFor = v; })}
-            <button class="btn small" @click=${() => this.stop()}>${drawIcon.stop}${t("Take it off")}</button>
-          </div>
-          <p class="hint">${t("Live sends every stroke to the display as you draw.")}</p>
         </div>
         <div class="card">
           <div class="head"><h2>${this.id ? t("Editing") : t("New drawing")}</h2>${this.dirty ? html`<span class="tag on">${t("Not saved")}</span>` : nothing}</div>

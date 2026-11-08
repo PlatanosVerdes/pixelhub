@@ -73,7 +73,14 @@ func TestDrawings(t *testing.T) {
 		}
 	}
 
-	if rec := serve(t, srv, "DELETE", "/api/show", ""); rec.Code != 200 {
+	if rec := serve(t, srv, "DELETE", "/api/show?key=mosko-idle", ""); rec.Code != 200 {
+		t.Errorf("unshow another key: %d %s", rec.Code, rec.Body)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if f.hub.Status().Showing != "live" {
+		t.Fatalf("unshowing Mosko took the drawing off: showing %q", f.hub.Status().Showing)
+	}
+	if rec := serve(t, srv, "DELETE", "/api/show?key=drawing/", ""); rec.Code != 200 {
 		t.Errorf("unshow: %d %s", rec.Code, rec.Body)
 	}
 	for deadline := time.Now().Add(2 * time.Second); f.hub.Status().Showing == "live"; time.Sleep(5 * time.Millisecond) {
