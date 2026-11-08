@@ -665,6 +665,14 @@ class Automatic extends LitElement {
     return ok;
   }
   setAmbient(a) { return this.save({ ambient: { ...this.channel.ambient, ...a } }); }
+  // The choice shows at once: one picture of the kind now, then the automatic turns go on with it.
+  async pickSurprise(list) {
+    const a = this.channel.ambient, pictures = seconds(a.pictures) ? a.pictures : PICTURE_DEFAULT;
+    if (a.list === list || !(await this.setAmbient({ list, pictures }))) return;
+    toast(this, t("In automatic: {what}", { what: surpriseName(list) }));
+    const kind = list === SURPRISE.random ? "random" : "moment";
+    try { await api("POST", "gallery/surprise", { kind, for: pictures }); send(this, "refresh"); } catch { /* the next turn shows one anyway */ }
+  }
   kind(id, source, glyph, title, sub, pick, disabled = false) {
     return html`<button class="kind" aria-pressed=${String(source === id)} ?disabled=${this.busy || disabled} @click=${() => { if (source !== id) pick(); }}>
       ${glyph}<b>${title}</b><span>${sub}</span></button>`;
@@ -714,14 +722,14 @@ class Automatic extends LitElement {
           ${this.kind("list", source, autoIcons.list, t("A list of mine"), lists.length ? t("Your drawings, in turn") : t("Make one in the Gallery first"),
             () => this.setAmbient({ list: lists[0].name, pictures: seconds(a.pictures) ? a.pictures : PICTURE_DEFAULT }), !lists.length)}
           ${this.kind("surprise", source, galleryIcons.sparkle, t("Surprise me"), t("Gallery pictures, picked for you"),
-            () => this.setAmbient({ list: SURPRISE.moment, pictures: seconds(a.pictures) ? a.pictures : PICTURE_DEFAULT }))}
+            () => this.pickSurprise(SURPRISE.moment))}
         </div>
         ${source === "list" ? html`<div class="sub"><span class="label">${t("Which list")}</span><div class="opts" role="group">
           ${lists.map((l) => html`<button class="opt" aria-pressed=${String(l.name.toLowerCase() === playing)} ?disabled=${this.busy}
             @click=${() => this.setAmbient({ list: l.name })}>${listName(l)}<small>${l.items.length}</small></button>`)}</div></div>` : nothing}
         ${source === "surprise" ? html`<div class="sub"><span class="label">${t("Which pictures")}</span><div class="opts" role="group">
           ${[[SURPRISE.moment, t("By the day, the hour and the weather")], [SURPRISE.random, t("The best of the gallery, by chance")]].map(([v, sub]) =>
-            html`<button class="opt pick" aria-pressed=${String(v === playing)} ?disabled=${this.busy} @click=${() => this.setAmbient({ list: v })}>
+            html`<button class="opt pick" aria-pressed=${String(v === playing)} ?disabled=${this.busy} @click=${() => this.pickSurprise(v)}>
               <b>${surpriseName(v)}</b><small>${sub}</small></button>`)}</div></div>` : nothing}
         ${playing ? html`
           ${list && !list.items.length ? html`<p class="small muted hint">${t("The list {name} is empty, so only the clock shows.", { name: listName(list) })}</p>` : nothing}
