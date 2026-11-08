@@ -37,7 +37,24 @@ type Decoder interface {
 }
 
 // talking lets one clip be made at a time: the Pi has no room for two speech runs at once.
-type talking struct{ sync.Mutex }
+type talking struct {
+	sync.Mutex
+	spoken map[string]speech
+}
+
+// speech is a text already read aloud, kept so the page's quick phrases answer at once.
+type speech struct {
+	pcm   talk.PCM
+	spans []talk.Span
+}
+
+const keptSpeech = 64
+
+// idleFor is how long Mosko waits on the display; the page asks again while it stays open.
+const (
+	idleFor    = 2 * time.Minute
+	maxIdleFor = 10 * time.Minute
+)
 
 type talkRequest struct {
 	Text string `json:"text"`
@@ -45,24 +62,6 @@ type talkRequest struct {
 
 // talk makes Mosko say a text, sent as JSON, or a recording, sent as the multipart field "audio".
 func (s *Server) talk(w http.ResponseWriter, r *http.Request) {
-	if kind, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); kind == "multipart/form-data" {
-		s.speak(w, r, func(ctx context.Context, tune state.Talk) (talk.PCM, []talk.Span, int, error) {
-			pcm, status, err := s.recording(ctx, w, r, tune)
-			return pcm, nil, status, err
-		})
-		return
-	}
-	var req talkRequest
-	if !decode(w, r, &req, smallBody) {
-		return
-	}
-	s.speak(w, r, func(ctx context.Context, tune state.Talk) (talk.PCM, []talk.Span, int, error) {
-		return s.spoken(ctx, req.Text, tune)
-	})
-}
-
-// speak makes the clip one request at a time and plays it, answering the faces the display got.
-func (s *Server) speak(w http.ResponseWriter, r *http.Request, voice func(context.Context, state.Talk) (talk.PCM, []talk.Span, int, error)) {
 	if s.Decoder == nil {
 		writeError(w, http.StatusServiceUnavailable, errors.New("talking needs ffmpeg"))
 		return
@@ -79,7 +78,19 @@ func (s *Server) speak(w http.ResponseWriter, r *http.Request, voice func(contex
 	defer cancel()
 
 	tune := s.Hub.State().Talk
-	pcm, spans, status, err := voice(ctx, tune)
+	var pcm talk.PCM
+	var spans []talk.Span
+	var status int
+	var err error
+	if kind, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); kind == "multipart/form-data" {
+		pcm, status, err = s.recording(ctx, w, r, tune)
+	} else {
+		var req talkRequest
+		if !decode(w, r, &req, smallBody) {
+			return
+		}
+		pcm, spans, status, err = s.spoken(ctx, req.Text, tune)
+	}
 	if err != nil {
 		writeError(w, status, err)
 		return
@@ -129,7 +140,7 @@ func (s *Server) spoken(ctx context.Context, text string, tune state.Talk) (talk
 	if s.Voice == nil {
 		return talk.PCM{}, nil, http.StatusServiceUnavailable, errors.New("no speech server set up")
 	}
-	pcm, spans, err := talk.Speak(ctx, s.Voice, lines)
+	pcm, spans, err := s.read(ctx, text, lines)
 	if err != nil {
 		return talk.PCM{}, nil, http.StatusBadGateway, err
 	}
@@ -141,6 +152,36 @@ func (s *Server) spoken(ctx context.Context, text string, tune state.Talk) (talk
 		pcm, spans = out, talk.Stretch(spans, pcm.Duration(), out.Duration())
 	}
 	return pcm, spans, 0, nil
+}
+
+// read speaks text, or reuses it if it was read before; callers hold s.talking.
+func (s *Server) read(ctx context.Context, text string, lines []talk.Line) (talk.PCM, []talk.Span, error) {
+	if kept, ok := s.talking.spoken[text]; ok {
+		return kept.pcm, kept.spans, nil
+	}
+	pcm, spans, err := talk.Speak(ctx, s.Voice, lines)
+	if err != nil {
+		return talk.PCM{}, nil, err
+	}
+	if s.talking.spoken == nil || len(s.talking.spoken) >= keptSpeech {
+		s.talking.spoken = map[string]speech{}
+	}
+	s.talking.spoken[text] = speech{pcm, spans}
+	return pcm, spans, nil
+}
+
+// idle shows Mosko waiting, blinking, for ?for= (2 minutes by default).
+func (s *Server) idle(w http.ResponseWriter, r *http.Request) {
+	d := idleFor
+	if q := r.URL.Query().Get("for"); q != "" {
+		var err error
+		if d, err = time.ParseDuration(q); err != nil || d <= 0 || d > maxIdleFor {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("for %q: want something like 2m, at most %s", q, maxIdleFor))
+			return
+		}
+	}
+	s.Hub.Show(talk.Idle(), d)
+	writeJSON(w, http.StatusAccepted, map[string]string{"showing": "Mosko", "duration": d.String()})
 }
 
 // moskoPNG draws one of Mosko's faces, ?shape=0-4&mood=0-4, mid-word and calm by default.

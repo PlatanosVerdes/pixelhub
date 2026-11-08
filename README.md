@@ -90,7 +90,7 @@ The environment only says where the hardware is; everything else is state, edite
 | `PIXELHUB_DEVICE_MAC` | required | The display's Bluetooth address |
 | `PIXELHUB_CHANNEL` | `1` | The display's RFCOMM channel |
 | `PIXELHUB_PORT` | `8000` | HTTP port |
-| `PIXELHUB_DATA_DIR` | `/data` | Holds `state.json`, `spotify.json`, `lists/`, `drawings/`, `sounds/`, `gallery-index.json`, `sprites/` and `ambient/` |
+| `PIXELHUB_DATA_DIR` | `/data` | Holds `state.json`, `spotify.json`, `lists/`, `drawings/`, `gallery-index.json`, `sprites/` and `ambient/` |
 | `PIXELHUB_LOG_JSON` | | `1` logs JSON (set in the image) |
 | `PIXELHUB_CHIME` | | `1` asks pixelbridge for a chime when a calendar event starts, except 23:00-08:00, and lets Mosko talk; the ESP32 bridge cannot play sound |
 | `PIXELHUB_SPEECH` | | A [Wyoming](https://github.com/rhasspy/wyoming) text-to-speech server's `host:port`, such as `wyoming-piper`, for Mosko to read text |
@@ -142,8 +142,6 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `POST /api/drawings/show` | A drawing, saved or not, plus `for` (30 s by default): show it now, like a gallery picture |
 | `POST /api/drawings/{id}/list` | `{"list"}`: put a saved drawing in a list, so the automatic rotation shows it; again after an edit updates it |
 | `DELETE /api/show` | Take off what was shown by hand (a gallery picture or a drawing) |
-| `GET /api/sounds`, `POST /api/sounds` | Mosko's soundboard; a new one is `{"name", "text"}` or the multipart fields `name` and `audio` |
-| `DELETE /api/sounds/{id}`, `POST /api/sounds/{id}/play` | Delete one, or have Mosko say it with the voice settings of now |
 | `GET /api/spotify` | Whether a Spotify app and account are linked, and what plays now |
 | `PUT /api/spotify` | `{"client_id": ...}` of your Spotify app; a new one forgets the signed-in account |
 | `GET /api/spotify/login` | Sends the browser to Spotify to sign in; it comes back to `/api/spotify/callback` on the same host |

@@ -78,8 +78,6 @@ type Server struct {
 	index       galleryIndex
 	// Drawings, when set, keeps the animations drawn in the page under /api/drawings.
 	Drawings Drawings
-	// Sounds, when set, keeps Mosko's soundboard under /api/sounds.
-	Sounds Sounds
 	// Voice and Decoder, when set, let Mosko talk under /api/talk: Voice reads text, Decoder takes recordings.
 	Voice   Voice
 	Decoder Decoder
@@ -113,6 +111,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("POST /api/talk", s.talk)
 	mux.HandleFunc("GET /api/talk/mosko.png", s.moskoPNG)
+	mux.HandleFunc("POST /api/talk/idle", s.idle)
 	mux.HandleFunc("GET /api/sprites", s.sprites)
 	mux.HandleFunc("GET /api/sprites/{file}", s.spritePNG)
 	mux.HandleFunc("GET /api/preview.png", s.previewPNG)
@@ -143,9 +142,6 @@ func (s *Server) Handler() http.Handler {
 	}
 	if s.Drawings != nil {
 		s.drawingRoutes(mux)
-	}
-	if s.Sounds != nil {
-		s.soundRoutes(mux)
 	}
 	return s.withWeb(mux)
 }

@@ -123,3 +123,36 @@ func TestTalkWithoutTools(t *testing.T) {
 		}
 	}
 }
+
+func TestIdleAndKeptSpeech(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	var said string
+	var pitch float64
+	srv := (&Server{Hub: f.hub, Voice: fakeVoice{&said}, Decoder: fakeDecoder{pitch: &pitch}, Size: 16}).Handler()
+
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest("POST", "/api/talk/idle?for=30s", nil))
+	if rec.Code != 202 {
+		t.Fatalf("idle: %d %s", rec.Code, rec.Body)
+	}
+	for deadline := time.Now().Add(2 * time.Second); f.hub.Status().Showing != "Mosko"; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("showing %q, want Mosko waiting", f.hub.Status().Showing)
+		}
+	}
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest("POST", "/api/talk/idle?for=1h", nil))
+	if rec.Code != 400 {
+		t.Errorf("idle for an hour: %d %s", rec.Code, rec.Body)
+	}
+
+	for i, want := range []string{"¡Hola!", ""} {
+		said = ""
+		rec = httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest("POST", "/api/talk", strings.NewReader(`{"text":"¡Hola!"}`)))
+		if rec.Code != 202 || said != want {
+			t.Errorf("say %d: code %d, read aloud %q, want %q", i+1, rec.Code, said, want)
+		}
+	}
+}

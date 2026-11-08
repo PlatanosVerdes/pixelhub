@@ -1739,6 +1739,8 @@ const POKE_LINES = [
   "¡Vale, vale! Ya estoy despierto.",
   "Si me sigues tocando, me pongo el reloj y no te hablo más.",
 ];
+const QUICK = ["¡Hola!", "Sí.", "No.", "Vale.", "¡Gracias!", "¡Adiós!", "¿Qué tal?", "¡Buenos días!", "Buenas noches...", "¡A comer!",
+  "¡Bravo!", "Jajaja", "¿En serio?", "Ni idea...", "¡Cuidado!", "¡Te quiero!", "¡Socorro!", "Mmm... déjame pensar."];
 const SYNC = { min: -1000, max: 1500, step: 10, rest: 0 };
 const PITCH = { min: 50, max: 200, step: 5, rest: 100 };
 const BARS = 40;
@@ -1770,7 +1772,7 @@ class MoskoTab extends LitElement {
   static properties = {
     state: { attribute: false }, text: { state: true }, busy: { state: true }, rec: { state: true },
     lag: { state: true }, pitch: { state: true }, effect: { state: true }, face: { state: true }, talking: { state: true },
-    sounds: { state: true }, editSounds: { state: true }, playingSound: { state: true },
+    playingSound: { state: true }, onDisplay: { state: true },
   };
   static styles = [base, css`
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
@@ -1833,31 +1835,28 @@ class MoskoTab extends LitElement {
     .effect:hover { border-color: var(--muted); }
     .effect[aria-pressed=true] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
     .effect[aria-pressed=true] b { color: var(--accent); }
-    .pads { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
-    .pad { position: relative; min-height: 64px; text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 10px 12px; cursor: pointer; display: grid; gap: 4px; align-content: start; color: var(--ink); }
+    .pads { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+    .pad { position: relative; min-height: 48px; text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 10px 12px; cursor: pointer; display: grid; gap: 4px; align-content: start; color: var(--ink); }
     .pad:hover:not(:disabled) { border-color: var(--muted); }
     .pad:active:not(:disabled) { transform: scale(.97); }
     .pad:disabled { opacity: .5; cursor: default; }
-    .pad b { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; padding-right: 18px; }
-    .pad span { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
-    .pad span svg { width: 12px; height: 12px; }
+    .pad b { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
     .pad.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
-    .padwrap { position: relative; }
-    .padwrap .pad { width: 100%; height: 100%; }
-    .padwrap .x { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border-radius: 7px; border: 0; background: var(--chip); color: var(--muted); display: inline-flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; }
-    .padwrap .x:hover { color: var(--bad); }
-    .padwrap .x svg { width: 14px; height: 14px; }
-    .file { position: relative; overflow: hidden; }
-    .file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
   `];
-  constructor() { super(); this.text = ""; this.face = [HALF, CALM]; this.timers = []; this.sounds = null; }
+  constructor() {
+    super(); this.text = ""; this.face = [HALF, CALM]; this.timers = [];
+    try { this.onDisplay = localStorage.getItem("pixelhub.moskoOnDisplay") !== "0"; } catch { this.onDisplay = true; }
+  }
   connectedCallback() {
     super.connectedCallback();
-    api("GET", "sounds").then((r) => { this.sounds = r.sounds; }).catch(() => { this.sounds = []; });
+    this.wait();
     for (let s = 0; s <= 4; s++) for (let m = 0; m <= 4; m++) new Image().src = faceURL(s, m);
     this.idle();
   }
-  disconnectedCallback() { super.disconnectedCallback(); this.stopRecording(true); this.discard(); this.clear(); clearTimeout(this.saving); }
+  disconnectedCallback() {
+    super.disconnectedCallback(); this.stopRecording(true); this.discard(); this.clear(); clearTimeout(this.saving); clearTimeout(this.waiting);
+    if (this.onDisplay) api("DELETE", "show", undefined, { keepalive: true }).then(() => send(this, "refresh")).catch(() => {});
+  }
   willUpdate(c) {
     if (c.has("state") && this.state && !this.editing) {
       const tune = this.state.talk ?? {};
@@ -1928,64 +1927,31 @@ class MoskoTab extends LitElement {
     const text = this.text.trim();
     if (text && await this.say({ text })) this.text = "";
   }
-  async playSound(s) {
-    this.playingSound = s.id;
-    await this.say(undefined, `sounds/${s.id}/play`);
+  async quick(text) {
+    this.playingSound = text;
+    await this.say({ text });
     this.playingSound = null;
   }
-  // A sound needs a name; the phrase's first words or the file's name are offered.
-  async keepSound(body, suggested) {
-    const name = prompt(t("Name for this sound"), suggested.slice(0, 30));
-    if (!name?.trim()) return false;
-    if (body instanceof FormData) body.append("name", name.trim());
-    else body.name = name.trim();
-    try {
-      this.sounds = (await api("POST", "sounds", body)).sounds;
-      toast(this, t("Added to the sounds"));
-      return true;
-    } catch (e) { toast(this, e.message); return false; }
-  }
-  keepText() {
-    const text = this.text.trim();
-    if (text) this.keepSound({ text }, text);
-  }
-  keepNote() {
-    const blob = this.rec?.blob;
-    if (!blob) return;
-    const form = new FormData();
-    form.append("audio", blob, "note");
-    this.keepSound(form, t("Voice note"));
-  }
-  keepFile(e) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    const form = new FormData();
-    form.append("audio", file, file.name);
-    this.keepSound(form, file.name.replace(/\.[^.]+$/, ""));
-  }
-  async dropSound(s) {
-    if (!confirm(t("Delete {name}?", { name: s.name }))) return;
-    try { this.sounds = (await api("DELETE", `sounds/${s.id}`)).sounds; } catch (e) { toast(this, e.message); }
-  }
-  soundboard() {
-    const list = this.sounds ?? [];
+  quickPhrases() {
     return html`<div class="card">
-      <div class="head"><h2>${t("Sounds")}</h2>
-        ${list.length ? html`<button class="btn small" aria-pressed=${String(!!this.editSounds)} @click=${() => { this.editSounds = !this.editSounds; }}>${this.editSounds ? t("Done") : t("Edit")}</button>` : nothing}
-        <label class="btn small file">${icons.upload}${t("Upload")}<input type="file" accept="audio/*,video/*" @change=${(e) => this.keepFile(e)}></label>
-      </div>
-      ${this.sounds === null ? html`<p class="hint">${t("Loading")}</p>` : !list.length
-        ? html`<p class="hint">${t("Keep phrases and recordings here to play them with a tap: save what you write or record above, or upload an audio file.")}</p>`
-        : html`<div class="pads">${list.map((s) => html`<div class="padwrap">
-            <button class="pad ${this.playingSound === s.id ? "on" : ""}" ?disabled=${this.busy && this.playingSound !== s.id} title=${s.text ?? ""}
-              @click=${() => (this.editSounds ? this.dropSound(s) : this.playSound(s))}>
-              <b>${s.name}</b><span>${s.audio ? noteIcons.mic : noteIcons.send}${s.audio ? t("Recording") : t("Phrase")}</span>
-            </button>
-            ${this.editSounds ? html`<button class="x" aria-label=${t("Delete")} @click=${() => this.dropSound(s)}>${noteIcons.trash}</button>` : nothing}
-          </div>`)}</div>`}
-      <p class="hint">${t("They play with the voice settings below.")}</p>
+      <div class="head"><h2>${t("Quick phrases")}</h2></div>
+      <div class="pads">${QUICK.map((text) => html`<button class="pad ${this.playingSound === text ? "on" : ""}"
+        ?disabled=${this.busy && this.playingSound !== text} @click=${() => this.quick(text)}><b>${text}</b></button>`)}</div>
+      <p class="hint">${t("The first time each one takes a moment; then it comes out at once.")}</p>
     </div>`;
+  }
+  // While this tab is open the display shows him waiting, blinking; the loop plays on the display by itself.
+  async wait() {
+    clearTimeout(this.waiting);
+    if (!this.onDisplay) return;
+    try { await api("POST", "talk/idle?for=2m"); send(this, "refresh"); } catch { /* the status shows the outage */ }
+    this.waiting = setTimeout(() => this.wait(), 90000);
+  }
+  toggleDisplay() {
+    this.onDisplay = !this.onDisplay;
+    try { localStorage.setItem("pixelhub.moskoOnDisplay", this.onDisplay ? "1" : "0"); } catch { /* a convenience */ }
+    if (this.onDisplay) this.wait();
+    else { clearTimeout(this.waiting); api("DELETE", "show").then(() => send(this, "refresh")).catch(() => {}); }
   }
   get canRecord() { return !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder); }
   // A voice note, as in a chat: record with live levels, then listen, delete or send it.
@@ -2080,7 +2046,6 @@ class MoskoTab extends LitElement {
       <button class="round play" aria-label=${r.playing ? t("Pause") : t("Listen")} @click=${() => this.togglePlay()}>${r.playing ? noteIcons.pause : noteIcons.play}</button>
       <div class="wave">${peaks.map((v, i) => html`<i class=${i < played ? "on" : ""} style="height:${Math.max(10, v * 100)}%"></i>`)}</div>
       <span class="clock">${clock(r.duration)}</span>
-      <button class="round" title=${t("Keep it among the sounds")} aria-label=${t("Keep it among the sounds")} @click=${() => this.keepNote()}>${icons.bookmark}</button>
       <button class="round send" ?disabled=${this.busy} aria-label=${t("Send to Mosko")} @click=${() => this.sendNote()}>${noteIcons.send}</button>
     </div>`;
   }
@@ -2124,6 +2089,7 @@ class MoskoTab extends LitElement {
           <b>Mosko</b>
           <span class="mood ${on ? "on" : ""}"><i></i>${mood}</span>
           <p>${t("Lives in the display and says whatever you tell him.")}</p>
+          <button class="btn small" aria-pressed=${String(!!this.onDisplay)} @click=${() => this.toggleDisplay()}>${this.onDisplay ? t("On the display: yes") : t("On the display: no")}</button>
         </div>
       </div>
       <div class="main">
@@ -2135,13 +2101,12 @@ class MoskoTab extends LitElement {
           ${this.rec ? this.noteBar() : html`<div class="row">
             <button class="btn primary" ?disabled=${this.busy || !this.text.trim()} @click=${() => this.sayText()}>${this.busy ? t("Thinking…") : t("Say it")}</button>
             ${this.canRecord ? html`<button class="btn" ?disabled=${this.busy} @click=${() => this.startRecording()}>${noteIcons.mic}${t("Record")}</button>` : nothing}
-            <button class="btn" title=${t("Keep it among the sounds")} ?disabled=${!this.text.trim()} @click=${() => this.keepText()}>${icons.bookmark}${t("Keep")}</button>
             <span class="count">${this.text.length}/400</span>
           </div>`}
           <p class="hint">${t("Up to 30 seconds. The mouth follows the voice: shut in the pauses, wider the louder.")}</p>
           <p class="hint">${t("He gestures with the text: ! raises his eyebrows, ? raises one, ... makes him think, jaja makes him laugh.")}</p>
         </div>
-        ${this.soundboard()}
+        ${this.quickPhrases()}
         <div class="card voice">
           <h2>${t("Voice")}</h2>
           <div class="field">
@@ -2280,7 +2245,7 @@ class DrawTab extends LitElement {
 
   constructor() {
     super();
-    this.color = "#ff0000"; this.tool = "pen"; this.mirror = false; this.onion = false; this.showFor = "10m";
+    this.color = "#ff0000"; this.tool = "pen"; this.mirror = false; this.onion = true; this.showFor = "10m";
     this.drawings = null; this.lists = []; this.beat = 0; this.live = false;
     this.undos = []; this.redos = [];
     this.recent = [];
@@ -2368,12 +2333,12 @@ class DrawTab extends LitElement {
     const under = this.onion && this.cur > 0 ? this.frames[this.cur - 1] : null;
     ctx.fillStyle = "#07060d";
     ctx.fillRect(0, 0, px, px);
+    // The frame before shows as a faint, smaller ghost under empty cells, so it never reads as drawn.
+    const inset = cell * 0.22;
     for (let i = 0; i < SIDE * SIDE; i++) {
       const x = (i % SIDE) * cell, y = Math.floor(i / SIDE) * cell;
-      if (frame[i] !== BLACK) { ctx.globalAlpha = 1; ctx.fillStyle = frame[i]; }
-      else if (under && under[i] !== BLACK) { ctx.globalAlpha = 0.28; ctx.fillStyle = under[i]; }
-      else continue;
-      ctx.fillRect(x, y, cell, cell);
+      if (frame[i] !== BLACK) { ctx.globalAlpha = 1; ctx.fillStyle = frame[i]; ctx.fillRect(x, y, cell, cell); }
+      else if (under && under[i] !== BLACK) { ctx.globalAlpha = 0.22; ctx.fillStyle = under[i]; ctx.fillRect(x + inset, y + inset, cell - 2 * inset, cell - 2 * inset); }
     }
     ctx.globalAlpha = 1;
     ctx.strokeStyle = "rgba(255,255,255,.07)";
@@ -2473,6 +2438,11 @@ class DrawTab extends LitElement {
     const next = [...this.frames];
     [next[this.cur], next[to]] = [next[to], next[this.cur]];
     this.change(next, to);
+  }
+  // Starts this frame over from the one before: what the ghost shows, made real.
+  copyBefore() {
+    if (this.cur === 0) return;
+    this.change(this.frames.map((f, i) => (i === this.cur ? [...this.frames[this.cur - 1]] : f)));
   }
   // Moves the whole frame a pixel, wrapping round: handy for scrolling animations.
   shift(dx, dy) {
@@ -2580,11 +2550,12 @@ class DrawTab extends LitElement {
           <div class="head"><h2>${t("Frames")}</h2></div>
           <div class="frames">
             ${frames.map((f, i) => html`<button class="frame" aria-current=${String(i === this.cur)} @click=${() => { this.cur = i; }}><img class="pix" src=${frameURL(f)} alt=""><span>${i + 1}</span></button>`)}
-            <button class="frame add" title=${t("Copy this frame")} aria-label=${t("Copy this frame")} @click=${() => this.addFrame(true)}>${icons.plus}</button>
+            <button class="frame add" title=${t("New empty frame")} aria-label=${t("New empty frame")} @click=${() => this.addFrame(false)}>${icons.plus}</button>
           </div>
           <div class="frame-ops">
-            <button class="btn small" @click=${() => this.addFrame(true)}>${drawIcon.copy}${t("Copy")}</button>
-            <button class="btn small" @click=${() => this.addFrame(false)}>${icons.plus}${t("Blank")}</button>
+            <button class="btn small" @click=${() => this.addFrame(false)}>${icons.plus}${t("New frame")}</button>
+            <button class="btn small" title=${t("A new frame equal to this one")} @click=${() => this.addFrame(true)}>${drawIcon.copy}${t("Duplicate")}</button>
+            <button class="btn small" title=${t("Replace this frame with the one before")} ?disabled=${this.cur === 0} @click=${() => this.copyBefore()}>${t("Copy the one before")}</button>
             <button class="icon" aria-label=${t("Move it before")} ?disabled=${this.cur === 0} @click=${() => this.moveFrame(-1)}>${drawIcon.left}</button>
             <button class="icon" aria-label=${t("Move it after")} ?disabled=${this.cur === n - 1} @click=${() => this.moveFrame(1)}>${drawIcon.right}</button>
             <button class="icon trash" aria-label=${t("Delete this frame")} @click=${() => this.dropFrame()}>${icons.trash}</button>

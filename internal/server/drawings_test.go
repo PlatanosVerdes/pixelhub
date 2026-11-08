@@ -1,10 +1,8 @@
 package server
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +11,6 @@ import (
 
 	"github.com/PlatanosVerdes/pixelhub/internal/drawings"
 	"github.com/PlatanosVerdes/pixelhub/internal/lists"
-	"github.com/PlatanosVerdes/pixelhub/internal/sounds"
 )
 
 func serve(t *testing.T, srv http.Handler, method, path, body string) *httptest.ResponseRecorder {
@@ -98,60 +95,5 @@ func TestDrawings(t *testing.T) {
 	again, err := drawings.Open(dir, 16)
 	if err != nil || len(again.List()) != 0 {
 		t.Errorf("reopened: %v %v", again.List(), err)
-	}
-}
-
-func TestSounds(t *testing.T) {
-	t.Parallel()
-	f := newFixture(t)
-	store, err := sounds.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var said string
-	var pitch float64
-	srv := (&Server{Hub: f.hub, Sounds: store, Voice: fakeVoice{&said}, Decoder: fakeDecoder{pitch: &pitch}, Size: 16}).Handler()
-
-	if rec := serve(t, srv, "POST", "/api/sounds", `{"name":"comer","text":"¡A comer!"}`); rec.Code != 201 {
-		t.Fatalf("a phrase: %d %s", rec.Code, rec.Body)
-	}
-	if rec := serve(t, srv, "POST", "/api/sounds", `{"name":"","text":"x"}`); rec.Code != 400 {
-		t.Errorf("no name: %d %s", rec.Code, rec.Body)
-	}
-	upload := func(name, data string) *httptest.ResponseRecorder {
-		var body bytes.Buffer
-		w := multipart.NewWriter(&body)
-		_ = w.WriteField("name", name)
-		part, _ := w.CreateFormFile("audio", "clip.m4a")
-		part.Write([]byte(data))
-		w.Close()
-		req := httptest.NewRequest("POST", "/api/sounds", &body)
-		req.Header.Set("Content-Type", w.FormDataContentType())
-		rec := httptest.NewRecorder()
-		srv.ServeHTTP(rec, req)
-		return rec
-	}
-	if rec := upload("ruido", "noise"); rec.Code != 400 {
-		t.Errorf("not audio: %d %s", rec.Code, rec.Body)
-	}
-	if rec := upload("risa", "clip"); rec.Code != 201 {
-		t.Fatalf("a recording: %d %s", rec.Code, rec.Body)
-	}
-	list := store.List()
-	if len(list) != 2 || list[0].Audio || !list[1].Audio {
-		t.Fatalf("kept %+v", list)
-	}
-
-	if rec := serve(t, srv, "POST", "/api/sounds/"+list[0].ID+"/play", ""); rec.Code != 202 || said != "¡A comer!" {
-		t.Errorf("play the phrase: %d %s, said %q", rec.Code, rec.Body, said)
-	}
-	if rec := serve(t, srv, "POST", "/api/sounds/"+list[1].ID+"/play", ""); rec.Code != 202 {
-		t.Errorf("play the recording: %d %s", rec.Code, rec.Body)
-	}
-	if rec := serve(t, srv, "POST", "/api/sounds/nope/play", ""); rec.Code != 404 {
-		t.Errorf("play a missing one: %d %s", rec.Code, rec.Body)
-	}
-	if rec := serve(t, srv, "DELETE", "/api/sounds/"+list[1].ID, ""); rec.Code != 200 || len(store.List()) != 1 {
-		t.Errorf("delete: %d %s", rec.Code, rec.Body)
 	}
 }
