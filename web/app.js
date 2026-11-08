@@ -2855,7 +2855,7 @@ const TABS = [
 ];
 
 class PixelhubApp extends LitElement {
-  static properties = { st: { state: true }, status: { state: true }, sprites: { state: true }, modes: { state: true }, version: { state: true }, offline: { state: true }, gone: { state: true }, tab: { state: true }, typing: { state: true } };
+  static properties = { st: { state: true }, status: { state: true }, sprites: { state: true }, modes: { state: true }, version: { state: true }, offline: { state: true }, gone: { state: true }, tab: { state: true }, keyboard: { state: true }, tucked: { state: true } };
   static styles = [base, css`
     header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: blur(12px); }
     .bar { max-width: 1120px; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; gap: 16px; }
@@ -2879,7 +2879,9 @@ class PixelhubApp extends LitElement {
         padding: 6px 8px max(8px, env(safe-area-inset-bottom, 0px)); background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--line); }
       .bottom button { flex-direction: column; gap: 3px; font-size: 10.5px; padding: 6px 0; min-width: 0; }
       .bottom button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .bottom.typing { display: none; }
+      .bottom { transition: transform .22s ease, opacity .22s ease; }
+      .bottom.tucked { transform: translateY(calc(100% + 2px)); }
+      .bottom.keyboard { display: none; }
       .bottom button[aria-current=page] { background: none; }
       main { padding-bottom: 96px !important; }
     }
@@ -2913,16 +2915,20 @@ class PixelhubApp extends LitElement {
     this.addEventListener("refresh", () => this.pollStatus());
     this.addEventListener("remove-channel", (e) => this.removeChannel(e.detail));
     this.visible = () => { if (!document.hidden) { this.pollStatus(); this.loadState(); } };
-    // iOS leaves fixed bars where the keyboard pushed them once it closes; hide the bar while typing and nudge the page after.
-    const typingIn = (e) => {
-      const el = e.composedPath()[0];
-      return el?.tagName === "TEXTAREA" || el?.tagName === "SELECT" || (el?.tagName === "INPUT" && !["button", "checkbox", "radio", "range", "color", "file"].includes(el.type));
+    // The bar tucks away while scrolling down and comes back on the way up, as Safari's does.
+    this.lastY = scrollY;
+    this.scrolled = () => {
+      const y = scrollY, dy = y - this.lastY, end = y + innerHeight >= document.documentElement.scrollHeight - 40;
+      if (Math.abs(dy) < 6 && !end) return;
+      this.tucked = dy > 0 && y > 80 && !end;
+      this.lastY = y;
     };
-    this.focusIn = (e) => { if (typingIn(e)) { clearTimeout(this.unfocus); this.typing = true; } };
-    this.focusOut = (e) => {
-      if (!typingIn(e)) return;
-      clearTimeout(this.unfocus);
-      this.unfocus = setTimeout(() => { this.typing = false; requestAnimationFrame(() => { scrollBy(0, 1); scrollBy(0, -1); }); }, 300);
+    // While the keyboard is up the bar would ride on it; iOS also leaves fixed bars where the keyboard pushed
+    // them once it closes, so the page is nudged after.
+    this.viewport = () => {
+      const open = !!visualViewport && visualViewport.height < innerHeight - 120;
+      if (this.keyboard && !open) requestAnimationFrame(() => { scrollBy(0, 1); scrollBy(0, -1); });
+      this.keyboard = open;
     };
     this.leave = () => this.toasts.flush();
   }
@@ -2944,8 +2950,8 @@ class PixelhubApp extends LitElement {
     this.timers = [setInterval(() => { if (!document.hidden) this.pollStatus(); }, STATUS_MS), setInterval(() => { if (!document.hidden) this.loadState(); }, STATE_MS)];
     document.addEventListener("visibilitychange", this.visible);
     addEventListener("pagehide", this.leave);
-    document.addEventListener("focusin", this.focusIn);
-    document.addEventListener("focusout", this.focusOut);
+    addEventListener("scroll", this.scrolled, { passive: true });
+    visualViewport?.addEventListener("resize", this.viewport);
     this.hash = () => { const id = location.hash.slice(1); if (TABS.some(([t]) => t === id)) this.tab = id; };
     addEventListener("hashchange", this.hash);
   }
@@ -2954,8 +2960,8 @@ class PixelhubApp extends LitElement {
     this.timers.forEach(clearInterval);
     document.removeEventListener("visibilitychange", this.visible);
     removeEventListener("pagehide", this.leave);
-    document.removeEventListener("focusin", this.focusIn);
-    document.removeEventListener("focusout", this.focusOut);
+    removeEventListener("scroll", this.scrolled);
+    visualViewport?.removeEventListener("resize", this.viewport);
     removeEventListener("hashchange", this.hash);
   }
 
@@ -3029,7 +3035,7 @@ class PixelhubApp extends LitElement {
       </div></header>
       <main>${this.page(view)}</main>
       <footer>pixelhub ${this.version ?? ""}</footer>
-      ${this.nav(this.typing ? "bottom typing" : "bottom")}
+      ${this.nav(["bottom", this.keyboard && "keyboard", this.tucked && !this.keyboard && "tucked"].filter(Boolean).join(" "))}
       ${this.toasts.view()}`;
   }
 }
