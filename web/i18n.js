@@ -545,6 +545,20 @@ const es = {
 
   // Mosko's quick phrases
   "Quick phrases": "Frases rápidas",
+  "Pranks": "Travesuras",
+  "For a while he makes the noises you pick out of nowhere, at random moments. Tap one to leave it in or out; ▶ makes it now.": "Durante un rato suelta los ruidos que elijas, sin avisar y a ratos al azar. Toca uno para meterlo o quitarlo; ▶ lo hace ya.",
+  "Make it now": "Hacerlo ya",
+  "On until {time}": "Activo hasta las {time}",
+  "the next one any moment": "el siguiente en cualquier momento",
+  "the next one in {n} min": "el siguiente en {n} min",
+  "How often": "Cada cuánto",
+  "Farts": "Pedos",
+  "Burps": "Eructos",
+  "Screams": "Gritos",
+  "Bleeps": "Soniditos",
+  "Often": "A menudo",
+  "Now and then": "A ratos",
+  "Rarely": "Poco",
 
   // Surprises
   "Random": "Aleatorio",

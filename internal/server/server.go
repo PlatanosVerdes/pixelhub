@@ -83,6 +83,7 @@ type Server struct {
 	Voice   Voice
 	Decoder Decoder
 	talking talking
+	pranks  pranks
 	voice   *keptVoice
 	// SpeechDir, when set, keeps what the voice read across restarts.
 	SpeechDir string
@@ -121,6 +122,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/talk/idle", s.idle)
 	mux.HandleFunc("POST /api/talk/warm", s.warmUp)
 	mux.HandleFunc("GET /api/talk/phrases", s.phrases)
+	s.pranksRoutes(mux)
 	mux.HandleFunc("GET /api/sprites", s.sprites)
 	mux.HandleFunc("GET /api/sprites/{file}", s.spritePNG)
 	mux.HandleFunc("GET /api/preview.png", s.previewPNG)

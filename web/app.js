@@ -1931,11 +1931,16 @@ const at = (range, v) => ((v - range.min) / (range.max - range.min)) * 100;
 
 // Mosko says what is typed, or a recording, on the display, his mouth and eyes moving with the voice.
 // The page plays the same faces the display shows, and idles with a blink now and then.
+const NOISES = [["fart", "💨", "Farts"], ["burp", "🤢", "Burps"], ["scream", "😱", "Screams"], ["sound", "🎵", "Bleeps"]];
+const PRANKS_FOR = [["15m", "15 min"], ["30m", "30 min"], ["1h", "1 h"], ["2h", "2 h"]];
+const PRANKS_EVERY = [["often", "Often"], ["sometimes", "Now and then"], ["rarely", "Rarely"]];
+
 class MoskoTab extends LitElement {
   static properties = {
     state: { attribute: false }, status: { attribute: false }, text: { state: true }, busy: { state: true }, rec: { state: true },
     lag: { state: true }, pitch: { state: true }, effect: { state: true }, face: { state: true }, talking: { state: true },
-    playingSound: { state: true }, phrases: { state: true },
+    playingSound: { state: true }, phrases: { state: true }, pranks: { state: true }, pick: { state: true }, pranksFor: { state: true },
+    pranksEvery: { state: true }, trying: { state: true },
   };
   static styles = [base, css`
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
@@ -2006,6 +2011,32 @@ class MoskoTab extends LitElement {
     .pad:disabled { opacity: .5; cursor: default; }
     .pad b { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
     .pad.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+    .pranks { display: grid; gap: 12px; }
+    .pranks .head { margin: 0; }
+    .pranks .hint { margin: 0; }
+    .noises { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+    .noise { position: relative; }
+    .noise .effect { width: 100%; min-height: 44px; padding: 8px 44px 8px 12px; display: flex; align-items: center; gap: 8px; }
+    .noise .effect i { font-style: normal; font-size: 18px; line-height: 1; }
+    .noise .try { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; padding: 0; font-size: 10px; }
+    .noise .try:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .noise .try:disabled { opacity: .5; cursor: default; }
+    .options { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+    .option { display: flex; align-items: center; gap: 8px; }
+    .option > span { font-size: 12px; color: var(--muted); }
+    .options .seg { flex-wrap: nowrap; }
+    .options .btn { margin-left: auto; }
+    @media (max-width: 599px) {
+      .option { width: 100%; }
+      .option > span { width: 72px; flex: none; }
+      .options .seg { flex: 1; }
+      .options .seg button { flex: 1; padding: 0 6px; }
+      .options .btn { width: 100%; }
+    }
+    .live { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 12%, transparent); font-size: 13px; }
+    .live span { flex: 1 1 200px; display: flex; align-items: baseline; gap: 8px; }
+    .live i { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+    .live .btn { margin-left: auto; }
   `];
   constructor() {
     super(); this.text = ""; this.face = [HALF, CALM]; this.timers = [];
@@ -2015,11 +2046,12 @@ class MoskoTab extends LitElement {
     this.wait();
     api("GET", "talk/phrases").then((r) => { this.phrases = r.phrases; }).catch(() => {});
     api("POST", "talk/warm").catch(() => {});
+    this.loadPranks();
     for (let s = 0; s <= 4; s++) for (let m = 0; m <= 4; m++) new Image().src = faceURL(s, m);
     this.idle();
   }
   disconnectedCallback() {
-    super.disconnectedCallback(); this.stopRecording(true); this.discard(); this.clear(); clearTimeout(this.saving); clearTimeout(this.waiting);
+    super.disconnectedCallback(); this.stopRecording(true); this.discard(); this.clear(); clearTimeout(this.saving); clearTimeout(this.waiting); clearTimeout(this.pranksTick);
     api("DELETE", "show?key=mosko-idle", undefined, { keepalive: true }).then(() => send(this, "refresh")).catch(() => {});
   }
   willUpdate(c) {
@@ -2102,6 +2134,59 @@ class MoskoTab extends LitElement {
       <div class="head"><h2>${t("Quick phrases")}</h2></div>
       <div class="pads">${(this.phrases ?? []).map((text) => html`<button class="pad ${this.playingSound === text ? "on" : ""}"
         ?disabled=${this.busy && this.playingSound !== text} @click=${() => this.quick(text)}><b>${text}</b></button>`)}</div>
+    </div>`;
+  }
+  async loadPranks() {
+    clearTimeout(this.pranksTick);
+    try {
+      this.pranks = await api("GET", "talk/pranks");
+      if (this.pranks.on) {
+        this.pick = this.pranks.kinds; this.pranksEvery = this.pranks.every;
+        this.pranksTick = setTimeout(() => this.loadPranks(), 20000);
+      }
+    } catch { /* the card stays as it was */ }
+  }
+  toggleNoise(kind) {
+    const pick = this.pick ?? NOISES.map(([k]) => k);
+    this.pick = pick.includes(kind) ? pick.filter((k) => k !== kind) : [...pick, kind];
+  }
+  async tryNoise(kind) {
+    this.trying = kind;
+    try {
+      const r = await api("POST", "talk/noise", { kind });
+      this.play(r.faces ?? [], r.faces_after_ms ?? 0);
+      send(this, "refresh");
+    } catch (e) { toast(this, e.message); }
+    setTimeout(() => { if (this.trying === kind) this.trying = null; }, 1500);
+  }
+  async startPranks() {
+    try {
+      this.pranks = await api("POST", "talk/pranks", { kinds: this.pick ?? NOISES.map(([k]) => k), for: this.pranksFor ?? "1h", every: this.pranksEvery ?? "sometimes" });
+      this.loadPranks();
+    } catch (e) { toast(this, e.message); }
+  }
+  async stopPranks() {
+    try { this.pranks = await api("DELETE", "talk/pranks"); clearTimeout(this.pranksTick); } catch (e) { toast(this, e.message); }
+  }
+  pranksCard() {
+    const p = this.pranks ?? {}, pick = this.pick ?? NOISES.map(([k]) => k), every = this.pranksEvery ?? "sometimes";
+    const mins = p.next ? Math.max(0, Math.round((new Date(p.next) - Date.now()) / 60000)) : 0;
+    return html`<div class="card pranks">
+      <div class="head"><h2>${t("Pranks")}</h2></div>
+      <p class="hint">${t("For a while he makes the noises you pick out of nowhere, at random moments. Tap one to leave it in or out; ▶ makes it now.")}</p>
+      <div class="noises">${NOISES.map(([kind, icon, name]) => html`<div class="noise">
+        <button class="effect" aria-pressed=${String(pick.includes(kind))} ?disabled=${p.on} @click=${() => this.toggleNoise(kind)}><i>${icon}</i><b>${t(name)}</b></button>
+        <button class="try" aria-label=${t("Make it now")} title=${t("Make it now")} ?disabled=${this.busy || this.trying === kind} @click=${() => this.tryNoise(kind)}>▶</button>
+      </div>`)}</div>
+      ${p.on ? html`<div class="live" role="status">
+          <span><i></i>${t("On until {time}", { time: hhmm(new Date(p.until)) })} · ${mins < 1 ? t("the next one any moment") : t("the next one in {n} min", { n: mins })}</span>
+          <button class="btn" @click=${() => this.stopPranks()}>${t("Stop")}</button>
+        </div>`
+        : html`<div class="options">
+          <div class="option"><span>${t("For")}</span>${segmented(PRANKS_FOR.map(([v, l]) => [v, t(l)]), this.pranksFor ?? "1h", (v) => { this.pranksFor = v; })}</div>
+          <div class="option"><span>${t("How often")}</span>${segmented(PRANKS_EVERY.map(([v, l]) => [v, t(l)]), every, (v) => { this.pranksEvery = v; })}</div>
+          <button class="btn primary" ?disabled=${pick.length === 0} @click=${() => this.startPranks()}>${t("Start")}</button>
+        </div>`}
     </div>`;
   }
   // While this tab is open the display shows him waiting, blinking; the loop plays on the display by itself.
@@ -2264,6 +2349,7 @@ class MoskoTab extends LitElement {
           <p class="hint">${t("He gestures with the text: ! raises his eyebrows, ? raises one, ... makes him think, jaja makes him laugh.")}</p>
         </div>
         ${this.quickPhrases()}
+        ${this.pranksCard()}
         <div class="card voice">
           <h2>${t("Voice")}</h2>
           <div class="field">

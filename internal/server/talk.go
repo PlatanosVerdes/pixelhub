@@ -56,7 +56,7 @@ func (s *Server) talk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.talking.TryLock() {
-		writeError(w, http.StatusTooManyRequests, errors.New("Mosko is still on the last one"))
+		writeError(w, http.StatusTooManyRequests, errMoskoBusy)
 		return
 	}
 	defer s.talking.Unlock()
