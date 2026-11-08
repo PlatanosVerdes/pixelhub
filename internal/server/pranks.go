@@ -169,7 +169,10 @@ func (s *Server) runPranks(ctx context.Context, wait [2]time.Duration) {
 	}
 }
 
-var errMoskoBusy = errors.New("Mosko is still on the last one")
+var (
+	errMoskoBusy = errors.New("Mosko is still on the last one")
+	errNoNoises  = errors.New("noises need ffmpeg")
+)
 
 // noise has Mosko make a noise of kind now, unless he is already talking.
 func (s *Server) noise(kind string) (display.Content, []talk.Pose, error) {
@@ -177,7 +180,12 @@ func (s *Server) noise(kind string) (display.Content, []talk.Pose, error) {
 		return display.Content{}, nil, errMoskoBusy
 	}
 	defer s.talking.Unlock()
-	n, err := talk.MakeNoise(kind)
+	if s.Decoder == nil {
+		return display.Content{}, nil, errNoNoises
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	n, err := s.noises.Make(ctx, kind)
 	if err != nil {
 		return display.Content{}, nil, err
 	}
@@ -193,6 +201,8 @@ func noiseStatus(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, talk.ErrNoNoise):
 		return http.StatusBadRequest
+	case errors.Is(err, errNoNoises):
+		return http.StatusServiceUnavailable
 	}
 	return http.StatusInternalServerError
 }

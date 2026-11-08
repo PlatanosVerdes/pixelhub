@@ -14,6 +14,7 @@ import (
 	"github.com/PlatanosVerdes/pixelhub/internal/hub"
 	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
+	"github.com/PlatanosVerdes/pixelhub/internal/talk"
 	"github.com/PlatanosVerdes/pixelhub/internal/weather"
 )
 
@@ -84,6 +85,7 @@ type Server struct {
 	Decoder Decoder
 	talking talking
 	pranks  pranks
+	noises  talk.Noises
 	voice   *keptVoice
 	// SpeechDir, when set, keeps what the voice read across restarts.
 	SpeechDir string
@@ -96,6 +98,7 @@ func (s *Server) Handler() http.Handler {
 	if s.Voice != nil && s.voice == nil {
 		s.voice = newKeptVoice(s.Voice, s.SpeechDir)
 	}
+	s.noises.Decoder = s.Decoder
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": s.Version})

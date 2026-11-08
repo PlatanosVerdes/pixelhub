@@ -328,25 +328,36 @@ func TestMoodsFallWhereTheyAreSaid(t *testing.T) {
 	}
 }
 
+type toneDecoder struct{ calls *int }
+
+func (d toneDecoder) Decode(_ context.Context, audio []byte, _ float64, _ string) (PCM, error) {
+	*d.calls++
+	p := PCM{Rate: Rate, Samples: make([]int16, Rate)}
+	for i := range p.Samples {
+		p.Samples[i] = int16(12000 * math.Sin(float64(i)/8))
+	}
+	return p, nil
+}
+
 func TestNoises(t *testing.T) {
 	t.Parallel()
+	var calls int
+	n := &Noises{Decoder: toneDecoder{&calls}}
 	for _, kind := range NoiseKinds {
-		for range 20 {
-			n, err := MakeNoise(kind)
+		if files := NoiseFiles(kind); len(files) < 5 {
+			t.Errorf("%s has %d recordings, want 5 or more", kind, len(files))
+		}
+		var last string
+		for range 12 {
+			noise, err := n.Make(context.Background(), kind)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if d := n.PCM.Duration(); d < 100*time.Millisecond || d > 5*time.Second {
-				t.Errorf("%s lasts %s", kind, d)
+			if noise.File == last {
+				t.Errorf("%s played %s twice in a row", kind, last)
 			}
-			var peak int16
-			for _, v := range n.PCM.Samples {
-				peak = max(peak, v, -v)
-			}
-			if peak < 20000 {
-				t.Errorf("%s peaks at %d, want it loud", kind, peak)
-			}
-			_, poses := n.Clip(0)
+			last = noise.File
+			_, poses := noise.Clip(0)
 			open := slices.ContainsFunc(poses, func(p Pose) bool { return p.Shape != Shut && p.Shape != Blink })
 			if open != (kind != "fart") {
 				t.Errorf("%s opens the mouth: %v", kind, open)
@@ -356,7 +367,29 @@ func TestNoises(t *testing.T) {
 			}
 		}
 	}
-	if _, err := MakeNoise("sneeze"); !errors.Is(err, ErrNoNoise) {
+	if total := len(NoiseFiles("fart")) + len(NoiseFiles("burp")) + len(NoiseFiles("scream")) + len(NoiseFiles("sound")); calls > total {
+		t.Errorf("decoded %d times for %d recordings", calls, total)
+	}
+	if _, err := n.Make(context.Background(), "sneeze"); !errors.Is(err, ErrNoNoise) {
 		t.Errorf("an unknown noise: %v", err)
+	}
+}
+
+func TestNoiseRecordingsDecode(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg")
+	}
+	n := &Noises{Decoder: Decoder{FFmpeg: ffmpeg}}
+	for _, kind := range NoiseKinds {
+		for _, f := range NoiseFiles(kind) {
+			p, err := n.pcm(context.Background(), f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d := p.Duration(); d < 100*time.Millisecond || d > 3100*time.Millisecond {
+				t.Errorf("%s lasts %s", f, d)
+			}
+		}
 	}
 }
