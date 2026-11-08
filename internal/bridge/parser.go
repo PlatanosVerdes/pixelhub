@@ -12,6 +12,7 @@ type event struct {
 	battery int // 1-10 when the bridge reported a battery level of battery-1
 	light   int // 1-256 when the bridge's light sensor read light-1
 	sound   bool
+	speaker int // 1 when the display's speaker was not there for a talk, 2 when it played it
 	err     error
 }
 
@@ -22,6 +23,8 @@ const (
 	// sound sensor sets, which only says a sound came.
 	opLight = 0x4c
 	opSound = 0x53
+	// opSpeaker is followed by 1 when the display's speaker played a talk, 0 when it was not connected.
+	opSpeaker = 0x41
 )
 
 // parser splits the bridge's byte stream into Evo frames and link-down bytes, whatever the read boundaries.
@@ -42,6 +45,14 @@ func (p *parser) feed(data []byte) []event {
 			} else {
 				out = append(out, event{sound: true})
 			}
+			p.buf = p.buf[2:]
+			continue
+		}
+		if p.buf[0] == opSpeaker {
+			if len(p.buf) < 2 {
+				break
+			}
+			out = append(out, event{speaker: 1 + int(min(p.buf[1], 1))})
 			p.buf = p.buf[2:]
 			continue
 		}

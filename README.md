@@ -189,6 +189,10 @@ pictures with 3 of the clock.
 
 ### Battery
 
+After a talk, pixelbridge sends `0x41` and 1 when the display's speaker played it, or 0 when the
+speaker was not connected (it then plays nothing rather than on the machine's own output); pixelhub
+shows it as `speaker` in the status and the Mosko tab warns.
+
 A bridge that can read the display's battery sends `0x42` and the level, 0 (empty) to 9 (full).
 The display only reports it over hands-free, to a gateway that answers `AT+XAPL` as an iPhone; the
 macOS bridge cannot, an ESP32 bridge with hands-free can. pixelhub shows it in the status

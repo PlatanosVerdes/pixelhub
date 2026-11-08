@@ -1933,7 +1933,7 @@ const at = (range, v) => ((v - range.min) / (range.max - range.min)) * 100;
 // The page plays the same faces the display shows, and idles with a blink now and then.
 class MoskoTab extends LitElement {
   static properties = {
-    state: { attribute: false }, text: { state: true }, busy: { state: true }, rec: { state: true },
+    state: { attribute: false }, status: { attribute: false }, text: { state: true }, busy: { state: true }, rec: { state: true },
     lag: { state: true }, pitch: { state: true }, effect: { state: true }, face: { state: true }, talking: { state: true },
     playingSound: { state: true }, phrases: { state: true },
   };
@@ -1946,6 +1946,7 @@ class MoskoTab extends LitElement {
     @media (max-width: 599px) { ph-poke { width: min(60%, 200px); } }
     .who b { font-family: var(--font-pixel); font-size: 22px; font-weight: 600; }
     .who p { margin: 0; color: var(--muted); font-size: 13px; }
+    .who p.mute { color: var(--ink); background: color-mix(in srgb, var(--warn) 16%, transparent); border-radius: 10px; padding: 8px 10px; text-align: left; }
     .mood { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); padding: 4px 10px; border-radius: 999px; background: var(--chip); }
     .mood i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
     .mood.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
@@ -2245,6 +2246,7 @@ class MoskoTab extends LitElement {
           <b>Mosko</b>
           <span class="mood ${on ? "on" : ""}"><i></i>${mood}</span>
           <p>${t("Lives in the display and says whatever you tell him.")}</p>
+          ${this.status?.speaker === false ? html`<p class="mute" role="alert">${t("The Evo's speaker is not connected, so his mouth moves but nothing sounds. If a phone has the Evo as a speaker, disconnect it there; if not, switch the Evo off and on.")}</p>` : nothing}
         </div>
       </div>
       <div class="main">
@@ -3016,7 +3018,7 @@ class PixelhubApp extends LitElement {
       case "music": return html`<ph-music .state=${view} .status=${this.status} .styles=${this.modes}></ph-music>${gallery}`;
       case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<ph-connection .status=${this.status} .state=${view}></ph-connection></div>${gallery}`;
       case "calendar": return html`<ph-calendar></ph-calendar>${gallery}`;
-      case "mosko": return html`<ph-mosko .state=${view}></ph-mosko>${gallery}`;
+      case "mosko": return html`<ph-mosko .state=${view} .status=${this.status}></ph-mosko>${gallery}`;
       case "draw": return html`<ph-draw></ph-draw>${gallery}`;
       default: return html`<ph-display .status=${this.status} .state=${view} .sprites=${this.sprites} .styles=${this.modes} ?offline=${this.offline}></ph-display>${gallery}`;
     }

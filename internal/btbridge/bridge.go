@@ -20,7 +20,9 @@ const (
 	// opChime asks for the chime on the display's own speaker; the esp32 bridge has no such op.
 	opChime = 0x7c
 	// opSay carries a sound for that speaker and the faces to paint in time with it, after a four-byte length.
-	opSay     = 0x7d
+	opSay = 0x7d
+	// opSpeaker tells pixelhub, after a talk, whether the display's speaker played it (1) or was not there (0).
+	opSpeaker = 0x41
 	maxSay    = 8 << 20
 	cmdBright = 0x74
 	linkDown  = 0x96
@@ -45,8 +47,9 @@ type Bridge struct {
 	Retry time.Duration
 	// Chime, when set, plays the chime on the speaker of the display at mac.
 	Chime func(mac [6]byte)
-	// Say, when set, plays wav on that speaker after a wait, until ctx ends.
-	Say func(ctx context.Context, mac [6]byte, wav []byte, after time.Duration)
+	// Say, when set, plays wav on that speaker after a wait, until ctx ends; ErrNoSpeaker when the
+	// display's speaker is not connected.
+	Say func(ctx context.Context, mac [6]byte, wav []byte, after time.Duration) error
 
 	ops     chan func()
 	cl      net.Conn
@@ -243,10 +246,16 @@ func (b *Bridge) say(body []byte) {
 	b.talk = t
 	mac := b.mac
 	go func() {
-		b.Say(ctx, mac, wav, soundAfter)
+		err := b.Say(ctx, mac, wav, soundAfter)
 		b.ops <- func() {
 			t.heard = true
 			b.endTalk(t)
+			switch {
+			case err == nil:
+				b.reply([]byte{opSpeaker, 1})
+			case errors.Is(err, ErrNoSpeaker):
+				b.reply([]byte{opSpeaker, 0})
+			}
 		}
 	}()
 }
@@ -374,6 +383,9 @@ func (b *Bridge) close() {
 		b.lk = nil
 	}
 }
+
+// ErrNoSpeaker is a sound with nowhere to play: the display is linked but its speaker is not.
+var ErrNoSpeaker = errors.New("the display's speaker is not connected")
 
 func (b *Bridge) reply(data []byte) {
 	if b.cl == nil {

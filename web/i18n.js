@@ -602,4 +602,5 @@ const es = {
   "Hearts": "Corazones",
   "Cats": "Gatos",
   "Space": "Espacio",
+  "The Evo's speaker is not connected, so his mouth moves but nothing sounds. If a phone has the Evo as a speaker, disconnect it there; if not, switch the Evo off and on.": "El altavoz de la Evo no está conectado: se le mueve la boca pero no suena nada. Si un móvil tiene la Evo como altavoz, desconéctala ahí; si no, apaga y enciende la Evo.",
 };
