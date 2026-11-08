@@ -650,14 +650,14 @@ class Automatic extends LitElement {
   setAmbient(a) { return this.save({ ambient: { ...this.channel.ambient, ...a } }); }
   whatOf(s) {
     if (s.brightness === 0) return t("Display off");
-    if (s.list) return s.list;
+    if (s.list) return surpriseName(s.list);
     if (s.view?.mode) return RULE_KINDS().find(([k]) => k === s.view.mode)?.[1] ?? modeName(s.view.mode);
     return s.sprite || t("Only the clock");
   }
   async add(e) {
     e.preventDefault();
     const d = this.draft;
-    const scene = { name: `${d.what.replace(/^list:/, "")} ${d.from}`, days: d.days, from: d.from, to: d.to };
+    const scene = { name: `${surpriseName(d.what.replace(/^list:/, ""))} ${d.from}`, days: d.days, from: d.from, to: d.to };
     if (d.what.startsWith("list:")) scene.list = d.what.slice(5);
     else if (d.what === "off") Object.assign(scene, { view: { mode: "clock" }, brightness: 0 });
     else scene.view = d.what === "light" ? { mode: "light", color: "#ffb547" } : { mode: d.what };
@@ -670,7 +670,7 @@ class Automatic extends LitElement {
       <div class="line">${t("from")} <input type="time" aria-label=${t("from")} .value=${d.from} @change=${(e) => { this.draft = { ...d, from: e.target.value }; }}>
         ${t("to")} <input type="time" aria-label=${t("to")} .value=${d.to} @change=${(e) => { this.draft = { ...d, to: e.target.value }; }}>
         ${t("show")} <select aria-label=${t("What to show")} @change=${(e) => { this.draft = { ...d, what: e.target.value }; }}>
-          ${lists.map((l) => html`<option value=${`list:${l.name}`} ?selected=${d.what === `list:${l.name}`}>${l.name}</option>`)}
+          ${[...Object.values(SURPRISE).map((v) => [v, surpriseName(v)]), ...lists.map((l) => [l.name, l.name])].map(([v, label]) => html`<option value=${`list:${v}`} ?selected=${d.what === `list:${v}`}>${label}</option>`)}
           ${RULE_KINDS().map(([k, label]) => html`<option value=${k} ?selected=${d.what === k}>${label}</option>`)}</select></div>
       <div class="line"><button class="btn primary" type="submit" ?disabled=${this.busy || d.from === d.to}>${t("Save")}</button>
         <button class="btn" type="button" @click=${() => { this.draft = null; }}>${t("Cancel")}</button></div>
@@ -688,6 +688,8 @@ class Automatic extends LitElement {
         <h3>${t("Usually it shows")}</h3>
         <div class="opts" role="group">
           <button class="opt" aria-pressed=${String(!playing)} ?disabled=${this.busy} @click=${() => this.setAmbient({ pictures: "0s", list: "", clock: seconds(a.clock) ? a.clock : "1m" })}>${t("Only the clock")}</button>
+          ${Object.values(SURPRISE).map((v) => html`<button class="opt" aria-pressed=${String(v === playing)} ?disabled=${this.busy}
+            @click=${() => this.setAmbient({ list: v, pictures: seconds(a.pictures) ? a.pictures : "1m" })}>${surpriseName(v)}</button>`)}
           ${lists.map((l) => html`<button class="opt" aria-pressed=${String(l.name.toLowerCase() === playing)} ?disabled=${this.busy}
             @click=${() => this.setAmbient({ list: l.name, pictures: seconds(a.pictures) ? a.pictures : "1m" })}>${l.name}<small>${l.items.length}</small></button>`)}
         </div>
@@ -812,15 +814,22 @@ const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
 
 // The list that is always there; the page shows it under its name in the reader's language.
 const FAVORITES = "favorites";
+const SURPRISE = { random: "@random", moment: "@moment" };
+const surpriseName = (list) => (list === SURPRISE.random ? t("Random") : list === SURPRISE.moment ? t("For the moment") : list);
+const galleryIcons = {
+  dice: icon(svg`<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1" fill="currentColor"/><circle cx="15" cy="15" r="1" fill="currentColor"/><circle cx="15" cy="9" r="1" fill="currentColor"/><circle cx="9" cy="15" r="1" fill="currentColor"/>`),
+  sparkle: icon(svg`<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/>`),
+};
 const listName = (l) => (l.name === FAVORITES ? t("Favorites") : l.name);
 
 class GalleryTab extends LitElement {
-  static properties = { state: { attribute: false }, width: { state: true }, category: { state: true }, sort: { state: true }, items: { state: true }, page: { state: true },
+  static properties = { surprising: { state: true }, state: { attribute: false }, width: { state: true }, category: { state: true }, sort: { state: true }, items: { state: true }, page: { state: true },
     more: { state: true }, pages: { state: true }, loading: { state: true }, picked: { state: true }, busy: { state: true }, problem: { state: true },
     query: { state: true }, searched: { state: true }, indexing: { state: true }, source: { state: true }, lists: { state: true }, open: { state: true },
     saving: { state: true }, newList: { state: true }, creating: { state: true }, renaming: { state: true } };
   static styles = [base, css`
     .bar { display: grid; gap: 10px; margin-bottom: 14px; }
+    .lucky { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .cats { display: flex; gap: 6px; flex-wrap: wrap; }
     @media (max-width: 599px) {
       .cats { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px; scroll-padding: 16px; }
@@ -1127,6 +1136,27 @@ class GalleryTab extends LitElement {
         : nothing}`;
   }
 
+  // A gallery picture picked by chance, or for the day and hour, shown now; the toast offers to keep it going.
+  async surprise(kind) {
+    this.surprising = kind;
+    try {
+      const r = await api("POST", "gallery/surprise", { kind });
+      send(this, "refresh");
+      const label = kind === "moment" ? `${r.theme} · ${r.showing}` : r.showing;
+      toast(this, label, { action: { label: t("Keep it going"), run: () => this.keepGoing(kind) } });
+    } catch (e) { toast(this, e.message); }
+    finally { this.surprising = null; }
+  }
+  async keepGoing(kind) {
+    const ch = defaultChannel(this.state);
+    if (!ch) return;
+    try { if (this.state.mode) await api("DELETE", "mode"); } catch (e) { toast(this, e.message); return; }
+    const a = ch.ambient;
+    if (await saveChannel(this, this.state, { ambient: { ...a, list: SURPRISE[kind], pictures: seconds(a.pictures) ? a.pictures : "1m" } })) {
+      toast(this, kind === "moment" ? t("In automatic it now shows things for the moment") : t("In automatic it now shows random pictures"));
+    }
+  }
+
   render() {
     const mine = this.category === "lists" && !this.searched;
     return html`
@@ -1135,6 +1165,11 @@ class GalleryTab extends LitElement {
           <input type="search" placeholder=${t("Search: cat, heart, pumpkin…")} aria-label=${t("Search the gallery")} .value=${this.query ?? ""} @input=${(e) => { this.query = e.target.value; }}>
           <button class="btn primary" type="submit">${t("Search")}</button>
         </form>
+        <div class="lucky">
+          <button class="btn" ?disabled=${!!this.surprising} @click=${() => this.surprise("random")}>${galleryIcons.dice}${t("Random")}</button>
+          <button class="btn" ?disabled=${!!this.surprising} @click=${() => this.surprise("moment")}>${galleryIcons.sparkle}${t("For the moment")}</button>
+          ${this.surprising ? html`<span class="small muted">${t("Looking…")}</span>` : nothing}
+        </div>
         <div class="cats" role="group" aria-label=${t("Categories")}>
           <button class="cat mine" aria-pressed=${String(mine)} @click=${() => this.pick("category", "lists")}>${t("My lists")}</button>
           ${CATEGORIES.map((c) => html`<button class="cat" aria-pressed=${String(!this.searched && c === this.category)} @click=${() => this.pick("category", c)}>${categoryName(c)}</button>`)}</div>

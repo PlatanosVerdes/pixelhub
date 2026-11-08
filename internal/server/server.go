@@ -74,6 +74,7 @@ type Server struct {
 	// GalleryPace is the pause between the gallery pages read for search; 0 means 3 s.
 	GalleryPace time.Duration
 	gifs        gifCache
+	surprises   surprises
 	lists       listCache
 	index       galleryIndex
 	// Drawings, when set, keeps the animations drawn in the page under /api/drawings.

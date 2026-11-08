@@ -111,7 +111,13 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 	if err != nil {
 		return err
 	}
-	h.Lists = hub.ListFunc(func(list string, turn int) (display.Content, bool, error) { return kept.Pick(list, turn, divoom.Size) })
+	var api *server.Server
+	h.Lists = hub.ListFunc(func(list string, turn int) (display.Content, bool, error) {
+		if list == server.Random || list == server.Moment {
+			return api.Surprise(list)
+		}
+		return kept.Pick(list, turn, divoom.Size)
+	})
 	cal, err := calendar.Open(filepath.Join(cfg.DataDir, "google.json"), log)
 	if err != nil {
 		return err
@@ -122,13 +128,7 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 			h.Chime()
 		}
 	}
-	go session.Run(ctx)
-	go h.Run(ctx)
-	go music.Run(ctx)
-	go station.Run(ctx)
-	go cal.Run(ctx)
-
-	api := &server.Server{Hub: h, Sprites: sprites, Spotify: music, Calendar: cal, Weather: station, Gallery: gallery.NewClient(), Lists: kept, IndexPath: filepath.Join(cfg.DataDir, "gallery-index.json"), Size: divoom.Size, Version: buildVersion}
+	api = &server.Server{Hub: h, Sprites: sprites, Spotify: music, Calendar: cal, Weather: station, Gallery: gallery.NewClient(), Lists: kept, IndexPath: filepath.Join(cfg.DataDir, "gallery-index.json"), Size: divoom.Size, Version: buildVersion}
 	if ffmpeg, err := exec.LookPath("ffmpeg"); err == nil {
 		api.Decoder = talk.Decoder{FFmpeg: ffmpeg}
 	} else {
@@ -140,7 +140,13 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 	if api.Drawings, err = drawings.Open(filepath.Join(cfg.DataDir, "drawings"), divoom.Size); err != nil {
 		return err
 	}
+	go session.Run(ctx)
+	go h.Run(ctx)
+	go music.Run(ctx)
+	go station.Run(ctx)
+	go cal.Run(ctx)
 	go api.WarmGallery(ctx)
+	go api.RunSurprises(ctx)
 	srv := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),
 		Handler:           api.Handler(),

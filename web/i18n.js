@@ -552,4 +552,12 @@ const es = {
   // Mosko's quick phrases
   "Quick phrases": "Frases rápidas",
   "The first time each one takes a moment; then it comes out at once.": "La primera vez cada una tarda un poco; después sale al momento.",
+
+  // Surprises
+  "Random": "Aleatorio",
+  "For the moment": "Del momento",
+  "Looking…": "Buscando…",
+  "Keep it going": "Que siga así",
+  "In automatic it now shows things for the moment": "En automático ahora salen cosas del momento",
+  "In automatic it now shows random pictures": "En automático ahora salen dibujos aleatorios",
 };
