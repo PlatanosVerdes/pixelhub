@@ -613,7 +613,10 @@ const daysText = (days) => {
   if (formatDays(set) === "sat,sun") return t("Weekends");
   return [...set].sort().map(dayLabel).join(" ");
 };
-const STEPS = [["30s", "30 s"], ["1m", "1 min"], ["2m", "2 min"], ["5m", "5 min"]];
+// Each picture is short, as on the display's own animations; the clock between can stay longer.
+const PICTURE_STEPS = [["5s", "5 s"], ["10s", "10 s"], ["15s", "15 s"], ["30s", "30 s"]];
+const CLOCK_STEPS = [["5s", "5 s"], ["10s", "10 s"], ["30s", "30 s"], ["1m", "1 min"]];
+const PICTURE_DEFAULT = "10s";
 
 const RULE_KINDS = () => [["off", t("Display off")], ["clock", t("Only the clock")], ["light", t("Light")], ["animations", t("My animations")]];
 
@@ -709,9 +712,9 @@ class Automatic extends LitElement {
           ${this.kind("clock", source, autoIcons.clock, t("Only the clock"), t("The clock all the time"),
             () => this.setAmbient({ pictures: "0s", list: "", clock: seconds(a.clock) ? a.clock : "1m" }))}
           ${this.kind("list", source, autoIcons.list, t("A list of mine"), lists.length ? t("Your drawings, in turn") : t("Make one in the Gallery first"),
-            () => this.setAmbient({ list: lists[0].name, pictures: seconds(a.pictures) ? a.pictures : "1m" }), !lists.length)}
+            () => this.setAmbient({ list: lists[0].name, pictures: seconds(a.pictures) ? a.pictures : PICTURE_DEFAULT }), !lists.length)}
           ${this.kind("surprise", source, galleryIcons.sparkle, t("Surprise me"), t("Gallery pictures, picked for you"),
-            () => this.setAmbient({ list: SURPRISE.moment, pictures: seconds(a.pictures) ? a.pictures : "1m" }))}
+            () => this.setAmbient({ list: SURPRISE.moment, pictures: seconds(a.pictures) ? a.pictures : PICTURE_DEFAULT }))}
         </div>
         ${source === "list" ? html`<div class="sub"><span class="label">${t("Which list")}</span><div class="opts" role="group">
           ${lists.map((l) => html`<button class="opt" aria-pressed=${String(l.name.toLowerCase() === playing)} ?disabled=${this.busy}
@@ -723,8 +726,8 @@ class Automatic extends LitElement {
         ${playing ? html`
           ${list && !list.items.length ? html`<p class="small muted hint">${t("The list {name} is empty, so only the clock shows.", { name: listName(list) })}</p>` : nothing}
           <div class="rows">
-            <div class="row"><span>${t("Each drawing")}</span><ph-duration .options=${STEPS} .value=${a.pictures} max="86400" @change=${(e) => this.setAmbient({ pictures: e.detail })}></ph-duration></div>
-            <div class="row"><span>${t("Clock between")}</span><ph-duration .options=${[["0s", t("No")], ...STEPS]} .value=${a.clock} max="86400" @change=${(e) => this.setAmbient({ clock: e.detail })}></ph-duration></div>
+            <div class="row"><span>${t("Each drawing")}</span><ph-duration .options=${PICTURE_STEPS} .value=${a.pictures} max="86400" @change=${(e) => this.setAmbient({ pictures: e.detail })}></ph-duration></div>
+            <div class="row"><span>${t("Clock between")}</span><ph-duration .options=${[["0s", t("No")], ...CLOCK_STEPS]} .value=${a.clock} max="86400" @change=${(e) => this.setAmbient({ clock: e.detail })}></ph-duration></div>
           </div>` : nothing}
       </div>
       <div class="block">
@@ -967,7 +970,7 @@ class GalleryTab extends LitElement {
   async play(l) {
     const a = defaultChannel(this.state).ambient;
     this.busy = true;
-    if (await saveChannel(this, this.state, { ambient: { ...a, list: l.name, pictures: seconds(a.pictures) ? a.pictures : "1m" } })) toast(this, t("{name} plays on the Evo in automatic", { name: l.name }));
+    if (await saveChannel(this, this.state, { ambient: { ...a, list: l.name, pictures: seconds(a.pictures) ? a.pictures : PICTURE_DEFAULT } })) toast(this, t("{name} plays on the Evo in automatic", { name: l.name }));
     this.busy = false;
   }
   async upload(l, input) {
@@ -1197,7 +1200,7 @@ class GalleryTab extends LitElement {
     if (!ch) return;
     try { if (this.state.mode) await api("DELETE", "mode"); } catch (e) { toast(this, e.message); return; }
     const a = ch.ambient;
-    if (await saveChannel(this, this.state, { ambient: { ...a, list: SURPRISE[kind], pictures: seconds(a.pictures) ? a.pictures : "1m" } })) {
+    if (await saveChannel(this, this.state, { ambient: { ...a, list: SURPRISE[kind], pictures: seconds(a.pictures) ? a.pictures : PICTURE_DEFAULT } })) {
       toast(this, kind === "moment" ? t("In automatic it now shows things for the moment") : t("In automatic it now shows random pictures"));
     }
   }
