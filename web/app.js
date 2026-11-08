@@ -2440,10 +2440,15 @@ class DrawTab extends LitElement {
     .item span { font-size: 11px; color: var(--muted); }
     .item .icon { position: absolute; top: 4px; right: 4px; background: color-mix(in srgb, var(--bg) 80%, transparent); }
     .empty { font-size: 13px; color: var(--muted); margin: 0; }
-    .saved-now { display: grid; gap: 6px; padding: 12px 14px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--line)); background: color-mix(in srgb, var(--ok) 10%, var(--bg)); }
-    .saved-now b { display: flex; align-items: center; gap: 6px; font-size: 14px; }
-    .saved-now b svg { width: 16px; height: 16px; color: var(--ok); }
-    .saved-now span { font-size: 13px; color: var(--muted); }
+    dialog.next { width: min(380px, calc(100vw - 24px)); }
+    .saved-now { justify-items: center; text-align: center; gap: 8px; }
+    .saved-now .done { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+    .saved-now .done svg { width: 24px; height: 24px; }
+    .saved-now b { font-size: 17px; font-weight: 600; }
+    .saved-now span { font-size: 14px; color: var(--muted); }
+    .saved-now .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; margin-top: 8px; }
+    .saved-now .choices .btn { justify-content: center; height: 44px; }
+    @media (max-width: 600px) { dialog.next { width: 100%; } }
   `];
 
   constructor() {
@@ -2646,7 +2651,7 @@ class DrawTab extends LitElement {
   useColor(c, close = true) {
     this.color = c;
     if (this.tool !== "fill") this.tool = "pen";
-    if (close) this.renderRoot.querySelector("dialog")?.close();
+    if (close) this.renderRoot.querySelector("dialog.colors")?.close();
   }
   saveMine() {
     if (this.mine.includes(this.color)) return;
@@ -2674,7 +2679,7 @@ class DrawTab extends LitElement {
   }
   // A colour of one's own: any colour or a code, kept among Mine to find again.
   colorSheet() {
-    return html`<dialog @click=${(e) => { if (e.target.tagName === "DIALOG") e.target.close(); }} @close=${() => { this.editMine = false; }}>
+    return html`<dialog class="colors" @click=${(e) => { if (e.target.tagName === "DIALOG") e.target.close(); }} @close=${() => { this.editMine = false; }}>
       <div class="sheet">
         <div class="head" style="margin:0"><h2>${t("Custom colour")}</h2>
           <button class="icon" aria-label=${t("Close")} @click=${(e) => e.target.closest("dialog").close()}>${icons.close}</button></div>
@@ -2714,7 +2719,7 @@ class DrawTab extends LitElement {
 
   body() { return { name: this.name.trim() || t("Untitled"), delay_ms: this.delay, frames: this.frames.map(toHex) }; }
   // Saving says what was kept and asks what comes next, so the next strokes never land on it by mistake.
-  async save(asNew = false) {
+  async save(asNew = false, ask = true) {
     const body = this.body();
     if (asNew) {
       const name = prompt(t("Name for the copy"), t("{name} (copy)", { name: body.name }));
@@ -2725,7 +2730,11 @@ class DrawTab extends LitElement {
     try {
       const r = this.id && !asNew ? await api("PUT", `drawings/${this.id}`, body) : await api("POST", "drawings", body);
       this.drawings = r.drawings; this.id = r.drawing.id; this.name = r.drawing.name; this.dirty = false;
-      this.justSaved = r.drawing.name;
+      if (ask) {
+        this.justSaved = r.drawing.name;
+        await this.updateComplete;
+        this.renderRoot.querySelector("dialog.next")?.showModal();
+      }
       return true;
     } catch (e) { toast(this, e.message); return false; }
     finally { this.busy = false; }
@@ -2743,7 +2752,7 @@ class DrawTab extends LitElement {
   }
   async addToList(list) {
     if (!list) return;
-    if ((this.dirty || !this.id) && !(await this.save())) return;
+    if ((this.dirty || !this.id) && !(await this.save(false, false))) return;
     try {
       this.lists = (await api("POST", `drawings/${this.id}/list`, { list })).lists;
       const l = this.lists.find((x) => x.name === list);
@@ -2792,7 +2801,7 @@ class DrawTab extends LitElement {
             <button class="tool" title=${t("Redo")} aria-label=${t("Redo")} ?disabled=${!this.redos.length} @click=${() => this.redo()}>${drawIcon.redo}</button>
           </div>
           <div class="colorbar">
-            <button class="current" title=${t("Custom colour")} aria-label=${t("Custom colour")} @click=${() => this.renderRoot.querySelector("dialog").showModal()}>
+            <button class="current" title=${t("Custom colour")} aria-label=${t("Custom colour")} @click=${() => this.renderRoot.querySelector("dialog.colors").showModal()}>
               <i style="background:${this.tool === "eraser" ? BLACK : this.color}"></i>${drawIcon.palette}</button>
             <div class="tabs" role="tablist">${this.colorTabs().map(([id, label]) => html`<button role="tab" aria-selected=${String(this.palette === id)}
               @click=${() => { this.palette = id; this.keepColors(); }}>${label}</button>`)}</div>
@@ -2825,20 +2834,24 @@ class DrawTab extends LitElement {
         </div>
         <div class="card">
           <div class="head"><h2>${this.id ? t("Editing “{name}”", { name: this.name }) : t("New drawing")}</h2>${this.dirty ? html`<span class="tag on">${t("Not saved")}</span>` : nothing}</div>
-          ${this.justSaved ? html`<div class="saved-now" role="status">
-              <b>${icons.check}${t("Saved “{name}”", { name: this.justSaved })}</b>
+          <dialog class="next" @click=${(e) => { if (e.target.tagName === "DIALOG") e.target.close(); }} @close=${() => { this.justSaved = null; }}>
+            <div class="sheet saved-now">
+              <div class="done">${icons.check}</div>
+              <b>${t("Saved “{name}”", { name: this.justSaved ?? "" })}</b>
               <span>${t("What now?")}</span>
-              <div class="row">
-                <button class="btn" @click=${() => { this.justSaved = null; }}>${t("Keep drawing this one")}</button>
-                <button class="btn primary" @click=${() => this.startNew()}>${icons.plus}${t("Start a new one")}</button>
+              <div class="choices">
+                <button class="btn" @click=${(e) => e.target.closest("dialog").close()}>${t("Keep drawing this one")}</button>
+                <button class="btn primary" @click=${(e) => { e.target.closest("dialog").close(); this.startNew(); }}>${icons.plus}${t("Start a new one")}</button>
               </div>
-            </div>` : html`<div class="row">
+            </div>
+          </dialog>
+          <div class="row">
               <input type="text" maxlength="40" .value=${this.name} placeholder=${t("Name")} aria-label=${t("Name")}
                 @input=${(e) => { this.name = e.target.value; this.dirty = true; }} @keydown=${(e) => { if (e.key === "Enter") this.save(); }}>
               ${this.id ? html`<button class="btn primary" ?disabled=${this.busy || !this.dirty} @click=${() => this.save()}>${t("Save changes")}</button>
                 <button class="btn" ?disabled=${this.busy} @click=${() => this.save(true)}>${t("Save as new")}</button>`
                 : html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.save()}>${t("Save")}</button>`}
-            </div>`}
+            </div>
           <div class="row" style="margin-top:10px">
             <select aria-label=${t("Add to a list")} @change=${(e) => { const v = e.target.value; e.target.value = ""; this.addToList(v); }}>
               <option value="">${t("Add to a list…")}</option>
