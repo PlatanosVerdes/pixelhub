@@ -1933,14 +1933,12 @@ const at = (range, v) => ((v - range.min) / (range.max - range.min)) * 100;
 // The page plays the same faces the display shows, and idles with a blink now and then.
 const NOISES = [["fart", "💨", "Farts"], ["burp", "🤢", "Burps"], ["scream", "😱", "Screams"], ["sound", "🎵", "Bleeps"]];
 const PRANKS_FOR = [["15m", "15 min"], ["30m", "30 min"], ["1h", "1 h"], ["2h", "2 h"]];
-const PRANKS_EVERY = [["often", "Often"], ["sometimes", "Now and then"], ["rarely", "Rarely"]];
 
 class MoskoTab extends LitElement {
   static properties = {
     state: { attribute: false }, status: { attribute: false }, text: { state: true }, busy: { state: true }, rec: { state: true },
     lag: { state: true }, pitch: { state: true }, effect: { state: true }, face: { state: true }, talking: { state: true },
-    playingSound: { state: true }, phrases: { state: true }, pranks: { state: true }, pick: { state: true }, pranksFor: { state: true },
-    pranksEvery: { state: true }, trying: { state: true },
+    playingSound: { state: true }, phrases: { state: true }, pranks: { state: true }, pick: { state: true }, pranksFor: { state: true }, trying: { state: true },
   };
   static styles = [base, css`
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
@@ -2141,7 +2139,7 @@ class MoskoTab extends LitElement {
     try {
       this.pranks = await api("GET", "talk/pranks");
       if (this.pranks.on) {
-        this.pick = this.pranks.kinds; this.pranksEvery = this.pranks.every;
+        this.pick = this.pranks.kinds;
         this.pranksTick = setTimeout(() => this.loadPranks(), 20000);
       }
     } catch { /* the card stays as it was */ }
@@ -2161,7 +2159,7 @@ class MoskoTab extends LitElement {
   }
   async startPranks() {
     try {
-      this.pranks = await api("POST", "talk/pranks", { kinds: this.pick ?? NOISES.map(([k]) => k), for: this.pranksFor ?? "1h", every: this.pranksEvery ?? "sometimes" });
+      this.pranks = await api("POST", "talk/pranks", { kinds: this.pick ?? NOISES.map(([k]) => k), for: this.pranksFor ?? "1h" });
       this.loadPranks();
     } catch (e) { toast(this, e.message); }
   }
@@ -2169,11 +2167,11 @@ class MoskoTab extends LitElement {
     try { this.pranks = await api("DELETE", "talk/pranks"); clearTimeout(this.pranksTick); } catch (e) { toast(this, e.message); }
   }
   pranksCard() {
-    const p = this.pranks ?? {}, pick = this.pick ?? NOISES.map(([k]) => k), every = this.pranksEvery ?? "sometimes";
+    const p = this.pranks ?? {}, pick = this.pick ?? NOISES.map(([k]) => k);
     const mins = p.next ? Math.max(0, Math.round((new Date(p.next) - Date.now()) / 60000)) : 0;
     return html`<div class="card pranks">
       <div class="head"><h2>${t("Pranks")}</h2></div>
-      <p class="hint">${t("For a while he makes the noises you pick out of nowhere, at random moments. Tap one to leave it in or out; ▶ makes it now.")}</p>
+      <p class="hint">${t("For a while he makes the noises you pick out of nowhere, from a second to five minutes apart. Tap one to leave it in or out; ▶ makes it now.")}</p>
       <div class="noises">${NOISES.map(([kind, icon, name]) => html`<div class="noise">
         <button class="effect" aria-pressed=${String(pick.includes(kind))} ?disabled=${p.on} @click=${() => this.toggleNoise(kind)}><i>${icon}</i><b>${t(name)}</b></button>
         <button class="try" aria-label=${t("Make it now")} title=${t("Make it now")} ?disabled=${this.busy || this.trying === kind} @click=${() => this.tryNoise(kind)}>▶</button>
@@ -2184,7 +2182,6 @@ class MoskoTab extends LitElement {
         </div>`
         : html`<div class="options">
           <div class="option"><span>${t("For")}</span>${segmented(PRANKS_FOR.map(([v, l]) => [v, t(l)]), this.pranksFor ?? "1h", (v) => { this.pranksFor = v; })}</div>
-          <div class="option"><span>${t("How often")}</span>${segmented(PRANKS_EVERY.map(([v, l]) => [v, t(l)]), every, (v) => { this.pranksEvery = v; })}</div>
           <button class="btn primary" ?disabled=${pick.length === 0} @click=${() => this.startPranks()}>${t("Start")}</button>
         </div>`}
     </div>`;
