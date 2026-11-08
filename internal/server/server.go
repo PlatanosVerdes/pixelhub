@@ -30,6 +30,7 @@ const (
 type Hub interface {
 	Notify(hub.Alert) (channel string, accepted bool)
 	Show(c display.Content, d time.Duration)
+	Unshow()
 	Sense(light *int, sound bool)
 	SetChannel(name string, d time.Duration) error
 	ClearChannel()
@@ -75,6 +76,10 @@ type Server struct {
 	gifs        gifCache
 	lists       listCache
 	index       galleryIndex
+	// Drawings, when set, keeps the animations drawn in the page under /api/drawings.
+	Drawings Drawings
+	// Sounds, when set, keeps Mosko's soundboard under /api/sounds.
+	Sounds Sounds
 	// Voice and Decoder, when set, let Mosko talk under /api/talk: Voice reads text, Decoder takes recordings.
 	Voice   Voice
 	Decoder Decoder
@@ -94,6 +99,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/weather/show", s.showWeather)
 	mux.HandleFunc("POST /api/sensors", s.sense)
 	mux.HandleFunc("POST /api/notify", s.notify)
+	mux.HandleFunc("DELETE /api/show", func(w http.ResponseWriter, _ *http.Request) {
+		s.Hub.Unshow()
+		writeJSON(w, http.StatusOK, s.Hub.Status())
+	})
 	mux.HandleFunc("POST /api/channel", s.setChannel)
 	mux.HandleFunc("DELETE /api/channel", s.clearChannel)
 	mux.HandleFunc("POST /api/release", s.release)
@@ -131,6 +140,12 @@ func (s *Server) Handler() http.Handler {
 	}
 	if s.Gallery != nil {
 		s.galleryRoutes(mux)
+	}
+	if s.Drawings != nil {
+		s.drawingRoutes(mux)
+	}
+	if s.Sounds != nil {
+		s.soundRoutes(mux)
 	}
 	return s.withWeb(mux)
 }

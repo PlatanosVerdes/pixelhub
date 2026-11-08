@@ -421,6 +421,14 @@ func (h *Hub) Show(c display.Content, d time.Duration) {
 	h.poke()
 }
 
+// Unshow takes off what was shown by hand, if it is still on.
+func (h *Hub) Unshow() {
+	h.mu.Lock()
+	h.alerts.drop(shownSource, h.now())
+	h.mu.Unlock()
+	h.poke()
+}
+
 // ErrLent is a request the display cannot take while the phone app has it.
 var ErrLent = errors.New("the display is lent to the phone app")
 

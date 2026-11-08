@@ -45,6 +45,24 @@ type talkRequest struct {
 
 // talk makes Mosko say a text, sent as JSON, or a recording, sent as the multipart field "audio".
 func (s *Server) talk(w http.ResponseWriter, r *http.Request) {
+	if kind, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); kind == "multipart/form-data" {
+		s.speak(w, r, func(ctx context.Context, tune state.Talk) (talk.PCM, []talk.Span, int, error) {
+			pcm, status, err := s.recording(ctx, w, r, tune)
+			return pcm, nil, status, err
+		})
+		return
+	}
+	var req talkRequest
+	if !decode(w, r, &req, smallBody) {
+		return
+	}
+	s.speak(w, r, func(ctx context.Context, tune state.Talk) (talk.PCM, []talk.Span, int, error) {
+		return s.spoken(ctx, req.Text, tune)
+	})
+}
+
+// speak makes the clip one request at a time and plays it, answering the faces the display got.
+func (s *Server) speak(w http.ResponseWriter, r *http.Request, voice func(context.Context, state.Talk) (talk.PCM, []talk.Span, int, error)) {
 	if s.Decoder == nil {
 		writeError(w, http.StatusServiceUnavailable, errors.New("talking needs ffmpeg"))
 		return
@@ -61,19 +79,7 @@ func (s *Server) talk(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	tune := s.Hub.State().Talk
-	var pcm talk.PCM
-	var spans []talk.Span
-	var status int
-	var err error
-	if kind, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); kind == "multipart/form-data" {
-		pcm, status, err = s.recording(ctx, w, r, tune)
-	} else {
-		var req talkRequest
-		if !decode(w, r, &req, smallBody) {
-			return
-		}
-		pcm, spans, status, err = s.spoken(ctx, req.Text, tune)
-	}
+	pcm, spans, status, err := voice(ctx, tune)
 	if err != nil {
 		writeError(w, status, err)
 		return

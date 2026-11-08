@@ -21,10 +21,12 @@ import (
 	"github.com/PlatanosVerdes/pixelhub/internal/demo"
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
 	"github.com/PlatanosVerdes/pixelhub/internal/divoom"
+	"github.com/PlatanosVerdes/pixelhub/internal/drawings"
 	"github.com/PlatanosVerdes/pixelhub/internal/gallery"
 	"github.com/PlatanosVerdes/pixelhub/internal/hub"
 	"github.com/PlatanosVerdes/pixelhub/internal/lists"
 	"github.com/PlatanosVerdes/pixelhub/internal/server"
+	"github.com/PlatanosVerdes/pixelhub/internal/sounds"
 	"github.com/PlatanosVerdes/pixelhub/internal/spotify"
 	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
@@ -135,6 +137,12 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 	}
 	if cfg.Speech != "" {
 		api.Voice = talk.Speaker{Addr: cfg.Speech, Voice: cfg.Voice}
+	}
+	if api.Drawings, err = drawings.Open(filepath.Join(cfg.DataDir, "drawings"), divoom.Size); err != nil {
+		return err
+	}
+	if api.Sounds, err = sounds.Open(filepath.Join(cfg.DataDir, "sounds")); err != nil {
+		return err
 	}
 	go api.WarmGallery(ctx)
 	srv := &http.Server{

@@ -1770,6 +1770,7 @@ class MoskoTab extends LitElement {
   static properties = {
     state: { attribute: false }, text: { state: true }, busy: { state: true }, rec: { state: true },
     lag: { state: true }, pitch: { state: true }, effect: { state: true }, face: { state: true }, talking: { state: true },
+    sounds: { state: true }, editSounds: { state: true }, playingSound: { state: true },
   };
   static styles = [base, css`
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
@@ -1832,10 +1833,27 @@ class MoskoTab extends LitElement {
     .effect:hover { border-color: var(--muted); }
     .effect[aria-pressed=true] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
     .effect[aria-pressed=true] b { color: var(--accent); }
+    .pads { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+    .pad { position: relative; min-height: 64px; text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 10px 12px; cursor: pointer; display: grid; gap: 4px; align-content: start; color: var(--ink); }
+    .pad:hover:not(:disabled) { border-color: var(--muted); }
+    .pad:active:not(:disabled) { transform: scale(.97); }
+    .pad:disabled { opacity: .5; cursor: default; }
+    .pad b { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; padding-right: 18px; }
+    .pad span { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+    .pad span svg { width: 12px; height: 12px; }
+    .pad.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+    .padwrap { position: relative; }
+    .padwrap .pad { width: 100%; height: 100%; }
+    .padwrap .x { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border-radius: 7px; border: 0; background: var(--chip); color: var(--muted); display: inline-flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; }
+    .padwrap .x:hover { color: var(--bad); }
+    .padwrap .x svg { width: 14px; height: 14px; }
+    .file { position: relative; overflow: hidden; }
+    .file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
   `];
-  constructor() { super(); this.text = ""; this.face = [HALF, CALM]; this.timers = []; }
+  constructor() { super(); this.text = ""; this.face = [HALF, CALM]; this.timers = []; this.sounds = null; }
   connectedCallback() {
     super.connectedCallback();
+    api("GET", "sounds").then((r) => { this.sounds = r.sounds; }).catch(() => { this.sounds = []; });
     for (let s = 0; s <= 4; s++) for (let m = 0; m <= 4; m++) new Image().src = faceURL(s, m);
     this.idle();
   }
@@ -1895,11 +1913,11 @@ class MoskoTab extends LitElement {
     this.later(t + 300, () => this.idle());
   }
 
-  async say(body) {
+  async say(body, path = "talk") {
     this.busy = true;
     this.thinking();
     try {
-      const r = await api("POST", "talk", body);
+      const r = await api("POST", path, body);
       this.play(r.faces ?? [], r.faces_after_ms ?? 0);
       send(this, "refresh");
       return true;
@@ -1909,6 +1927,65 @@ class MoskoTab extends LitElement {
   async sayText() {
     const text = this.text.trim();
     if (text && await this.say({ text })) this.text = "";
+  }
+  async playSound(s) {
+    this.playingSound = s.id;
+    await this.say(undefined, `sounds/${s.id}/play`);
+    this.playingSound = null;
+  }
+  // A sound needs a name; the phrase's first words or the file's name are offered.
+  async keepSound(body, suggested) {
+    const name = prompt(t("Name for this sound"), suggested.slice(0, 30));
+    if (!name?.trim()) return false;
+    if (body instanceof FormData) body.append("name", name.trim());
+    else body.name = name.trim();
+    try {
+      this.sounds = (await api("POST", "sounds", body)).sounds;
+      toast(this, t("Added to the sounds"));
+      return true;
+    } catch (e) { toast(this, e.message); return false; }
+  }
+  keepText() {
+    const text = this.text.trim();
+    if (text) this.keepSound({ text }, text);
+  }
+  keepNote() {
+    const blob = this.rec?.blob;
+    if (!blob) return;
+    const form = new FormData();
+    form.append("audio", blob, "note");
+    this.keepSound(form, t("Voice note"));
+  }
+  keepFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const form = new FormData();
+    form.append("audio", file, file.name);
+    this.keepSound(form, file.name.replace(/\.[^.]+$/, ""));
+  }
+  async dropSound(s) {
+    if (!confirm(t("Delete {name}?", { name: s.name }))) return;
+    try { this.sounds = (await api("DELETE", `sounds/${s.id}`)).sounds; } catch (e) { toast(this, e.message); }
+  }
+  soundboard() {
+    const list = this.sounds ?? [];
+    return html`<div class="card">
+      <div class="head"><h2>${t("Sounds")}</h2>
+        ${list.length ? html`<button class="btn small" aria-pressed=${String(!!this.editSounds)} @click=${() => { this.editSounds = !this.editSounds; }}>${this.editSounds ? t("Done") : t("Edit")}</button>` : nothing}
+        <label class="btn small file">${icons.upload}${t("Upload")}<input type="file" accept="audio/*,video/*" @change=${(e) => this.keepFile(e)}></label>
+      </div>
+      ${this.sounds === null ? html`<p class="hint">${t("Loading")}</p>` : !list.length
+        ? html`<p class="hint">${t("Keep phrases and recordings here to play them with a tap: save what you write or record above, or upload an audio file.")}</p>`
+        : html`<div class="pads">${list.map((s) => html`<div class="padwrap">
+            <button class="pad ${this.playingSound === s.id ? "on" : ""}" ?disabled=${this.busy && this.playingSound !== s.id} title=${s.text ?? ""}
+              @click=${() => (this.editSounds ? this.dropSound(s) : this.playSound(s))}>
+              <b>${s.name}</b><span>${s.audio ? noteIcons.mic : noteIcons.send}${s.audio ? t("Recording") : t("Phrase")}</span>
+            </button>
+            ${this.editSounds ? html`<button class="x" aria-label=${t("Delete")} @click=${() => this.dropSound(s)}>${noteIcons.trash}</button>` : nothing}
+          </div>`)}</div>`}
+      <p class="hint">${t("They play with the voice settings below.")}</p>
+    </div>`;
   }
   get canRecord() { return !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder); }
   // A voice note, as in a chat: record with live levels, then listen, delete or send it.
@@ -2003,6 +2080,7 @@ class MoskoTab extends LitElement {
       <button class="round play" aria-label=${r.playing ? t("Pause") : t("Listen")} @click=${() => this.togglePlay()}>${r.playing ? noteIcons.pause : noteIcons.play}</button>
       <div class="wave">${peaks.map((v, i) => html`<i class=${i < played ? "on" : ""} style="height:${Math.max(10, v * 100)}%"></i>`)}</div>
       <span class="clock">${clock(r.duration)}</span>
+      <button class="round" title=${t("Keep it among the sounds")} aria-label=${t("Keep it among the sounds")} @click=${() => this.keepNote()}>${icons.bookmark}</button>
       <button class="round send" ?disabled=${this.busy} aria-label=${t("Send to Mosko")} @click=${() => this.sendNote()}>${noteIcons.send}</button>
     </div>`;
   }
@@ -2057,11 +2135,13 @@ class MoskoTab extends LitElement {
           ${this.rec ? this.noteBar() : html`<div class="row">
             <button class="btn primary" ?disabled=${this.busy || !this.text.trim()} @click=${() => this.sayText()}>${this.busy ? t("Thinking…") : t("Say it")}</button>
             ${this.canRecord ? html`<button class="btn" ?disabled=${this.busy} @click=${() => this.startRecording()}>${noteIcons.mic}${t("Record")}</button>` : nothing}
+            <button class="btn" title=${t("Keep it among the sounds")} ?disabled=${!this.text.trim()} @click=${() => this.keepText()}>${icons.bookmark}${t("Keep")}</button>
             <span class="count">${this.text.length}/400</span>
           </div>`}
           <p class="hint">${t("Up to 30 seconds. The mouth follows the voice: shut in the pauses, wider the louder.")}</p>
           <p class="hint">${t("He gestures with the text: ! raises his eyebrows, ? raises one, ... makes him think, jaja makes him laugh.")}</p>
         </div>
+        ${this.soundboard()}
         <div class="card voice">
           <h2>${t("Voice")}</h2>
           <div class="field">
@@ -2096,9 +2176,476 @@ class MoskoTab extends LitElement {
 }
 customElements.define("ph-mosko", MoskoTab);
 
+// The drawing tab: animations drawn pixel by pixel, kept in pixelhub and shown on the display.
+const SIDE = 16;
+const BLACK = "#000000";
+const PALETTE = ["#ffffff", "#ff0000", "#ff7a00", "#ffd400", "#9dff00", "#00d43a", "#00e0b0", "#00c8ff",
+  "#0050ff", "#5a2dff", "#b026ff", "#ff3fa4", "#ffb38a", "#8a4b1c", "#7a7a7a", BLACK];
+const SPEEDS = [[1000, "1"], [500, "2"], [250, "4"], [125, "8"], [83, "12"]];
+const PROJECT_FOR = [["1m", "1 min"], ["10m", "10 min"], ["1h", "1 h"]];
+const MAX_FRAMES = 60;
+const DRAFT_KEY = "pixelhub.draft";
+const blank = () => Array(SIDE * SIDE).fill(BLACK);
+const toHex = (frame) => frame.map((c) => c.slice(1)).join("");
+const fromHex = (s) => Array.from({ length: SIDE * SIDE }, (_, i) => `#${s.slice(i * 6, i * 6 + 6)}`);
+const drawIcon = {
+  pen: icon(svg`<path d="M4 20l4-1L19 8l-3-3L5 16z"/><path d="m14 7 3 3"/>`),
+  eraser: icon(svg`<path d="m8 20 12-12-4-4L4 16l4 4h12"/><path d="m9 11 4 4"/>`),
+  fill: icon(svg`<path d="m11 4 8 8-7 7-8-8z"/><path d="M4 11h15M20 15s1.5 2 1.5 3a1.5 1.5 0 0 1-3 0c0-1 1.5-3 1.5-3z"/>`),
+  pick: icon(svg`<path d="m14 4 6 6-2 2-6-6zM12 8l-7 7v4h4l7-7"/>`),
+  mirror: icon(svg`<path d="M12 3v18" stroke-dasharray="2 2"/><path d="M9 7 4 12l5 5zM15 7l5 5-5 5z"/>`),
+  undo: icon(svg`<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>`),
+  redo: icon(svg`<path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/>`),
+  onion: icon(svg`<rect x="3" y="7" width="11" height="11" rx="2" stroke-dasharray="2 2"/><rect x="9" y="4" width="11" height="11" rx="2"/>`),
+  copy: icon(svg`<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>`),
+  left: icon(svg`<path d="m15 18-6-6 6-6"/>`),
+  right: icon(svg`<path d="m9 18 6-6-6-6"/>`),
+  cast: icon(svg`<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>`),
+  live: icon(svg`<circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/>`),
+  stop: icon(svg`<rect x="6" y="6" width="12" height="12" rx="2"/>`),
+};
+const decoded = new WeakMap();
+const framesOf = (d) => { let f = decoded.get(d); if (!f) decoded.set(d, (f = d.frames.map(fromHex))); return f; };
+const frameURLs = new Map();
+// A frame as a 16x16 PNG data URL, for thumbnails and the LED preview; kept, since frames repeat.
+const frameURL = (frame) => {
+  const key = frame.join("");
+  let url = frameURLs.get(key);
+  if (url) return url;
+  const c = document.createElement("canvas");
+  c.width = c.height = SIDE;
+  const ctx = c.getContext("2d");
+  const img = ctx.createImageData(SIDE, SIDE);
+  frame.forEach((hex, i) => {
+    const n = parseInt(hex.slice(1), 16);
+    img.data.set([n >> 16, (n >> 8) & 255, n & 255, 255], i * 4);
+  });
+  ctx.putImageData(img, 0, 0);
+  url = c.toDataURL();
+  if (frameURLs.size > 400) frameURLs.delete(frameURLs.keys().next().value);
+  frameURLs.set(key, url);
+  return url;
+};
+
+class DrawTab extends LitElement {
+  static properties = {
+    frames: { state: true }, cur: { state: true }, color: { state: true }, tool: { state: true }, mirror: { state: true }, onion: { state: true },
+    delay: { state: true }, name: { state: true }, id: { state: true }, dirty: { state: true }, live: { state: true }, busy: { state: true },
+    drawings: { state: true }, lists: { state: true }, showFor: { state: true }, beat: { state: true }, recent: { state: true },
+  };
+  static styles = [base, css`
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+    @media (min-width: 900px) { .layout { grid-template-columns: minmax(0, 560px) minmax(0, 1fr); align-items: start; } .side { position: sticky; top: 88px; } }
+    .main, .side { display: grid; gap: 14px; min-width: 0; align-content: start; }
+    .board { display: block; width: 100%; aspect-ratio: 1; border-radius: 12px; background: var(--case); touch-action: none; cursor: crosshair; }
+    .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+    .tools .sp { flex: 1; }
+    .tool { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+    .tool:hover:not(:disabled) { color: var(--ink); border-color: var(--muted); }
+    .tool[aria-pressed=true] { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+    .tool:disabled { opacity: .35; cursor: default; }
+    .tool svg { width: 20px; height: 20px; }
+    .group { display: inline-flex; gap: 4px; }
+    .palette { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+    .swatch { aspect-ratio: 1; border-radius: 8px; border: 2px solid transparent; cursor: pointer; padding: 0; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12); }
+    .swatch[aria-pressed=true] { border-color: var(--ink); box-shadow: 0 0 0 2px var(--accent); }
+    .custom { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+    .custom .recent { display: flex; gap: 6px; }
+    .custom .recent .swatch { width: 28px; }
+    .frames { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 8px; scroll-snap-type: x proximity; }
+    .frame { flex: none; width: 56px; display: grid; gap: 3px; justify-items: center; border: 0; background: none; cursor: pointer; padding: 0; color: var(--muted); font-size: 11px; font-family: var(--font-data); scroll-snap-align: start; }
+    .frame img { width: 56px; height: 56px; border-radius: 8px; border: 2px solid var(--line); background: #000; }
+    .frame[aria-current=true] img { border-color: var(--accent); }
+    .frame[aria-current=true] { color: var(--accent); }
+    .frame.add { width: 56px; height: 56px; border: 2px dashed var(--line); border-radius: 8px; align-content: center; }
+    .frame.add:hover { color: var(--ink); border-color: var(--muted); }
+    .frame-ops { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .frame-ops .count { margin-left: auto; font-size: 12px; color: var(--muted); font-family: var(--font-data); }
+    ph-led { width: min(100%, 260px); margin: 0 auto; }
+    .preview { display: grid; gap: 12px; justify-items: center; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .row input[type=text] { flex: 1 1 160px; }
+    .live[aria-pressed=true] { background: color-mix(in srgb, var(--bad) 18%, var(--surface)); border-color: var(--bad); color: var(--ink); }
+    .live[aria-pressed=true] svg { color: var(--bad); animation: pulse 1.2s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: .3; } }
+    .saved { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
+    .item { position: relative; display: grid; gap: 4px; border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 8px; cursor: pointer; text-align: left; color: var(--ink); }
+    .item[aria-current=true] { border-color: var(--accent); }
+    .item img { width: 100%; aspect-ratio: 1; border-radius: 6px; background: #000; }
+    .item b { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item span { font-size: 11px; color: var(--muted); }
+    .item .icon { position: absolute; top: 4px; right: 4px; background: color-mix(in srgb, var(--bg) 80%, transparent); }
+    .empty { font-size: 13px; color: var(--muted); margin: 0; }
+  `];
+
+  constructor() {
+    super();
+    this.color = "#ff0000"; this.tool = "pen"; this.mirror = false; this.onion = false; this.showFor = "10m";
+    this.drawings = null; this.lists = []; this.beat = 0; this.live = false;
+    this.undos = []; this.redos = [];
+    this.recent = [];
+    let draft = null;
+    try { draft = JSON.parse(localStorage.getItem(DRAFT_KEY)); } catch { /* no draft */ }
+    if (draft?.frames?.length) this.load(draft, draft.dirty);
+    else this.fresh();
+  }
+  connectedCallback() {
+    super.connectedCallback();
+    api("GET", "drawings").then((r) => { this.drawings = r.drawings; }).catch((e) => { this.drawings = []; toast(this, e.message); });
+    api("GET", "lists").then((r) => { this.lists = r.lists; }).catch(() => {});
+    this.ticker = setInterval(() => { this.beat++; }, 50);
+    this.keys = (e) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" || e.composedPath()[0]?.tagName === "INPUT") return;
+      e.preventDefault();
+      if (e.shiftKey) this.redo(); else this.undo();
+    };
+    addEventListener("keydown", this.keys);
+  }
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    clearInterval(this.ticker); clearTimeout(this.liveTimer); clearTimeout(this.draftTimer);
+    removeEventListener("keydown", this.keys);
+    this.resize?.disconnect();
+  }
+  firstUpdated() {
+    const board = this.renderRoot.querySelector(".board");
+    this.resize = new ResizeObserver(() => this.paint());
+    this.resize.observe(board);
+  }
+  updated(c) {
+    if (c.has("frames") || c.has("cur") || c.has("onion")) this.paint();
+    if (c.has("frames") || c.has("delay") || c.has("name") || c.has("id")) this.keepDraft();
+  }
+
+  fresh() {
+    this.frames = [blank()]; this.cur = 0; this.delay = 250; this.name = ""; this.id = null; this.dirty = false;
+    this.undos = []; this.redos = [];
+  }
+  load(d, dirty = false) {
+    this.frames = d.frames.map((f) => (typeof f === "string" ? fromHex(f) : [...f]));
+    this.cur = 0; this.delay = d.delay_ms ?? d.delay ?? 250; this.name = d.name ?? ""; this.id = d.id ?? null; this.dirty = dirty;
+    this.undos = []; this.redos = [];
+  }
+  keepDraft() {
+    clearTimeout(this.draftTimer);
+    this.draftTimer = setTimeout(() => {
+      try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ frames: this.frames.map(toHex), delay_ms: this.delay, name: this.name, id: this.id, dirty: this.dirty })); }
+      catch { /* the draft is a convenience */ }
+    }, 400);
+  }
+  confirmLeave() { return !this.dirty || confirm(t("Drop the changes to this drawing?")); }
+
+  // Every change goes through here: undo keeps the frames before it.
+  change(frames, cur = this.cur) {
+    this.undos = [...this.undos.slice(-49), { frames: this.frames, cur: this.cur }];
+    this.redos = [];
+    this.frames = frames; this.cur = Math.max(0, Math.min(cur, frames.length - 1)); this.dirty = true;
+    this.sendLive();
+  }
+  undo() {
+    const last = this.undos.at(-1);
+    if (!last) return;
+    this.redos = [...this.redos, { frames: this.frames, cur: this.cur }];
+    this.undos = this.undos.slice(0, -1);
+    this.frames = last.frames; this.cur = last.cur; this.dirty = true;
+    this.sendLive();
+  }
+  redo() {
+    const next = this.redos.at(-1);
+    if (!next) return;
+    this.undos = [...this.undos, { frames: this.frames, cur: this.cur }];
+    this.redos = this.redos.slice(0, -1);
+    this.frames = next.frames; this.cur = next.cur; this.dirty = true;
+    this.sendLive();
+  }
+
+  paint() {
+    const board = this.renderRoot.querySelector(".board");
+    if (!board || !this.frames) return;
+    const px = Math.round(board.clientWidth * devicePixelRatio) || 320;
+    if (board.width !== px) board.width = board.height = px;
+    const ctx = board.getContext("2d"), cell = px / SIDE, frame = this.stroke ?? this.frames[this.cur];
+    const under = this.onion && this.cur > 0 ? this.frames[this.cur - 1] : null;
+    ctx.fillStyle = "#07060d";
+    ctx.fillRect(0, 0, px, px);
+    for (let i = 0; i < SIDE * SIDE; i++) {
+      const x = (i % SIDE) * cell, y = Math.floor(i / SIDE) * cell;
+      if (frame[i] !== BLACK) { ctx.globalAlpha = 1; ctx.fillStyle = frame[i]; }
+      else if (under && under[i] !== BLACK) { ctx.globalAlpha = 0.28; ctx.fillStyle = under[i]; }
+      else continue;
+      ctx.fillRect(x, y, cell, cell);
+    }
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "rgba(255,255,255,.07)";
+    ctx.lineWidth = Math.max(1, devicePixelRatio * 0.5);
+    ctx.beginPath();
+    for (let k = 1; k < SIDE; k++) { const p = Math.round(k * cell) + 0.5; ctx.moveTo(p, 0); ctx.lineTo(p, px); ctx.moveTo(0, p); ctx.lineTo(px, p); }
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,.16)";
+    ctx.beginPath();
+    const mid = Math.round(8 * cell) + 0.5;
+    ctx.moveTo(mid, 0); ctx.lineTo(mid, px); ctx.moveTo(0, mid); ctx.lineTo(px, mid);
+    ctx.stroke();
+  }
+
+  cellAt(e) {
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = Math.floor(((e.clientX - r.left) / r.width) * SIDE), y = Math.floor(((e.clientY - r.top) / r.height) * SIDE);
+    return x >= 0 && y >= 0 && x < SIDE && y < SIDE ? [x, y] : null;
+  }
+  plot(frame, x, y, c) {
+    frame[y * SIDE + x] = c;
+    if (this.mirror) frame[y * SIDE + (SIDE - 1 - x)] = c;
+  }
+  down(e) {
+    const at = this.cellAt(e);
+    if (!at || e.button > 0) return;
+    const [x, y] = at, frame = this.frames[this.cur];
+    if (this.tool === "pick") {
+      this.color = frame[y * SIDE + x]; this.tool = "pen";
+      return;
+    }
+    if (this.tool === "fill") {
+      const next = [...frame], from = frame[y * SIDE + x], to = this.color;
+      if (from === to) return;
+      const stack = [[x, y]];
+      while (stack.length) {
+        const [cx, cy] = stack.pop();
+        if (cx < 0 || cy < 0 || cx >= SIDE || cy >= SIDE || next[cy * SIDE + cx] !== from) continue;
+        next[cy * SIDE + cx] = to;
+        stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
+      }
+      this.change(this.frames.map((f, i) => (i === this.cur ? next : f)));
+      this.pickedColor();
+      return;
+    }
+    e.currentTarget.setPointerCapture(e.pointerId);
+    this.stroke = [...frame];
+    this.last = at;
+    this.plot(this.stroke, x, y, this.tool === "eraser" ? BLACK : this.color);
+    this.paint();
+  }
+  move(e) {
+    if (!this.stroke) return;
+    const at = this.cellAt(e);
+    if (!at) return;
+    const c = this.tool === "eraser" ? BLACK : this.color;
+    // A line from the last cell, so a fast stroke leaves no gaps.
+    let [x0, y0] = this.last;
+    const [x1, y1] = at, dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx + dy;
+    for (;;) {
+      this.plot(this.stroke, x0, y0, c);
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x0 += sx; }
+      if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+    this.last = at;
+    this.paint();
+  }
+  up() {
+    if (!this.stroke) return;
+    const done = this.stroke;
+    this.stroke = null;
+    if (done.join() !== this.frames[this.cur].join()) {
+      this.change(this.frames.map((f, i) => (i === this.cur ? done : f)));
+      if (this.tool === "pen") this.pickedColor();
+    }
+  }
+  pickedColor() {
+    if (PALETTE.includes(this.color)) return;
+    this.recent = [this.color, ...this.recent.filter((c) => c !== this.color)].slice(0, 6);
+  }
+
+  addFrame(copy) {
+    if (this.frames.length >= MAX_FRAMES) { toast(this, t("The display plays up to {n} frames", { n: MAX_FRAMES })); return; }
+    const f = copy ? [...this.frames[this.cur]] : blank();
+    this.change([...this.frames.slice(0, this.cur + 1), f, ...this.frames.slice(this.cur + 1)], this.cur + 1);
+  }
+  dropFrame() {
+    if (this.frames.length === 1) { this.change([blank()], 0); return; }
+    this.change(this.frames.filter((_, i) => i !== this.cur), this.cur - (this.cur === this.frames.length - 1 ? 1 : 0));
+  }
+  moveFrame(by) {
+    const to = this.cur + by;
+    if (to < 0 || to >= this.frames.length) return;
+    const next = [...this.frames];
+    [next[this.cur], next[to]] = [next[to], next[this.cur]];
+    this.change(next, to);
+  }
+  // Moves the whole frame a pixel, wrapping round: handy for scrolling animations.
+  shift(dx, dy) {
+    const f = this.frames[this.cur], next = blank();
+    for (let y = 0; y < SIDE; y++) for (let x = 0; x < SIDE; x++) next[((y + dy + SIDE) % SIDE) * SIDE + ((x + dx + SIDE) % SIDE)] = f[y * SIDE + x];
+    this.change(this.frames.map((g, i) => (i === this.cur ? next : g)));
+  }
+
+  body() { return { name: this.name.trim() || t("Untitled"), delay_ms: this.delay, frames: this.frames.map(toHex) }; }
+  async save() {
+    this.busy = true;
+    try {
+      const body = this.body();
+      const r = this.id ? await api("PUT", `drawings/${this.id}`, body) : await api("POST", "drawings", body);
+      this.drawings = r.drawings; this.id = r.drawing.id; this.name = r.drawing.name; this.dirty = false;
+      toast(this, t("Saved"));
+      return true;
+    } catch (e) { toast(this, e.message); return false; }
+    finally { this.busy = false; }
+  }
+  async project(body = this.body(), quiet = false) {
+    try {
+      await api("POST", "drawings/show", { ...body, for: this.live ? "10m" : this.showFor });
+      send(this, "refresh");
+      if (!quiet) toast(this, t("On the display for {d}", { d: PROJECT_FOR.find(([v]) => v === this.showFor)?.[1] ?? this.showFor }));
+    } catch (e) { toast(this, e.message); }
+  }
+  async stop() {
+    this.live = false;
+    try { await api("DELETE", "show"); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+  }
+  toggleLive() {
+    this.live = !this.live;
+    if (this.live) this.project(this.body(), true); else this.stop();
+  }
+  sendLive() {
+    if (!this.live) return;
+    clearTimeout(this.liveTimer);
+    this.liveTimer = setTimeout(() => this.project(this.body(), true), 350);
+  }
+  async addToList(list) {
+    if (!list) return;
+    if ((this.dirty || !this.id) && !(await this.save())) return;
+    try {
+      this.lists = (await api("POST", `drawings/${this.id}/list`, { list })).lists;
+      const l = this.lists.find((x) => x.name === list);
+      toast(this, t("Added to {list}", { list: l ? listName(l) : list }));
+    } catch (e) { toast(this, e.message); }
+  }
+  open(d) {
+    if (d.id === this.id && !this.dirty) return;
+    if (!this.confirmLeave()) return;
+    this.load(d);
+    scrollTo({ top: 0, behavior: "smooth" });
+    this.sendLive();
+  }
+  startNew() {
+    if (!this.confirmLeave()) return;
+    this.fresh();
+    this.sendLive();
+  }
+  async deleteDrawing(d) {
+    if (!confirm(t("Delete {name}?", { name: d.name }))) return;
+    try {
+      this.drawings = (await api("DELETE", `drawings/${d.id}`)).drawings;
+      if (d.id === this.id) { this.id = null; this.dirty = true; }
+    } catch (e) { toast(this, e.message); }
+  }
+  // The frame a looping animation is on now, from the shared 50 ms beat.
+  playing(frames, delay) { return frames[Math.floor((this.beat * 50) / Math.max(delay, 50)) % frames.length]; }
+
+  render() {
+    const frames = this.frames, n = frames.length;
+    const tools = [["pen", t("Pencil"), drawIcon.pen], ["eraser", t("Eraser"), drawIcon.eraser], ["fill", t("Fill"), drawIcon.fill], ["pick", t("Pick a colour"), drawIcon.pick]];
+    return html`<div class="layout">
+      <div class="main">
+        <div class="card">
+          <canvas class="board" role="img" aria-label=${t("Frame {i} of {n}", { i: this.cur + 1, n })}
+            @pointerdown=${(e) => this.down(e)} @pointermove=${(e) => this.move(e)} @pointerup=${() => this.up()} @pointercancel=${() => this.up()}
+            @contextmenu=${(e) => e.preventDefault()}></canvas>
+          <div class="tools">
+            <div class="group" role="group" aria-label=${t("Tool")}>${tools.map(([id, label, glyph]) =>
+              html`<button class="tool" title=${label} aria-label=${label} aria-pressed=${String(this.tool === id)} @click=${() => { this.tool = id; }}>${glyph}</button>`)}</div>
+            <button class="tool" title=${t("Mirror")} aria-label=${t("Mirror")} aria-pressed=${String(this.mirror)} @click=${() => { this.mirror = !this.mirror; }}>${drawIcon.mirror}</button>
+            <button class="tool" title=${t("See the frame before")} aria-label=${t("See the frame before")} aria-pressed=${String(this.onion)} @click=${() => { this.onion = !this.onion; }}>${drawIcon.onion}</button>
+            <span class="sp"></span>
+            <button class="tool" title=${t("Undo")} aria-label=${t("Undo")} ?disabled=${!this.undos.length} @click=${() => this.undo()}>${drawIcon.undo}</button>
+            <button class="tool" title=${t("Redo")} aria-label=${t("Redo")} ?disabled=${!this.redos.length} @click=${() => this.redo()}>${drawIcon.redo}</button>
+          </div>
+          <div class="palette">${PALETTE.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c} aria-pressed=${String(this.color === c && this.tool !== "eraser")}
+            @click=${() => { this.color = c; if (this.tool !== "fill") this.tool = "pen"; }}></button>`)}</div>
+          <div class="custom">
+            <input type="color" aria-label=${t("Another colour")} .value=${this.color} @input=${(e) => { this.color = e.target.value; if (this.tool !== "fill") this.tool = "pen"; }}>
+            <div class="recent">${this.recent.map((c) => html`<button class="swatch" style="background:${c}" aria-label=${c} aria-pressed=${String(this.color === c)} @click=${() => { this.color = c; }}></button>`)}</div>
+            <span class="sp" style="flex:1"></span>
+            <div class="group" role="group" aria-label=${t("Move the frame")}>
+              <button class="tool" aria-label=${t("Shift left")} @click=${() => this.shift(-1, 0)}>${drawIcon.left}</button>
+              <button class="tool" aria-label=${t("Shift up")} @click=${() => this.shift(0, -1)}>${icons.up}</button>
+              <button class="tool" aria-label=${t("Shift down")} @click=${() => this.shift(0, 1)}>${icons.down}</button>
+              <button class="tool" aria-label=${t("Shift right")} @click=${() => this.shift(1, 0)}>${drawIcon.right}</button>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head"><h2>${t("Frames")}</h2></div>
+          <div class="frames">
+            ${frames.map((f, i) => html`<button class="frame" aria-current=${String(i === this.cur)} @click=${() => { this.cur = i; }}><img class="pix" src=${frameURL(f)} alt=""><span>${i + 1}</span></button>`)}
+            <button class="frame add" title=${t("Copy this frame")} aria-label=${t("Copy this frame")} @click=${() => this.addFrame(true)}>${icons.plus}</button>
+          </div>
+          <div class="frame-ops">
+            <button class="btn small" @click=${() => this.addFrame(true)}>${drawIcon.copy}${t("Copy")}</button>
+            <button class="btn small" @click=${() => this.addFrame(false)}>${icons.plus}${t("Blank")}</button>
+            <button class="icon" aria-label=${t("Move it before")} ?disabled=${this.cur === 0} @click=${() => this.moveFrame(-1)}>${drawIcon.left}</button>
+            <button class="icon" aria-label=${t("Move it after")} ?disabled=${this.cur === n - 1} @click=${() => this.moveFrame(1)}>${drawIcon.right}</button>
+            <button class="icon trash" aria-label=${t("Delete this frame")} @click=${() => this.dropFrame()}>${icons.trash}</button>
+            <span class="count">${this.cur + 1}/${n}</span>
+          </div>
+        </div>
+      </div>
+      <div class="side">
+        <div class="card preview">
+          <ph-led .src=${frameURL(this.stroke && n === 1 ? this.stroke : this.playing(frames, this.delay))} .label=${t("Preview")}></ph-led>
+          ${n > 1 ? html`<div class="row"><span class="small muted">${t("Frames per second")}</span>
+            ${segmented(SPEEDS, this.delay, (v) => { this.delay = v; this.dirty = true; this.sendLive(); })}</div>` : nothing}
+        </div>
+        <div class="card">
+          <div class="head"><h2>${t("On the display")}</h2></div>
+          <div class="row">
+            <button class="btn live" aria-pressed=${String(this.live)} @click=${() => this.toggleLive()}>${drawIcon.live}${this.live ? t("Live: on") : t("Live")}</button>
+            <button class="btn primary" @click=${() => this.project()}>${drawIcon.cast}${t("Show it")}</button>
+            ${segmented(PROJECT_FOR, this.showFor, (v) => { this.showFor = v; })}
+            <button class="btn small" @click=${() => this.stop()}>${drawIcon.stop}${t("Take it off")}</button>
+          </div>
+          <p class="hint">${t("Live sends every stroke to the display as you draw.")}</p>
+        </div>
+        <div class="card">
+          <div class="head"><h2>${this.id ? t("Editing") : t("New drawing")}</h2>${this.dirty ? html`<span class="tag on">${t("Not saved")}</span>` : nothing}</div>
+          <div class="row">
+            <input type="text" maxlength="40" .value=${this.name} placeholder=${t("Name")} aria-label=${t("Name")}
+              @input=${(e) => { this.name = e.target.value; this.dirty = true; }} @keydown=${(e) => { if (e.key === "Enter") this.save(); }}>
+            <button class="btn primary" ?disabled=${this.busy} @click=${() => this.save()}>${t("Save")}</button>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <select aria-label=${t("Add to a list")} @change=${(e) => { const v = e.target.value; e.target.value = ""; this.addToList(v); }}>
+              <option value="">${t("Add to a list…")}</option>
+              ${this.lists.map((l) => html`<option value=${l.name}>${listName(l)}</option>`)}
+            </select>
+            <button class="btn" @click=${() => this.startNew()}>${icons.plus}${t("New drawing")}</button>
+          </div>
+          <p class="hint">${t("In a list, it joins the pictures the display shows in automatic.")}</p>
+        </div>
+        <div class="card">
+          <div class="head"><h2>${t("Your drawings")}</h2></div>
+          ${this.drawings === null ? html`<p class="empty">${t("Loading")}</p>` : !this.drawings.length ? html`<p class="empty">${t("Nothing saved yet.")}</p>` : html`<div class="saved">
+            ${repeat(this.drawings, (d) => d.id, (d) => {
+              const fs = framesOf(d);
+              return html`<div class="item" role="button" tabindex="0" aria-current=${String(d.id === this.id)} @click=${() => this.open(d)} @keydown=${(e) => { if (e.key === "Enter") this.open(d); }}>
+                <img class="pix" src=${frameURL(this.playing(fs, d.delay_ms))} alt="">
+                <b>${d.name}</b><span>${t("{n} frames", { n: fs.length })}</span>
+                <button class="icon trash" aria-label=${t("Delete")} @click=${(e) => { e.stopPropagation(); this.deleteDrawing(d); }}>${icons.trash}</button>
+              </div>`;
+            })}</div>`}
+        </div>
+      </div>
+    </div>`;
+  }
+}
+customElements.define("ph-draw", DrawTab);
+
 const TABS = [
   ["display", "Display", icon(svg`<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 8.5h.01M12 8.5h.01M15.5 8.5h.01M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 15.5h.01M12 15.5h.01M15.5 15.5h.01" stroke-width="2.6"/>`)],
   ["gallery", "Gallery", icon(svg`<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="m14 20 2.5-3.5 2 2.5 1.5-2"/>`)],
+  ["draw", "Draw", icon(svg`<path d="M4 20l4-1L19 8l-3-3L5 16z"/><path d="m14 7 3 3M15 20h5"/>`)],
   ["music", "Music", icon(svg`<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>`)],
   ["calendar", "Calendar", icon(svg`<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>`)],
   ["mosko", "Mosko", icon(svg`<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M7 9.5h3M14 9.5h3M9 15h6"/>`)],
@@ -2107,7 +2654,7 @@ const TABS = [
 ];
 
 class PixelhubApp extends LitElement {
-  static properties = { st: { state: true }, status: { state: true }, sprites: { state: true }, modes: { state: true }, version: { state: true }, offline: { state: true }, gone: { state: true }, tab: { state: true } };
+  static properties = { st: { state: true }, status: { state: true }, sprites: { state: true }, modes: { state: true }, version: { state: true }, offline: { state: true }, gone: { state: true }, tab: { state: true }, typing: { state: true } };
   static styles = [base, css`
     header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: blur(12px); }
     .bar { max-width: 1120px; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; gap: 16px; }
@@ -2126,9 +2673,11 @@ class PixelhubApp extends LitElement {
     .bottom { display: none; }
     @media (max-width: 759px) {
       .top { display: none; }
-      .bottom { display: grid; grid-template-columns: repeat(7, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
+      .bottom { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 0;
         padding: 6px 8px max(8px, env(safe-area-inset-bottom, 0px)); background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--line); }
-      .bottom button { flex-direction: column; gap: 3px; font-size: 11px; padding: 6px 2px; }
+      .bottom button { flex-direction: column; gap: 3px; font-size: 10.5px; padding: 6px 0; min-width: 0; }
+      .bottom button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .bottom.typing { display: none; }
       .bottom button[aria-current=page] { background: none; }
       main { padding-bottom: 96px !important; }
     }
@@ -2162,6 +2711,17 @@ class PixelhubApp extends LitElement {
     this.addEventListener("refresh", () => this.pollStatus());
     this.addEventListener("remove-channel", (e) => this.removeChannel(e.detail));
     this.visible = () => { if (!document.hidden) { this.pollStatus(); this.loadState(); } };
+    // iOS leaves fixed bars where the keyboard pushed them once it closes; hide the bar while typing and nudge the page after.
+    const typingIn = (e) => {
+      const el = e.composedPath()[0];
+      return el?.tagName === "TEXTAREA" || el?.tagName === "SELECT" || (el?.tagName === "INPUT" && !["button", "checkbox", "radio", "range", "color", "file"].includes(el.type));
+    };
+    this.focusIn = (e) => { if (typingIn(e)) { clearTimeout(this.unfocus); this.typing = true; } };
+    this.focusOut = (e) => {
+      if (!typingIn(e)) return;
+      clearTimeout(this.unfocus);
+      this.unfocus = setTimeout(() => { this.typing = false; requestAnimationFrame(() => { scrollBy(0, 1); scrollBy(0, -1); }); }, 300);
+    };
     this.leave = () => this.toasts.flush();
   }
 
@@ -2182,6 +2742,8 @@ class PixelhubApp extends LitElement {
     this.timers = [setInterval(() => { if (!document.hidden) this.pollStatus(); }, STATUS_MS), setInterval(() => { if (!document.hidden) this.loadState(); }, STATE_MS)];
     document.addEventListener("visibilitychange", this.visible);
     addEventListener("pagehide", this.leave);
+    document.addEventListener("focusin", this.focusIn);
+    document.addEventListener("focusout", this.focusOut);
     this.hash = () => { const id = location.hash.slice(1); if (TABS.some(([t]) => t === id)) this.tab = id; };
     addEventListener("hashchange", this.hash);
   }
@@ -2190,6 +2752,8 @@ class PixelhubApp extends LitElement {
     this.timers.forEach(clearInterval);
     document.removeEventListener("visibilitychange", this.visible);
     removeEventListener("pagehide", this.leave);
+    document.removeEventListener("focusin", this.focusIn);
+    document.removeEventListener("focusout", this.focusOut);
     removeEventListener("hashchange", this.hash);
   }
 
@@ -2245,6 +2809,7 @@ class PixelhubApp extends LitElement {
       case "settings": return html`<div class="tab two">${view ? html`<ph-settings .base=${view}></ph-settings>` : nothing}<ph-connection .status=${this.status} .state=${view}></ph-connection></div>${gallery}`;
       case "calendar": return html`<ph-calendar></ph-calendar>${gallery}`;
       case "mosko": return html`<ph-mosko .state=${view}></ph-mosko>${gallery}`;
+      case "draw": return html`<ph-draw></ph-draw>${gallery}`;
       default: return html`<ph-display .status=${this.status} .state=${view} .sprites=${this.sprites} .styles=${this.modes} ?offline=${this.offline}></ph-display>${gallery}`;
     }
   }
@@ -2262,7 +2827,7 @@ class PixelhubApp extends LitElement {
       </div></header>
       <main>${this.page(view)}</main>
       <footer>pixelhub ${this.version ?? ""}</footer>
-      ${this.nav("bottom")}
+      ${this.nav(this.typing ? "bottom typing" : "bottom")}
       ${this.toasts.view()}`;
   }
 }
