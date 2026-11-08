@@ -21,19 +21,18 @@ const (
 	maxPranksFor = 4 * time.Hour
 	// pranksStart gets the first noise in soon, so it is plain the pranks are on.
 	pranksStart = 20 * time.Second
+	// Between two noises Mosko waits from pranksGapMin to pranksGapMax after the last one ends.
+	pranksGapMin = time.Second
+	pranksGapMax = 5 * time.Minute
 )
 
-// pranksEvery are how often Mosko makes a noise, as the shortest and longest wait between two.
-var pranksEvery = map[string][2]time.Duration{
-	"often":     {time.Minute, 4 * time.Minute},
-	"sometimes": {3 * time.Minute, 10 * time.Minute},
-	"rarely":    {8 * time.Minute, 20 * time.Minute},
+func pranksGap(most time.Duration) time.Duration {
+	return pranksGapMin + rand.N(most-pranksGapMin)
 }
 
 type pranks struct {
 	mu    sync.Mutex
 	kinds []string
-	every string
 	until time.Time
 	next  time.Time
 	stop  context.CancelFunc
@@ -42,7 +41,6 @@ type pranks struct {
 type pranksState struct {
 	On    bool      `json:"on"`
 	Kinds []string  `json:"kinds"`
-	Every string    `json:"every,omitempty"`
 	Until time.Time `json:"until,omitzero"`
 	Next  time.Time `json:"next,omitzero"`
 }
@@ -53,7 +51,7 @@ func (p *pranks) state() pranksState {
 	if p.stop == nil {
 		return pranksState{Kinds: []string{}}
 	}
-	return pranksState{On: true, Kinds: p.kinds, Every: p.every, Until: p.until, Next: p.next}
+	return pranksState{On: true, Kinds: p.kinds, Until: p.until, Next: p.next}
 }
 
 func (p *pranks) halt() {
@@ -62,7 +60,7 @@ func (p *pranks) halt() {
 	if p.stop != nil {
 		p.stop()
 	}
-	p.stop, p.kinds, p.every = nil, nil, ""
+	p.stop, p.kinds = nil, nil
 }
 
 // end stops the pranks that ran with ctx, unless newer ones replaced them.
@@ -71,7 +69,7 @@ func (p *pranks) end(ctx context.Context) {
 	defer p.mu.Unlock()
 	if ctx.Err() == nil {
 		p.stop()
-		p.stop, p.kinds, p.every = nil, nil, ""
+		p.stop, p.kinds = nil, nil
 	}
 }
 
@@ -103,7 +101,6 @@ func (s *Server) pranksRoutes(mux *http.ServeMux) {
 type pranksRequest struct {
 	Kinds []string `json:"kinds"`
 	For   string   `json:"for"`
-	Every string   `json:"every"`
 }
 
 // startPranks has Mosko make the noises asked for, one at a random moment after another, for a while.
@@ -126,26 +123,18 @@ func (s *Server) startPranks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if req.Every == "" {
-		req.Every = "sometimes"
-	}
-	wait, ok := pranksEvery[req.Every]
-	if !ok {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("every %q: want often, sometimes or rarely", req.Every))
-		return
-	}
 	s.pranks.halt()
 	ctx, stop := context.WithCancel(context.Background())
 	now := time.Now()
 	s.pranks.mu.Lock()
-	s.pranks.kinds, s.pranks.every, s.pranks.until, s.pranks.stop = req.Kinds, req.Every, now.Add(d), stop
-	s.pranks.next = now.Add(min(pranksStart, wait[0]))
+	s.pranks.kinds, s.pranks.until, s.pranks.stop = req.Kinds, now.Add(d), stop
+	s.pranks.next = now.Add(pranksGap(pranksStart))
 	s.pranks.mu.Unlock()
-	go s.runPranks(ctx, wait)
+	go s.runPranks(ctx)
 	writeJSON(w, http.StatusAccepted, s.pranks.state())
 }
 
-func (s *Server) runPranks(ctx context.Context, wait [2]time.Duration) {
+func (s *Server) runPranks(ctx context.Context) {
 	for {
 		s.pranks.mu.Lock()
 		next, until, kinds := s.pranks.next, s.pranks.until, s.pranks.kinds
@@ -160,11 +149,12 @@ func (s *Server) runPranks(ctx context.Context, wait [2]time.Duration) {
 		case <-time.After(time.Until(next)):
 		}
 		kind := kinds[rand.IntN(len(kinds))]
-		if _, _, err := s.noise(kind); err != nil {
+		clip, _, err := s.noise(kind)
+		if err != nil {
 			slog.Info("no prank this time", "kind", kind, "err", err)
 		}
 		s.pranks.mu.Lock()
-		s.pranks.next = time.Now().Add(wait[0] + rand.N(wait[1]-wait[0]))
+		s.pranks.next = time.Now().Add(talk.Length(clip) + pranksGap(pranksGapMax))
 		s.pranks.mu.Unlock()
 	}
 }

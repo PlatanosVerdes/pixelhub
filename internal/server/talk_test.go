@@ -183,13 +183,13 @@ func TestPranks(t *testing.T) {
 		srv.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
 		return rec
 	}
-	for _, body := range []string{`{"kinds":[]}`, `{"kinds":["sneeze"]}`, `{"kinds":["fart"],"for":"5h"}`, `{"kinds":["fart"],"every":"always"}`} {
+	for _, body := range []string{`{"kinds":[]}`, `{"kinds":["sneeze"]}`, `{"kinds":["fart"],"for":"5h"}`} {
 		if rec := do("POST", "/api/talk/pranks", body); rec.Code != 400 {
 			t.Errorf("%s: %d %s", body, rec.Code, rec.Body)
 		}
 	}
-	rec := do("POST", "/api/talk/pranks", `{"kinds":["scream","fart","fart"],"for":"30m","every":"often"}`)
-	if rec.Code != 202 || !strings.Contains(rec.Body.String(), `"on":true,"kinds":["fart","scream"],"every":"often"`) {
+	rec := do("POST", "/api/talk/pranks", `{"kinds":["scream","fart","fart"],"for":"30m"}`)
+	if rec.Code != 202 || !strings.Contains(rec.Body.String(), `"on":true,"kinds":["fart","scream"],"until"`) {
 		t.Fatalf("start: %d %s", rec.Code, rec.Body)
 	}
 	if rec := do("POST", "/api/talk/noise", `{"kind":"burp"}`); rec.Code != 202 || !strings.Contains(rec.Body.String(), `"faces":[{`) {

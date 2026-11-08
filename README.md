@@ -116,7 +116,7 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `GET /api/talk/phrases` | The quick phrases the Mosko tab offers |
 | `POST /api/talk/warm` | Read the quick phrases now, for a speech server that was away at start; they are read at start too |
 | `POST /api/talk/noise` | Mosko makes a noise now, `{"kind": "fart"}`: `fart`, `burp`, `scream` or `sound`, one of a few CC0 recordings of each (`internal/talk/noises`) |
-| `GET/POST/DELETE /api/talk/pranks` | Pranks: for a while, `{"kinds": ["fart", "burp"], "for": "1h", "every": "sometimes"}`, Mosko makes one of the noises at random moments (`often` 1-4 min apart, `sometimes` 3-10, `rarely` 8-20; up to 4 h); they stop on a restart |
+| `GET/POST/DELETE /api/talk/pranks` | Pranks: for a while, `{"kinds": ["fart", "burp"], "for": "1h"}`, Mosko makes one of the noises at random moments, from 1 s to 5 min after the last one ends (up to 4 h); they stop on a restart |
 | `POST /api/talk` | Mosko says `{"text": ...}` or a multipart `audio` recording, his mouth and eyes moving with it |
 | `POST /api/channel` | Override the channel: `name`, optional `for`; without it, until the schedule changes |
 | `DELETE /api/channel` | Back to the schedule |
