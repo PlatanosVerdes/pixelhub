@@ -2376,7 +2376,7 @@ class DrawTab extends LitElement {
     frames: { state: true }, cur: { state: true }, color: { state: true }, tool: { state: true }, mirror: { state: true }, onion: { state: true },
     delay: { state: true }, name: { state: true }, id: { state: true }, dirty: { state: true }, busy: { state: true },
     drawings: { state: true }, lists: { state: true }, beat: { state: true }, recent: { state: true },
-    mine: { state: true }, palette: { state: true }, editMine: { state: true },
+    mine: { state: true }, palette: { state: true }, editMine: { state: true }, justSaved: { state: true },
   };
   static styles = [base, css`
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
@@ -2440,6 +2440,10 @@ class DrawTab extends LitElement {
     .item span { font-size: 11px; color: var(--muted); }
     .item .icon { position: absolute; top: 4px; right: 4px; background: color-mix(in srgb, var(--bg) 80%, transparent); }
     .empty { font-size: 13px; color: var(--muted); margin: 0; }
+    .saved-now { display: grid; gap: 6px; padding: 12px 14px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--line)); background: color-mix(in srgb, var(--ok) 10%, var(--bg)); }
+    .saved-now b { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+    .saved-now b svg { width: 16px; height: 16px; color: var(--ok); }
+    .saved-now span { font-size: 13px; color: var(--muted); }
   `];
 
   constructor() {
@@ -2486,12 +2490,13 @@ class DrawTab extends LitElement {
   }
 
   fresh() {
-    this.recent = [];
+    this.recent = []; this.justSaved = null;
     this.frames = [blank()]; this.cur = 0; this.delay = 250; this.name = ""; this.id = null; this.dirty = false;
     this.undos = []; this.redos = [];
   }
   // A drawing brings back its own recent colours: the ones kept with its draft, or the ones it is made of.
   load(d, dirty = false) {
+    this.justSaved = null;
     this.frames = d.frames.map((f) => (typeof f === "string" ? fromHex(f) : [...f]));
     this.recent = d.recent ?? colorsOf(this.frames);
     this.cur = 0; this.delay = d.delay_ms ?? d.delay ?? 250; this.name = d.name ?? ""; this.id = d.id ?? null; this.dirty = dirty;
@@ -2510,7 +2515,7 @@ class DrawTab extends LitElement {
   change(frames, cur = this.cur) {
     this.undos = [...this.undos.slice(-49), { frames: this.frames, cur: this.cur }];
     this.redos = [];
-    this.frames = frames; this.cur = Math.max(0, Math.min(cur, frames.length - 1)); this.dirty = true;
+    this.frames = frames; this.cur = Math.max(0, Math.min(cur, frames.length - 1)); this.dirty = true; this.justSaved = null;
     this.sendLive();
   }
   undo() {
@@ -2708,13 +2713,19 @@ class DrawTab extends LitElement {
   }
 
   body() { return { name: this.name.trim() || t("Untitled"), delay_ms: this.delay, frames: this.frames.map(toHex) }; }
-  async save() {
+  // Saving says what was kept and asks what comes next, so the next strokes never land on it by mistake.
+  async save(asNew = false) {
+    const body = this.body();
+    if (asNew) {
+      const name = prompt(t("Name for the copy"), t("{name} (copy)", { name: body.name }));
+      if (!name?.trim()) return false;
+      body.name = name.trim();
+    }
     this.busy = true;
     try {
-      const body = this.body();
-      const r = this.id ? await api("PUT", `drawings/${this.id}`, body) : await api("POST", "drawings", body);
+      const r = this.id && !asNew ? await api("PUT", `drawings/${this.id}`, body) : await api("POST", "drawings", body);
       this.drawings = r.drawings; this.id = r.drawing.id; this.name = r.drawing.name; this.dirty = false;
-      toast(this, t("Saved"));
+      this.justSaved = r.drawing.name;
       return true;
     } catch (e) { toast(this, e.message); return false; }
     finally { this.busy = false; }
@@ -2750,6 +2761,7 @@ class DrawTab extends LitElement {
     if (!this.confirmLeave()) return;
     this.fresh();
     this.sendLive();
+    scrollTo({ top: 0, behavior: "smooth" });
   }
   async deleteDrawing(d) {
     if (!confirm(t("Delete {name}?", { name: d.name }))) return;
@@ -2812,12 +2824,21 @@ class DrawTab extends LitElement {
             ${segmented(SPEEDS, this.delay, (v) => { this.delay = v; this.dirty = true; this.sendLive(); })}</div>` : nothing}
         </div>
         <div class="card">
-          <div class="head"><h2>${this.id ? t("Editing") : t("New drawing")}</h2>${this.dirty ? html`<span class="tag on">${t("Not saved")}</span>` : nothing}</div>
-          <div class="row">
-            <input type="text" maxlength="40" .value=${this.name} placeholder=${t("Name")} aria-label=${t("Name")}
-              @input=${(e) => { this.name = e.target.value; this.dirty = true; }} @keydown=${(e) => { if (e.key === "Enter") this.save(); }}>
-            <button class="btn primary" ?disabled=${this.busy} @click=${() => this.save()}>${t("Save")}</button>
-          </div>
+          <div class="head"><h2>${this.id ? t("Editing “{name}”", { name: this.name }) : t("New drawing")}</h2>${this.dirty ? html`<span class="tag on">${t("Not saved")}</span>` : nothing}</div>
+          ${this.justSaved ? html`<div class="saved-now" role="status">
+              <b>${icons.check}${t("Saved “{name}”", { name: this.justSaved })}</b>
+              <span>${t("What now?")}</span>
+              <div class="row">
+                <button class="btn" @click=${() => { this.justSaved = null; }}>${t("Keep drawing this one")}</button>
+                <button class="btn primary" @click=${() => this.startNew()}>${icons.plus}${t("Start a new one")}</button>
+              </div>
+            </div>` : html`<div class="row">
+              <input type="text" maxlength="40" .value=${this.name} placeholder=${t("Name")} aria-label=${t("Name")}
+                @input=${(e) => { this.name = e.target.value; this.dirty = true; }} @keydown=${(e) => { if (e.key === "Enter") this.save(); }}>
+              ${this.id ? html`<button class="btn primary" ?disabled=${this.busy || !this.dirty} @click=${() => this.save()}>${t("Save changes")}</button>
+                <button class="btn" ?disabled=${this.busy} @click=${() => this.save(true)}>${t("Save as new")}</button>`
+                : html`<button class="btn primary" ?disabled=${this.busy} @click=${() => this.save()}>${t("Save")}</button>`}
+            </div>`}
           <div class="row" style="margin-top:10px">
             <select aria-label=${t("Add to a list")} @change=${(e) => { const v = e.target.value; e.target.value = ""; this.addToList(v); }}>
               <option value="">${t("Add to a list…")}</option>
