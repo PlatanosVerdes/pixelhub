@@ -2834,7 +2834,7 @@ class DrawTab extends LitElement {
         </div>
         <div class="card">
           <div class="head"><h2>${this.id ? t("Editing “{name}”", { name: this.name }) : t("New drawing")}</h2>${this.dirty ? html`<span class="tag on">${t("Not saved")}</span>` : nothing}</div>
-          <dialog class="next" @click=${(e) => { if (e.target.tagName === "DIALOG") e.target.close(); }} @close=${() => { this.justSaved = null; }}>
+          <dialog class="next" @cancel=${(e) => e.preventDefault()} @close=${() => { this.justSaved = null; }}>
             <div class="sheet saved-now">
               <div class="done">${icons.check}</div>
               <b>${t("Saved “{name}”", { name: this.justSaved ?? "" })}</b>
