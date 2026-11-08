@@ -2141,7 +2141,11 @@ class MoskoTab extends LitElement {
   }
   async tryNoise(kind) {
     this.trying = kind;
-    try { await api("POST", "talk/noise", { kind }); send(this, "refresh"); } catch (e) { toast(this, e.message); }
+    try {
+      const r = await api("POST", "talk/noise", { kind });
+      this.play(r.faces ?? [], r.faces_after_ms ?? 0);
+      send(this, "refresh");
+    } catch (e) { toast(this, e.message); }
     setTimeout(() => { if (this.trying === kind) this.trying = null; }, 1500);
   }
   async startPranks() {

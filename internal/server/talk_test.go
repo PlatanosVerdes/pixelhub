@@ -185,7 +185,7 @@ func TestPranks(t *testing.T) {
 	if rec.Code != 202 || !strings.Contains(rec.Body.String(), `"on":true,"kinds":["fart","scream"],"every":"often"`) {
 		t.Fatalf("start: %d %s", rec.Code, rec.Body)
 	}
-	if rec := f.do(t, "POST", "/api/talk/noise", `{"kind":"burp"}`); rec.Code != 202 {
+	if rec := f.do(t, "POST", "/api/talk/noise", `{"kind":"burp"}`); rec.Code != 202 || !strings.Contains(rec.Body.String(), `"faces":[{`) {
 		t.Fatalf("a burp now: %d %s", rec.Code, rec.Body)
 	}
 	for deadline := time.Now().Add(2 * time.Second); f.hub.Status().Showing != "Mosko"; time.Sleep(5 * time.Millisecond) {

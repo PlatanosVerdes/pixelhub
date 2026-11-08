@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/PlatanosVerdes/pixelhub/internal/display"
 	"github.com/PlatanosVerdes/pixelhub/internal/hub"
 	"github.com/PlatanosVerdes/pixelhub/internal/talk"
 )
@@ -90,11 +91,12 @@ func (s *Server) pranksRoutes(mux *http.ServeMux) {
 		if !decode(w, r, &req, smallBody) {
 			return
 		}
-		if err := s.noise(req.Kind); err != nil {
+		clip, poses, err := s.noise(req.Kind)
+		if err != nil {
 			writeError(w, noiseStatus(err), err)
 			return
 		}
-		writeJSON(w, http.StatusAccepted, map[string]string{"made": req.Kind})
+		writeJSON(w, http.StatusAccepted, map[string]any{"made": req.Kind, "faces": poses, "faces_after_ms": clip.FramesAfter.Milliseconds()})
 	})
 }
 
@@ -158,7 +160,7 @@ func (s *Server) runPranks(ctx context.Context, wait [2]time.Duration) {
 		case <-time.After(time.Until(next)):
 		}
 		kind := kinds[rand.IntN(len(kinds))]
-		if err := s.noise(kind); err != nil {
+		if _, _, err := s.noise(kind); err != nil {
 			slog.Info("no prank this time", "kind", kind, "err", err)
 		}
 		s.pranks.mu.Lock()
@@ -170,17 +172,17 @@ func (s *Server) runPranks(ctx context.Context, wait [2]time.Duration) {
 var errMoskoBusy = errors.New("Mosko is still on the last one")
 
 // noise has Mosko make a noise of kind now, unless he is already talking.
-func (s *Server) noise(kind string) error {
+func (s *Server) noise(kind string) (display.Content, []talk.Pose, error) {
 	if !s.talking.TryLock() {
-		return errMoskoBusy
+		return display.Content{}, nil, errMoskoBusy
 	}
 	defer s.talking.Unlock()
 	n, err := talk.MakeNoise(kind)
 	if err != nil {
-		return err
+		return display.Content{}, nil, err
 	}
-	clip, _ := n.Clip(s.Hub.State().Talk.Lag())
-	return s.Hub.Say(clip, talk.Length(clip)+sendSlack)
+	clip, poses := n.Clip(s.Hub.State().Talk.Lag())
+	return clip, poses, s.Hub.Say(clip, talk.Length(clip)+sendSlack)
 }
 
 func noiseStatus(err error) int {
