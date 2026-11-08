@@ -2230,7 +2230,7 @@ class MoskoTab extends LitElement {
       <button class="step" aria-label=${t("More")} @click=${() => set(clamp(value + range.step))}>+</button>
     </div>`;
   }
-  status() {
+  activity() {
     if (this.busy) return [true, t("Thinking…")];
     if (this.talking) return [true, t("Talking")];
     return [false, t("Waiting for you")];
@@ -2238,7 +2238,7 @@ class MoskoTab extends LitElement {
 
   render() {
     const lag = this.lag ?? 250, pitch = this.pitch ?? 100;
-    const [on, mood] = this.status();
+    const [on, mood] = this.activity();
     return html`<div class="layout">
       <div class="side">
         <div class="card who">
