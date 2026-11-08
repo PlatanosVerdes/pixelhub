@@ -629,6 +629,7 @@ class Automatic extends LitElement {
     .opts { display: flex; flex-wrap: wrap; gap: 6px; }
     .opt { border: 1px solid var(--line); background: none; border-radius: 10px; min-height: 38px; padding: 0 14px; font-size: 14px; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
     .opt small { font-size: 12px; opacity: .8; }
+    .opt small.spark svg { width: 13px; height: 13px; color: var(--accent); }
     .opt:hover { color: var(--ink); }
     .opt[aria-pressed=true] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
     .opt.pick { flex-direction: column; align-items: flex-start; gap: 0; padding: 8px 14px; text-align: left; }
@@ -666,12 +667,11 @@ class Automatic extends LitElement {
   }
   setAmbient(a) { return this.save({ ambient: { ...this.channel.ambient, ...a } }); }
   // The choice shows at once: one picture of the kind now, then the automatic turns go on with it.
-  async pickSurprise(list) {
+  async pickSurprise(list, label = surpriseName(list)) {
     const a = this.channel.ambient, pictures = seconds(a.pictures) ? a.pictures : PICTURE_DEFAULT;
     if (a.list === list || !(await this.setAmbient({ list, pictures }))) return;
-    toast(this, t("In automatic: {what}", { what: surpriseName(list) }));
-    const kind = list === SURPRISE.random ? "random" : "moment";
-    try { await api("POST", "gallery/surprise", { kind, for: pictures }); send(this, "refresh"); } catch { /* the next turn shows one anyway */ }
+    toast(this, t("In automatic: {what}", { what: label }));
+    try { await api("POST", "gallery/surprise", { list, for: pictures }); send(this, "refresh"); } catch { /* the next turn shows one anyway */ }
   }
   kind(id, source, glyph, title, sub, pick, disabled = false) {
     return html`<button class="kind" aria-pressed=${String(source === id)} ?disabled=${this.busy || disabled} @click=${() => { if (source !== id) pick(); }}>
@@ -726,13 +726,13 @@ class Automatic extends LitElement {
         </div>
         ${source === "list" ? html`<div class="sub"><span class="label">${t("Which list")}</span><div class="opts" role="group">
           ${lists.map((l) => html`<button class="opt" aria-pressed=${String(l.name.toLowerCase() === playing)} ?disabled=${this.busy}
-            @click=${() => this.setAmbient({ list: l.name })}>${listName(l)}<small>${l.items.length}</small></button>`)}</div></div>` : nothing}
+            @click=${() => (isSmart(l) ? this.pickSurprise(l.name, listName(l)) : this.setAmbient({ list: l.name }))}>${listName(l)}${isSmart(l) ? html`<small class="spark">${galleryIcons.sparkle}</small>` : html`<small>${l.items.length}</small>`}</button>`)}</div></div>` : nothing}
         ${source === "surprise" ? html`<div class="sub"><span class="label">${t("Which pictures")}</span><div class="opts" role="group">
           ${[[SURPRISE.moment, t("By the day, the hour and the weather")], [SURPRISE.random, t("The best of the gallery, by chance")]].map(([v, sub]) =>
             html`<button class="opt pick" aria-pressed=${String(v === playing)} ?disabled=${this.busy} @click=${() => this.pickSurprise(v)}>
               <b>${surpriseName(v)}</b><small>${sub}</small></button>`)}</div></div>` : nothing}
         ${playing ? html`
-          ${list && !list.items.length ? html`<p class="small muted hint">${t("The list {name} is empty, so only the clock shows.", { name: listName(list) })}</p>` : nothing}
+          ${list && !list.items.length && !isSmart(list) ? html`<p class="small muted hint">${t("The list {name} is empty, so only the clock shows.", { name: listName(list) })}</p>` : nothing}
           <div class="rows">
             <div class="row"><span>${t("Each drawing")}</span><ph-duration .options=${PICTURE_STEPS} .value=${a.pictures} max="86400" @change=${(e) => this.setAmbient({ pictures: e.detail })}></ph-duration></div>
             <div class="row"><span>${t("Clock between")}</span><ph-duration .options=${[["0s", t("No")], ...CLOCK_STEPS]} .value=${a.clock} max="86400" @change=${(e) => this.setAmbient({ clock: e.detail })}></ph-duration></div>
@@ -852,6 +852,15 @@ const gifURL = (file) => `api/gallery/gif?file=${encodeURIComponent(file)}`;
 // The list that is always there; the page shows it under its name in the reader's language.
 const FAVORITES = "favorites";
 const SURPRISE = { random: "@random", moment: "@moment" };
+// A smart list keeps a search or a category, and plays what the gallery has for it.
+const isSmart = (l) => !!(l?.search?.length || l?.category);
+const smartWhat = (l) => (l.category ? categoryName(l.category) : l.search.map((w) => `“${w}”`).join(", "));
+const THEMES = [
+  ["Christmas", { search: ["christmas", "santa", "snowman", "reindeer"] }], ["Halloween", { search: ["halloween", "pumpkin", "ghost", "bat"] }],
+  ["Night", { search: ["moon", "stars", "night", "galaxy"] }], ["Summer", { search: ["beach", "summer", "ice cream", "watermelon"] }],
+  ["Hearts", { search: ["heart", "love"] }], ["Cats", { search: ["cat", "kitten"] }], ["Space", { search: ["space", "planet", "rocket", "astronaut"] }],
+  ["Food", { category: "food" }], ["Animals", { category: "animal" }], ["Nature", { category: "nature" }],
+];
 const autoIcons = {
   clock: icon(svg`<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>`),
   list: icon(svg`<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><path d="M14 16.5h6M17 13.5v6"/>`),
@@ -871,6 +880,14 @@ class GalleryTab extends LitElement {
   static styles = [base, css`
     .bar { display: grid; gap: 10px; margin-bottom: 14px; }
     .lucky { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .thumbs.smart { display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 10%, var(--case)); color: var(--accent); }
+    .thumbs.smart svg { width: 34%; height: 34%; }
+    .themes { margin-top: 22px; display: grid; gap: 8px; }
+    .themes h3 { margin: 0; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+    .themes h3 svg { width: 16px; height: 16px; color: var(--accent); }
+    .themes .cats .cat { display: inline-flex; align-items: center; gap: 4px; }
+    .themes .cats .cat svg { width: 14px; height: 14px; }
+    .tag svg { width: 11px; height: 11px; display: inline-block; vertical-align: -1px; margin-right: 3px; }
     .cats { display: flex; gap: 6px; flex-wrap: wrap; }
     @media (max-width: 599px) {
       .cats { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px; scroll-padding: 16px; }
@@ -978,7 +995,10 @@ class GalleryTab extends LitElement {
   async play(l) {
     const a = defaultChannel(this.state).ambient;
     this.busy = true;
-    if (await saveChannel(this, this.state, { ambient: { ...a, list: l.name, pictures: seconds(a.pictures) ? a.pictures : PICTURE_DEFAULT } })) toast(this, t("{name} plays on the Evo in automatic", { name: l.name }));
+    if (await saveChannel(this, this.state, { ambient: { ...a, list: l.name, pictures: seconds(a.pictures) ? a.pictures : PICTURE_DEFAULT } })) {
+      toast(this, t("{name} plays on the Evo in automatic", { name: l.name }));
+      if (isSmart(l)) api("POST", "gallery/surprise", { list: l.name, for: a.pictures && seconds(a.pictures) ? a.pictures : PICTURE_DEFAULT }).then(() => send(this, "refresh")).catch(() => {});
+    }
     this.busy = false;
   }
   async upload(l, input) {
@@ -1108,7 +1128,7 @@ class GalleryTab extends LitElement {
 
   sheet(p) {
     const inLists = this.listsWith(p.file);
-    const fav = inLists.includes(FAVORITES), others = this.lists.filter((l) => l.name !== FAVORITES);
+    const fav = inLists.includes(FAVORITES), others = this.lists.filter((l) => l.name !== FAVORITES && !isSmart(l));
     const inOthers = inLists.filter((n) => n !== FAVORITES).length;
     return html`<div class="sheet" role="dialog" aria-label=${p.name}>
       <img class="pix" src=${gifURL(p.file)} alt="">
@@ -1162,8 +1182,57 @@ class GalleryTab extends LitElement {
         : kept.has(i.file) ? html`<span class="kept" aria-label=${t("In a list")}>${icons.bookmark}</span>` : nothing}</button>`)}</div>`;
   }
 
+  async makeSmart(name, body) {
+    if (!name?.trim()) return;
+    if (await this.listCall("POST", "lists", { name: name.trim(), ...body })) {
+      const l = this.lists.find((x) => x.name.toLowerCase() === name.trim().toLowerCase());
+      toast(this, t("Smart list {name} made", { name: l?.name ?? name }), l ? { action: { label: t("Play it in automatic"), run: () => this.play(l) } } : {});
+    }
+  }
+  // What is being looked at now, a search or a category, kept as a smart list.
+  smartFromHere() {
+    const body = this.searched ? { search: [this.searched] } : { category: this.category };
+    this.makeSmart(prompt(t("Name for the smart list"), this.searched || categoryName(this.category)), body);
+  }
+  async sample(l) {
+    try { const r = await api("POST", "gallery/surprise", { list: l.name, for: "30s" }); send(this, "refresh"); toast(this, t("Showing {name} for 30 s", { name: r.showing })); }
+    catch (e) { toast(this, e.message); }
+  }
+  browse(l) {
+    if (l.category) { this.pick("category", l.category); return; }
+    this.query = l.search[0];
+    this.search(new Event("submit"));
+  }
+  smartList(l) {
+    return html`<div class="head-list">
+        <button class="icon" aria-label=${t("All my lists")} @click=${() => { this.open = null; this.picked = null; }}>${icons.back}</button>
+        ${this.renaming !== null && this.renaming !== undefined
+          ? html`<form class="make" style="flex:1" @submit=${(e) => { e.preventDefault(); this.renameList(); }}>
+              <input aria-label=${t("List name")} maxlength="40" .value=${this.renaming} @input=${(e) => { this.renaming = e.target.value; }}>
+              <button class="btn small" type="submit">${t("Rename")}</button><button class="btn small" type="button" @click=${() => { this.renaming = null; }}>${t("Cancel")}</button></form>`
+          : html`<h2>${l.name}</h2><span class="tag on">${galleryIcons.sparkle}${t("Smart")}</span>
+              ${this.onEvo(l) ? html`<span class="tag on">${t("On the Evo")}</span>`
+                : html`<button class="btn small primary" ?disabled=${this.busy} @click=${() => this.play(l)}>${t("Show on the Evo")}</button>`}
+              <button class="btn small" @click=${() => this.sample(l)}>${t("Show one now")}</button>
+              <button class="btn small" @click=${() => { this.renaming = l.name; }}>${t("Rename")}</button>
+              <button class="icon trash" aria-label=${t("Delete list")} @click=${() => this.deleteList()}>${icons.trash}</button>`}
+      </div>
+      <p class="muted">${l.category ? t("Plays the most liked of {what} in the gallery, a different one each turn.", { what: smartWhat(l) })
+        : t("Plays what the gallery finds for {what}, a different one each turn.", { what: smartWhat(l) })}</p>
+      <button class="btn" @click=${() => this.browse(l)}>${t("See what it finds")}</button>`;
+  }
+  themes() {
+    const have = new Set(this.lists.map((l) => l.name.toLowerCase()));
+    const left = THEMES.filter(([label]) => !have.has(t(label).toLowerCase()));
+    if (!left.length) return nothing;
+    return html`<div class="themes"><h3>${galleryIcons.sparkle}${t("Themes")}</h3>
+      <p class="small muted">${t("Smart lists ready to add: each plays what the gallery has on its theme.")}</p>
+      <div class="cats">${left.map(([label, body]) => html`<button class="cat" ?disabled=${this.busy} @click=${() => this.makeSmart(t(label), body)}>${icons.plus}${t(label)}</button>`)}</div></div>`;
+  }
+
   myLists() {
     const l = this.current;
+    if (l && isSmart(l)) return this.smartList(l);
     if (l) {
       return html`<div class="head-list">
           <button class="icon" aria-label=${t("All my lists")} @click=${() => { this.open = null; this.picked = null; }}>${icons.back}</button>
@@ -1187,9 +1256,12 @@ class GalleryTab extends LitElement {
         <button class="btn" type="submit" ?disabled=${this.busy || !(this.newList ?? "").trim()}>${t("Create list")}</button>
       </form>
       ${this.lists.length ? html`<div class="cards">${this.lists.map((x) => html`<button class="card-list" @click=${() => { this.open = x.name; this.picked = null; }}>
-          <div class="thumbs">${[0, 1, 2, 3].map((k) => x.items[k] ? html`<img class="pix" src=${gifURL(x.items[k].file)} alt="" loading="lazy">` : html`<span></span>`)}</div>
-          <b class=${x.name === FAVORITES ? "fav-name" : ""}>${x.name === FAVORITES ? icons.heartFull : nothing}${listName(x)}</b><span class="small muted">${t("{n} drawings", { n: x.items.length })}</span></button>`)}</div>`
-        : nothing}`;
+          ${isSmart(x) ? html`<div class="thumbs smart">${galleryIcons.sparkle}</div>`
+            : html`<div class="thumbs">${[0, 1, 2, 3].map((k) => x.items[k] ? html`<img class="pix" src=${gifURL(x.items[k].file)} alt="" loading="lazy">` : html`<span></span>`)}</div>`}
+          <b class=${x.name === FAVORITES ? "fav-name" : ""}>${x.name === FAVORITES ? icons.heartFull : nothing}${listName(x)}</b>
+          <span class="small muted">${isSmart(x) ? smartWhat(x) : t("{n} drawings", { n: x.items.length })}</span></button>`)}</div>`
+        : nothing}
+      ${this.themes()}`;
   }
 
   // A gallery picture picked by chance, or for the day and hour, shown now; the toast offers to keep it going.
@@ -1235,6 +1307,8 @@ class GalleryTab extends LitElement {
               ${this.indexing ? html`<br>${t("Still gathering the gallery ({n} of {of} pages); search again in a minute for more.", { n: this.indexing.indexed, of: this.indexing.of })}` : nothing}</p>`
           : mine ? nothing
           : html`<div>${segmented([["likes", t("Most liked")], ["new", t("Newest")]], this.sort, (v) => this.pick("sort", v))}</div>`}
+        ${mine ? nothing : html`<div><button class="btn small" ?disabled=${this.busy} title=${t("Keep this search as a list that plays what the gallery finds")}
+          @click=${() => this.smartFromHere()}>${galleryIcons.sparkle}${this.searched ? t("Smart list of “{q}”", { q: this.searched }) : t("Smart list of {what}", { what: categoryName(this.category) })}</button></div>`}
       </div>
       ${mine ? this.myLists() : html`
         ${this.picked ? this.sheet(this.picked) : nothing}

@@ -47,7 +47,14 @@ type Picture struct {
 type List struct {
 	Name  string    `json:"name"`
 	Items []Picture `json:"items"`
+	// A smart list keeps no pictures: it plays what the gallery finds for Search, or shows in Category.
+	Search   []string `json:"search,omitempty"`
+	Category string   `json:"category,omitempty"`
 }
+
+func (l List) Smart() bool { return len(l.Search) > 0 || l.Category != "" }
+
+const maxSearch = 8
 
 type Store struct {
 	dir   string
@@ -121,6 +128,39 @@ func (s *Store) Create(name string) error {
 	return s.save(append(clone(s.lists), List{Name: name, Items: []Picture{}}))
 }
 
+// CreateSmart makes a list that plays what the gallery finds for search, or what is in category.
+func (s *Store) CreateSmart(name string, search []string, category string) error {
+	name, err := cleanName(name)
+	if err != nil {
+		return err
+	}
+	var words []string
+	for _, w := range search {
+		if w = strings.Join(strings.Fields(strings.ToLower(w)), " "); w != "" && !slices.Contains(words, w) {
+			words = append(words, w)
+		}
+	}
+	if (len(words) == 0) == (category == "") || len(words) > maxSearch {
+		return fmt.Errorf("%w: a smart list has 1 to %d words to search for, or a category", ErrInvalid, maxSearch)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.find(name) >= 0 {
+		return fmt.Errorf("%w: %q", ErrExists, name)
+	}
+	return s.save(append(clone(s.lists), List{Name: name, Items: []Picture{}, Search: words, Category: category}))
+}
+
+// Smart is the smart list named list, if there is one.
+func (s *Store) Smart(list string) (List, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if i := s.find(list); i >= 0 && s.lists[i].Smart() {
+		return clone(s.lists[i : i+1])[0], true
+	}
+	return List{}, false
+}
+
 func (s *Store) Rename(from, to string) error {
 	to, err := cleanName(to)
 	if err != nil {
@@ -173,6 +213,9 @@ func (s *Store) Add(list string, p Picture, gif []byte) error {
 	i := s.find(list)
 	if i < 0 {
 		return fmt.Errorf("%w: no list %q", ErrNotFound, list)
+	}
+	if s.lists[i].Smart() {
+		return fmt.Errorf("%w: %q fills itself from the gallery", ErrInvalid, s.lists[i].Name)
 	}
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
 		return fmt.Errorf("lists: %w", err)
@@ -278,7 +321,7 @@ func cleanName(name string) (string, error) {
 func clone(lists []List) []List {
 	out := make([]List, len(lists))
 	for i, l := range lists {
-		out[i] = List{Name: l.Name, Items: append([]Picture{}, l.Items...)}
+		out[i] = List{Name: l.Name, Items: append([]Picture{}, l.Items...), Search: slices.Clone(l.Search), Category: l.Category}
 	}
 	return out
 }

@@ -546,6 +546,8 @@ func galleryStatus(err error) int {
 type Lists interface {
 	Lists() []lists.List
 	Create(name string) error
+	CreateSmart(name string, search []string, category string) error
+	Smart(list string) (lists.List, bool)
 	Rename(from, to string) error
 	Delete(name string) error
 	Add(list string, p lists.Picture, gif []byte) error
@@ -557,11 +559,22 @@ func (s *Server) listRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/lists", func(w http.ResponseWriter, _ *http.Request) { s.replyLists(w, http.StatusOK, nil) })
 	mux.HandleFunc("POST /api/lists", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Name string `json:"name"`
+			Name     string   `json:"name"`
+			Search   []string `json:"search"`
+			Category string   `json:"category"`
 		}
-		if decode(w, r, &req, smallBody) {
+		if !decode(w, r, &req, smallBody) {
+			return
+		}
+		if len(req.Search) == 0 && req.Category == "" {
 			s.replyLists(w, http.StatusCreated, s.Lists.Create(req.Name))
+			return
 		}
+		if _, ok := gallery.Categories[req.Category]; req.Category != "" && !ok {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("category %q: see GET /api/gallery/categories", req.Category))
+			return
+		}
+		s.replyLists(w, http.StatusCreated, s.Lists.CreateSmart(req.Name, req.Search, req.Category))
 	})
 	mux.HandleFunc("PUT /api/lists/{name}", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {

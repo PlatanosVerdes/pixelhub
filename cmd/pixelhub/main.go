@@ -114,7 +114,7 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 	}
 	var api *server.Server
 	h.Lists = hub.ListFunc(func(list string, turn int) (display.Content, bool, error) {
-		if list == server.Random || list == server.Moment {
+		if api.IsSurprise(list) {
 			return api.Surprise(list)
 		}
 		return kept.Pick(list, turn, divoom.Size)
