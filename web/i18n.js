@@ -581,4 +581,5 @@ const es = {
   "The colours of this drawing show up here, custom ones too; a new drawing starts without any.": "Aquí salen los colores de este dibujo, también los personalizados; un dibujo nuevo empieza sin ninguno.",
   "Save colours here from the custom colour button.": "Guarda aquí colores desde el botón de color personalizado.",
   "Clear the colours": "Limpiar",
+  "In automatic: {what}": "En automático: {what}",
 };
