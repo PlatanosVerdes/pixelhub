@@ -2740,10 +2740,14 @@ class DrawTab extends LitElement {
     finally { this.busy = false; }
   }
   // While this tab is open the display shows what is being drawn, every change a moment after it is made.
+  // A blank canvas would paint the display black, as if it were off, so it leaves the display alone.
   async project() {
     clearTimeout(this.again);
-    try { await api("POST", "drawings/show", { ...this.body(), for: "10m" }); send(this, "refresh"); }
-    catch (e) { toast(this, e.message); }
+    const blankCanvas = this.frames.every((f) => f.every((c) => c === BLACK));
+    try {
+      await (blankCanvas ? api("DELETE", "show?key=drawing/") : api("POST", "drawings/show", { ...this.body(), for: "10m" }));
+      send(this, "refresh");
+    } catch (e) { toast(this, e.message); }
     this.again = setTimeout(() => this.project(), 5 * 60000);
   }
   sendLive() {
@@ -2828,7 +2832,7 @@ class DrawTab extends LitElement {
       <div class="side">
         <div class="card preview">
           <ph-led .src=${frameURL(this.stroke && n === 1 ? this.stroke : this.playing(frames, this.delay))} .label=${t("Preview")}></ph-led>
-          <span class="small muted">${t("The display shows it as you draw, while this tab is open.")}</span>
+          <span class="small muted">${t("The display shows it as you draw, while this tab is open; a blank canvas leaves the display as it was.")}</span>
           ${n > 1 ? html`<div class="row"><span class="small muted">${t("Frames per second")}</span>
             ${segmented(SPEEDS, this.delay, (v) => { this.delay = v; this.dirty = true; this.sendLive(); })}</div>` : nothing}
         </div>
