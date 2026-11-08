@@ -1931,7 +1931,7 @@ const at = (range, v) => ((v - range.min) / (range.max - range.min)) * 100;
 
 // Mosko says what is typed, or a recording, on the display, his mouth and eyes moving with the voice.
 // The page plays the same faces the display shows, and idles with a blink now and then.
-const NOISES = [["fart", "💨", "Farts"], ["burp", "🤢", "Burps"], ["scream", "😱", "Screams"], ["sound", "🎵", "Little sounds"]];
+const NOISES = [["fart", "💨", "Farts"], ["burp", "🤢", "Burps"], ["scream", "😱", "Screams"], ["sound", "🎵", "Bleeps"]];
 const PRANKS_FOR = [["15m", "15 min"], ["30m", "30 min"], ["1h", "1 h"], ["2h", "2 h"]];
 const PRANKS_EVERY = [["often", "Often"], ["sometimes", "Now and then"], ["rarely", "Rarely"]];
 
@@ -2011,17 +2011,28 @@ class MoskoTab extends LitElement {
     .pad:disabled { opacity: .5; cursor: default; }
     .pad b { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
     .pad.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
-    .pranks { display: grid; gap: 16px; }
+    .pranks { display: grid; gap: 12px; }
     .pranks .head { margin: 0; }
-    .noises { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+    .pranks .hint { margin: 0; }
+    .noises { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
     .noise { position: relative; }
-    .noise .effect { width: 100%; min-height: 64px; padding-right: 44px; }
-    .noise .effect i { font-style: normal; font-size: 20px; line-height: 1; }
-    .noise .try { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; padding: 0; font-size: 11px; }
+    .noise .effect { width: 100%; min-height: 44px; padding: 8px 44px 8px 12px; display: flex; align-items: center; gap: 8px; }
+    .noise .effect i { font-style: normal; font-size: 18px; line-height: 1; }
+    .noise .try { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; padding: 0; font-size: 10px; }
     .noise .try:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
     .noise .try:disabled { opacity: .5; cursor: default; }
-    .pranks .field { gap: 8px; }
-    .pranks .name { font-size: 13px; font-weight: 600; }
+    .options { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+    .option { display: flex; align-items: center; gap: 8px; }
+    .option > span { font-size: 12px; color: var(--muted); }
+    .options .seg { flex-wrap: nowrap; }
+    .options .btn { margin-left: auto; }
+    @media (max-width: 599px) {
+      .option { width: 100%; }
+      .option > span { width: 72px; flex: none; }
+      .options .seg { flex: 1; }
+      .options .seg button { flex: 1; padding: 0 6px; }
+      .options .btn { width: 100%; }
+    }
     .live { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 12%, transparent); font-size: 13px; }
     .live span { flex: 1 1 200px; display: flex; align-items: baseline; gap: 8px; }
     .live i { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1s ease-in-out infinite; }
@@ -2171,9 +2182,11 @@ class MoskoTab extends LitElement {
           <span><i></i>${t("On until {time}", { time: hhmm(new Date(p.until)) })} · ${mins < 1 ? t("the next one any moment") : t("the next one in {n} min", { n: mins })}</span>
           <button class="btn" @click=${() => this.stopPranks()}>${t("Stop")}</button>
         </div>`
-        : html`<div class="field"><div class="name">${t("For")}</div>${segmented(PRANKS_FOR.map(([v, l]) => [v, t(l)]), this.pranksFor ?? "1h", (v) => { this.pranksFor = v; })}</div>
-        <div class="field"><div class="name">${t("How often")}</div>${segmented(PRANKS_EVERY.map(([v, l]) => [v, t(l)]), every, (v) => { this.pranksEvery = v; })}</div>
-        <div class="row"><button class="btn primary" ?disabled=${pick.length === 0} @click=${() => this.startPranks()}>${t("Start the pranks")}</button></div>`}
+        : html`<div class="options">
+          <div class="option"><span>${t("For")}</span>${segmented(PRANKS_FOR.map(([v, l]) => [v, t(l)]), this.pranksFor ?? "1h", (v) => { this.pranksFor = v; })}</div>
+          <div class="option"><span>${t("How often")}</span>${segmented(PRANKS_EVERY.map(([v, l]) => [v, t(l)]), every, (v) => { this.pranksEvery = v; })}</div>
+          <button class="btn primary" ?disabled=${pick.length === 0} @click=${() => this.startPranks()}>${t("Start")}</button>
+        </div>`}
     </div>`;
   }
   // While this tab is open the display shows him waiting, blinking; the loop plays on the display by itself.

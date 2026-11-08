@@ -552,13 +552,12 @@ const es = {
   "the next one any moment": "el siguiente en cualquier momento",
   "the next one in {n} min": "el siguiente en {n} min",
   "How often": "Cada cuánto",
-  "Start the pranks": "Empezar las travesuras",
   "Farts": "Pedos",
   "Burps": "Eructos",
   "Screams": "Gritos",
-  "Little sounds": "Soniditos",
+  "Bleeps": "Soniditos",
   "Often": "A menudo",
-  "Now and then": "De vez en cuando",
+  "Now and then": "A ratos",
   "Rarely": "Poco",
 
   // Surprises
