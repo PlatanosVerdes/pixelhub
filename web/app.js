@@ -898,6 +898,15 @@ class GalleryTab extends LitElement {
     .menu-wrap { position: relative; }
     .menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; width: 240px; max-height: 300px; overflow-y: auto; padding: 6px; display: grid; gap: 2px;
       background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 16px 40px -10px rgba(0, 0, 0, .7); }
+    .menu.end { left: auto; right: 0; }
+    /* On a phone the menu rises from the bottom, above the tab bar, so it always fits and is in reach of the thumb. */
+    @media (max-width: 599px) {
+      .menu, .menu.end { position: fixed; left: 8px; right: 8px; top: auto; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); width: auto; max-height: 55vh;
+        padding: 8px; border-radius: 18px; box-shadow: 0 -10px 50px rgba(0, 0, 0, .6); animation: up .16s ease-out; }
+      .menu-item { min-height: 44px; font-size: 15px; }
+      .menu input { height: 42px; font-size: 16px; }
+    }
+    @keyframes up { from { transform: translateY(12px); opacity: 0; } }
     .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; padding: 0 10px; border: 0; border-radius: 10px; background: none;
       color: var(--ink); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
     .menu-item:hover, .menu-item:focus-visible { background: var(--chip); outline: none; }
@@ -1099,7 +1108,7 @@ class GalleryTab extends LitElement {
           <button class="btn small fav" aria-pressed=${String(fav)} ?disabled=${this.busy} title=${fav ? t("Remove from favorites") : t("Add to favorites")}
             aria-label=${fav ? t("Remove from favorites") : t("Add to favorites")} @click=${() => this.keep(FAVORITES, p, !fav)}>${fav ? icons.heartFull : icons.heart}</button>
           <div class="menu-wrap">
-            <button class="btn small save" aria-haspopup="menu" aria-expanded=${String(!!this.saving)} @click=${(e) => { e.stopPropagation(); this.saving = !this.saving; this.creating = false; }}>
+            <button class="btn small save" aria-haspopup="menu" aria-expanded=${String(!!this.saving)} @click=${(e) => { e.stopPropagation(); this.saving = !this.saving; this.creating = false; this.place(); }}>
               ${icons.bookmark}${inOthers ? t("In {n} lists", { n: inOthers }) : t("Add to list")}</button>
             ${this.saving ? this.listMenu(p, others, inLists) : nothing}
           </div>
@@ -1109,6 +1118,12 @@ class GalleryTab extends LitElement {
     </div>`;
   }
 
+  // The menu opens leftwards when there is no room for it on the right.
+  async place() {
+    await this.updateComplete;
+    const m = this.renderRoot.querySelector(".menu");
+    if (m && m.getBoundingClientRect().right > document.documentElement.clientWidth - 8) m.classList.add("end");
+  }
   // A small menu under Add to list, as apps have: a tap puts the drawing in a list or takes it out.
   listMenu(p, others, inLists) {
     return html`<div class="menu" role="menu" @click=${(e) => e.stopPropagation()} @keydown=${(e) => { if (e.key === "Escape") { this.saving = false; } }}>
