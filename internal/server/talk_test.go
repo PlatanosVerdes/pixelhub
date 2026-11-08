@@ -172,3 +172,31 @@ func TestSpeechKeptOnDisk(t *testing.T) {
 		t.Errorf("after a restart: %v, read aloud %q, got %d Hz %d samples", err, said, p.Rate, len(p.Samples))
 	}
 }
+
+func TestPranks(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	for _, body := range []string{`{"kinds":[]}`, `{"kinds":["sneeze"]}`, `{"kinds":["fart"],"for":"5h"}`, `{"kinds":["fart"],"every":"always"}`} {
+		if rec := f.do(t, "POST", "/api/talk/pranks", body); rec.Code != 400 {
+			t.Errorf("%s: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	rec := f.do(t, "POST", "/api/talk/pranks", `{"kinds":["scream","fart","fart"],"for":"30m","every":"often"}`)
+	if rec.Code != 202 || !strings.Contains(rec.Body.String(), `"on":true,"kinds":["fart","scream"],"every":"often"`) {
+		t.Fatalf("start: %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.do(t, "POST", "/api/talk/noise", `{"kind":"burp"}`); rec.Code != 202 {
+		t.Fatalf("a burp now: %d %s", rec.Code, rec.Body)
+	}
+	for deadline := time.Now().Add(2 * time.Second); f.hub.Status().Showing != "Mosko"; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("showing %q, want Mosko", f.hub.Status().Showing)
+		}
+	}
+	if rec := f.do(t, "POST", "/api/talk/noise", `{"kind":"sneeze"}`); rec.Code != 400 {
+		t.Errorf("an unknown noise: %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.do(t, "DELETE", "/api/talk/pranks", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"on":false,"kinds":[]`) {
+		t.Errorf("stop: %d %s", rec.Code, rec.Body)
+	}
+}

@@ -41,13 +41,21 @@ type Pose struct {
 // by the bridge. spans set the moods, Calm elsewhere. lag is how much later the speaker sounds than
 // the display paints: a positive one holds the faces back, a negative one the sound.
 func Clip(p PCM, spans []Span, lag time.Duration) (display.Content, []Pose) {
+	return clip(p, spans, lag, true)
+}
+
+func clip(p PCM, spans []Span, lag time.Duration, open bool) (display.Content, []Pose) {
 	p = p.withSilence(wake)
 	spans = slices.Clone(spans)
 	for i := range spans {
 		spans[i].From += wake
 		spans[i].To += wake
 	}
-	fr, poses := frames(rest(blinks(moods(mouth(p), spans))))
+	shapes := []segment{{Shut, Calm, p.Duration()}}
+	if open {
+		shapes = mouth(p)
+	}
+	fr, poses := frames(rest(blinks(moods(shapes, spans))))
 	c := display.Content{
 		Kind:   display.Picture,
 		Name:   "Mosko",

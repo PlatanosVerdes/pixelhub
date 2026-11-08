@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"math"
 	"net"
 	"os/exec"
+	"slices"
 	"testing"
 	"time"
 
@@ -323,5 +325,38 @@ func TestMoodsFallWhereTheyAreSaid(t *testing.T) {
 	stretched := Stretch(spans, p.Duration(), p.Duration()/2)
 	if (stretched[1].From - spans[1].From/2).Abs() > time.Microsecond {
 		t.Errorf("a faster voice moved the pause to %s, want %s", stretched[1].From, spans[1].From/2)
+	}
+}
+
+func TestNoises(t *testing.T) {
+	t.Parallel()
+	for _, kind := range NoiseKinds {
+		for range 20 {
+			n, err := MakeNoise(kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d := n.PCM.Duration(); d < 100*time.Millisecond || d > 5*time.Second {
+				t.Errorf("%s lasts %s", kind, d)
+			}
+			var peak int16
+			for _, v := range n.PCM.Samples {
+				peak = max(peak, v, -v)
+			}
+			if peak < 20000 {
+				t.Errorf("%s peaks at %d, want it loud", kind, peak)
+			}
+			_, poses := n.Clip(0)
+			open := slices.ContainsFunc(poses, func(p Pose) bool { return p.Shape != Shut && p.Shape != Blink })
+			if open != (kind != "fart") {
+				t.Errorf("%s opens the mouth: %v", kind, open)
+			}
+			if kind == "fart" && !slices.ContainsFunc(poses, func(p Pose) bool { return p.Mood == Laughing }) {
+				t.Errorf("a fart is not laughed at: %v", poses)
+			}
+		}
+	}
+	if _, err := MakeNoise("sneeze"); !errors.Is(err, ErrNoNoise) {
+		t.Errorf("an unknown noise: %v", err)
 	}
 }
