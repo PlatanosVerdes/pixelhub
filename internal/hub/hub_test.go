@@ -28,10 +28,11 @@ func (d *fakeDisplay) Show(c display.Content) {
 	defer d.mu.Unlock()
 	d.shown = append(d.shown, c)
 }
-func (d *fakeDisplay) Release() { d.released = true }
-func (d *fakeDisplay) Claim()   { d.released = false }
-func (d *fakeDisplay) Retry()   {}
-func (d *fakeDisplay) Chime()   {}
+func (d *fakeDisplay) Release()        { d.released = true }
+func (d *fakeDisplay) Claim()          { d.released = false }
+func (d *fakeDisplay) Retry()          {}
+func (d *fakeDisplay) Chime()          {}
+func (d *fakeDisplay) SetPowerOff(int) {}
 func (d *fakeDisplay) Status() display.Status {
 	d.mu.Lock()
 	defer d.mu.Unlock()

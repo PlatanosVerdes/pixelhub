@@ -28,6 +28,8 @@ const (
 	cmdBrightness = 0x74
 	cmdWeather    = 0x5f
 	cmdTool       = 0x72
+	cmdPowerOff   = 0xab
+	cmdPowerOffAt = 0xac
 
 	viewClock      = 0x00
 	viewLight      = 0x01
@@ -163,6 +165,24 @@ func DateTime(t time.Time) []byte {
 		byte(t.Year() % 100), byte(t.Year() / 100), byte(t.Month()), byte(t.Day()),
 		byte(t.Hour()), byte(t.Minute()), byte(t.Second()), byte(t.Weekday()),
 	})
+}
+
+// PowerOff sets the display's auto power-off to minutes, 0 to never switch itself off.
+func PowerOff(minutes int) []byte {
+	return Message(cmdPowerOff, binary.LittleEndian.AppendUint16(nil, uint16(minutes)))
+}
+
+// PowerOffQuery asks for the auto power-off; ParsePowerOff reads the answer.
+func PowerOffQuery() []byte {
+	return Message(cmdPowerOffAt, nil)
+}
+
+func ParsePowerOff(frame []byte) (int, bool) {
+	cmd, ok := Ack(frame)
+	if !ok || cmd != cmdPowerOffAt || len(frame) < 6+2+3 {
+		return 0, false
+	}
+	return int(binary.LittleEndian.Uint16(frame[6:8])), true
 }
 
 func TimeFormat24() []byte {

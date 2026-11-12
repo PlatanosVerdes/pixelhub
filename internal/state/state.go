@@ -38,6 +38,8 @@ type State struct {
 	Clock display.View `json:"clock,omitzero"`
 	// Talk is how Mosko speaks.
 	Talk Talk `json:"talk,omitzero"`
+	// PowerOffMin is the display's auto power-off in minutes; 0, the default, keeps it on for good.
+	PowerOffMin int `json:"power_off_min,omitempty"`
 }
 
 // Talk tunes Mosko. LagMS is how much later the speaker sounds than the display moves, measured by
@@ -67,6 +69,9 @@ func (t Talk) PitchRatio() float64 {
 	}
 	return float64(t.Pitch) / 100
 }
+
+// maxPowerOff is the longest auto power-off the Divoom app offers, 12 hours.
+const maxPowerOff = 720
 
 var defaultClock = display.View{Mode: display.ModeClock, Color: "#ff1e28"}
 
@@ -236,10 +241,11 @@ func (s *State) ApplySettings(data []byte) error {
 		ReleaseFor     *Duration `json:"release_for"`
 		DefaultChannel *string   `json:"default_channel"`
 		// Music is replaced whole: leaving out its view means the cover.
-		Music *Music        `json:"music"`
-		Clock *display.View `json:"clock"`
-		Talk  *Talk         `json:"talk"`
-	}{Talk: &s.Talk, Location: &s.Location, Brightness: &s.Brightness, ReleaseFor: &s.ReleaseFor, DefaultChannel: &s.DefaultChannel}
+		Music       *Music        `json:"music"`
+		Clock       *display.View `json:"clock"`
+		Talk        *Talk         `json:"talk"`
+		PowerOffMin *int          `json:"power_off_min"`
+	}{PowerOffMin: &s.PowerOffMin, Talk: &s.Talk, Location: &s.Location, Brightness: &s.Brightness, ReleaseFor: &s.ReleaseFor, DefaultChannel: &s.DefaultChannel}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&settings); err != nil {
@@ -269,6 +275,9 @@ func (s State) Validate() error {
 	}
 	if lag := s.Talk.Lag(); lag < -2*time.Second || lag > 2*time.Second {
 		errs = append(errs, fmt.Errorf("talk.lag_ms: %d is outside -2000 to 2000", lag.Milliseconds()))
+	}
+	if s.PowerOffMin < 0 || s.PowerOffMin > maxPowerOff {
+		errs = append(errs, fmt.Errorf("power_off_min: %d is outside 0-%d", s.PowerOffMin, maxPowerOff))
 	}
 	if s.Talk.Pitch != 0 && (s.Talk.Pitch < 50 || s.Talk.Pitch > 200) {
 		errs = append(errs, fmt.Errorf("talk.pitch: %d is outside 50-200", s.Talk.Pitch))

@@ -35,6 +35,7 @@ func (nullDisplay) Release()               {}
 func (nullDisplay) Claim()                 {}
 func (nullDisplay) Retry()                 {}
 func (nullDisplay) Chime()                 {}
+func (nullDisplay) SetPowerOff(int)        {}
 func (nullDisplay) Status() display.Status { return display.Status{Address: "192.0.2.10:7777"} }
 
 type memorySaver struct{}

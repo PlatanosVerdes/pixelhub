@@ -82,6 +82,7 @@ type Session struct {
 	released    bool
 	releaseSent bool
 	status      display.Status
+	powerOff    *int
 
 	// said is the key of the last sound sent, so a repaint after a reconnect does not say it again.
 	said string
@@ -127,6 +128,16 @@ func (s *Session) Claim() {
 func (s *Session) Chime() {
 	if s.opt.Chime {
 		poke(s.chime)
+	}
+}
+
+func (s *Session) SetPowerOff(minutes int) {
+	s.mu.Lock()
+	changed := s.powerOff == nil || *s.powerOff != minutes
+	s.powerOff = &minutes
+	s.mu.Unlock()
+	if changed {
+		poke(s.paint)
 	}
 }
 
@@ -226,7 +237,7 @@ func (s *Session) serve(ctx context.Context) (upSince time.Time, err error) {
 	defer close(done)
 	go read(conn, events, done)
 
-	link := &link{Session: s, ctx: ctx, conn: conn, events: events}
+	link := &link{Session: s, ctx: ctx, conn: conn, events: events, powerOff: -1}
 	up, err := link.probe()
 	if err != nil {
 		return time.Time{}, err
@@ -249,6 +260,8 @@ type link struct {
 	events  chan event
 	painted int
 	shown   display.Content
+	// powerOff is what this link last set, -1 before it has set anything.
+	powerOff int
 }
 
 // probe never reads silence as "not connected": the bridge always answers, and connecting while the
@@ -301,6 +314,9 @@ func (l *link) hold() error {
 		if err := l.repaint(); err != nil {
 			return err
 		}
+		if err := l.keepPowerOff(); err != nil {
+			return err
+		}
 		select {
 		case <-l.ctx.Done():
 			return nil
@@ -337,8 +353,11 @@ func (l *link) hold() error {
 			if v, ok := divoom.ParseState(ev.frame); ok {
 				l.reported(v)
 			}
+			if m, ok := divoom.ParsePowerOff(ev.frame); ok {
+				l.powerOffReported(m)
+			}
 			if divoom.IsGreeting(ev.frame) {
-				l.painted, l.shown = 0, display.Content{}
+				l.painted, l.shown, l.powerOff = 0, display.Content{}, -1
 			}
 		}
 	}
@@ -402,6 +421,22 @@ func (l *link) repaint() error {
 		}
 	}
 	return nil
+}
+
+// keepPowerOff sets the auto power-off when it differs from what this link set, then reads it back.
+func (l *link) keepPowerOff() error {
+	l.mu.Lock()
+	want := l.Session.powerOff
+	l.mu.Unlock()
+	if want == nil || *want == l.powerOff {
+		return nil
+	}
+	l.powerOff = *want
+	if err := l.write(divoom.PowerOff(*want)); err != nil {
+		return err
+	}
+	time.Sleep(l.opt.ChunkPause)
+	return l.write(divoom.PowerOffQuery())
 }
 
 // encode paints c. A talking clip goes whole, once, to a bridge that can play it; otherwise its last face shows.
@@ -511,7 +546,7 @@ func (s *Session) setConnected(up bool) {
 	s.mu.Lock()
 	s.status.Connected = up
 	if !up {
-		s.status.Device = nil
+		s.status.Device, s.status.PowerOff = nil, nil
 	}
 	s.mu.Unlock()
 }
@@ -544,6 +579,13 @@ func (s *Session) batteryReported(level int) {
 	s.status.Battery, s.status.BatteryAt = &level, time.Now()
 	s.mu.Unlock()
 	s.log.Info("battery reported", "level", level)
+}
+
+func (s *Session) powerOffReported(minutes int) {
+	s.mu.Lock()
+	s.status.PowerOff = &minutes
+	s.mu.Unlock()
+	s.log.Info("auto power-off reported", "minutes", minutes)
 }
 
 func (s *Session) reported(v display.View) {
