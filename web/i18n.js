@@ -128,7 +128,7 @@ const es = {
   "Ambient rotation": "Rotación de ambiente",
   "Pictures, minutes": "Imágenes, minutos",
   "Clock, minutes": "Reloj, minutos",
-  "Either can be 0 to skip it. Together they must add up to 10 seconds or more.": "Cualquiera puede ser 0 para omitirlo. Juntos tienen que sumar 10 segundos o más.",
+  "Either can be 0 to skip it. Together they must add up to 5 seconds or more.": "Cualquiera puede ser 0 para omitirlo. Juntos tienen que sumar 5 segundos o más.",
   "Add scene": "Añadir escena",
   "No scenes. Ambient plays all day.": "Sin escenas. El ambiente suena todo el día.",
   "Scene {n}": "Escena {n}",

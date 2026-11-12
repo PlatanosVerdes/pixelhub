@@ -347,8 +347,8 @@ func (c Channel) validate() []error {
 		}
 	}
 	pictures, clock := time.Duration(c.Ambient.Pictures), time.Duration(c.Ambient.Clock)
-	if pictures < 0 || clock < 0 || pictures+clock < 10*time.Second {
-		errs = append(errs, fmt.Errorf("channel %s: ambient pictures and clock must add up to 10s or more", c.Name))
+	if pictures < 0 || clock < 0 || pictures+clock < 5*time.Second {
+		errs = append(errs, fmt.Errorf("channel %s: ambient pictures and clock must add up to 5s or more", c.Name))
 	}
 	for i, sc := range c.Scenes {
 		if sc.Name == "" {

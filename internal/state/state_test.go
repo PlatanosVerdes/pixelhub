@@ -259,7 +259,7 @@ func TestValidateRejects(t *testing.T) {
 		{"schedule to a missing channel", func(s *State) { s.Schedule[0].Channel = "gym" }, "schedule[0]"},
 		{"empty schedule range", func(s *State) { s.Schedule[0].To = s.Schedule[0].From }, "schedule[0]"},
 		{"empty source", func(s *State) { s.Channels[0].Sources = []string{""} }, "empty source"},
-		{"short playlist", func(s *State) { s.Channels[0].Ambient = Ambient{Pictures: Duration(5 * time.Second)} }, "10s or more"},
+		{"short playlist", func(s *State) { s.Channels[0].Ambient = Ambient{Pictures: Duration(4 * time.Second)} }, "5s or more"},
 		{"scene without name", func(s *State) { s.Channels[1].Scenes[0].Name = "" }, "no name"},
 		{"level out of range", func(s *State) { s.Brightness.Night = 120 }, "brightness.night"},
 		{"power-off too long", func(s *State) { s.PowerOffMin = 721 }, "power_off_min"},
