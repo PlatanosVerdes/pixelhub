@@ -8,9 +8,9 @@ import "time"
 func batteryBand(level int) (sprite string, every time.Duration, climbOnly bool) {
 	switch {
 	case level <= 0:
-		return "battery-dying", 5 * time.Minute, false
+		return "battery-dying", time.Minute, false
 	case level == 1:
-		return "battery-charge", 30 * time.Minute, false
+		return "battery-charge", 5 * time.Minute, false
 	case level >= 8:
 		return "battery-unplug", 15 * time.Minute, true
 	}

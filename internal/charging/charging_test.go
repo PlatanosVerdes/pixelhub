@@ -23,7 +23,8 @@ func TestWant(t *testing.T) {
 		last  Power
 		want  Power
 	}{
-		{"low", new(3), time.Minute, Off, On},
+		{"low", new(2), time.Minute, Off, On},
+		{"just above low keeps resting", new(3), time.Minute, Off, Off},
 		{"empty", new(0), 0, Unknown, On},
 		{"high", new(7), time.Minute, On, Off},
 		{"full", new(9), time.Minute, Unknown, Off},
@@ -85,8 +86,8 @@ func TestCharger(t *testing.T) {
 	}{
 		{"switches on low and off high, once each", []step{
 			{at: 0, level: new(5)},
-			{at: m, level: new(3), sent: []bool{true}},
-			{at: 2 * m, level: new(3), plugOn: true},
+			{at: m, level: new(2), sent: []bool{true}},
+			{at: 2 * m, level: new(2), plugOn: true},
 			{at: 3 * m, level: new(6), plugOn: true},
 			{at: 4 * m, level: new(7), plugOn: true, sent: []bool{false}},
 			{at: 5 * m, level: new(8)},
