@@ -259,7 +259,8 @@ func TestValidateRejects(t *testing.T) {
 		{"schedule to a missing channel", func(s *State) { s.Schedule[0].Channel = "gym" }, "schedule[0]"},
 		{"empty schedule range", func(s *State) { s.Schedule[0].To = s.Schedule[0].From }, "schedule[0]"},
 		{"empty source", func(s *State) { s.Channels[0].Sources = []string{""} }, "empty source"},
-		{"short playlist", func(s *State) { s.Channels[0].Ambient = Ambient{Pictures: Duration(5 * time.Second)} }, "10s or more"},
+		{"empty ambient", func(s *State) { s.Channels[0].Ambient = Ambient{} }, "pictures or clock"},
+		{"short playlist", func(s *State) { s.Channels[0].Ambient = Ambient{Pictures: Duration(4 * time.Second)} }, "5s or more"},
 		{"scene without name", func(s *State) { s.Channels[1].Scenes[0].Name = "" }, "no name"},
 		{"level out of range", func(s *State) { s.Brightness.Night = 120 }, "brightness.night"},
 		{"power-off too long", func(s *State) { s.PowerOffMin = 721 }, "power_off_min"},
@@ -434,5 +435,13 @@ func TestCloneKeepsPointersApart(t *testing.T) {
 	}
 	if *st.Volume != 40 || *st.Talk.LagMS != 100 {
 		t.Errorf("a change to the clone reached the original: volume %d, lag %d", *st.Volume, *st.Talk.LagMS)
+	}
+}
+
+func TestClockOnlyAmbientTakesAnyLength(t *testing.T) {
+	s := Defaults()
+	s.Channels[0].Ambient = Ambient{Clock: Duration(time.Second)}
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }
