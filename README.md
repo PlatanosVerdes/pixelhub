@@ -218,7 +218,7 @@ reopens it after 30 min without a report. PipeWire's own hands-free gateway answ
 bare `OK` and holds the same channel, so take the `hfp_ag` and `hsp_ag` roles off WirePlumber's
 `bluez5.roles` on that host. The macOS bridge cannot read it. pixelhub shows it in the status
 (`battery`, `battery_at`) and on the display, over anything picked by hand: at 1 a battery asking
-for the charger, then every 30 min while it stays there; at 0 a flashing skull every 5 min; at 8 or
+for the charger, then every 5 min while it stays there; at 0 a flashing skull every minute; at 8 or
 more a full battery with its plug out, on climbing there, then every 15 min while it stays. A battery
 already at 8 or more when pixelhub starts shows nothing until it drops below 8 and climbs back.
 
@@ -226,7 +226,7 @@ already at 8 or more when pixelhub starts shows nothing until it drops below 8 a
 
 With `PIXELHUB_PLUG_ID`, `PIXELHUB_PLUG_IP` and `PIXELHUB_PLUG_KEY` set, pixelhub switches the
 Tuya plug the display's charger hangs from (local protocol 3.3, TCP 6668, no cloud) to keep the
-battery around 30-80 %: on at level 3 or less, off at 7 or more, left as it is in between. With no
+battery around 30-80 %: on at level 2 or less, off at 7 or more, left as it is in between. With no
 reading for 2 hours (or none in the 2 hours since start) it switches the plug on so the display never
 dies. It reads the plug every minute, only writes when the wanted state changes, and switches back a
 plug turned the other way in the phone app at most every 10 min. Only the power switch (DP 1) is

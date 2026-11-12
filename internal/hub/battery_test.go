@@ -17,22 +17,22 @@ func TestBatteryWatch(t *testing.T) {
 		name     string
 		readings []reading
 	}{
-		{"charge me on reaching 1, every 30 min while there", []reading{
+		{"charge me on reaching 1, every 5 min while there", []reading{
 			{0, 3, ""},
 			{m, 2, ""},
 			{2 * m, 1, "battery-charge"},
 			{3 * m, 1, ""},
-			{31 * m, 1, ""},
-			{32 * m, 1, "battery-charge"},
-			{40 * m, 1, ""},
-			{62 * m, 1, "battery-charge"},
+			{6 * m, 1, ""},
+			{7 * m, 1, "battery-charge"},
+			{8 * m, 1, ""},
+			{12 * m, 1, "battery-charge"},
 		}},
-		{"dying at 0, every 5 min", []reading{
+		{"dying at 0, every minute", []reading{
 			{0, 1, "battery-charge"},
 			{m, 0, "battery-dying"},
-			{5 * m, 0, ""},
-			{6 * m, 0, "battery-dying"},
-			{11 * m, 0, "battery-dying"},
+			{m + 30*time.Second, 0, ""},
+			{2 * m, 0, "battery-dying"},
+			{3 * m, 0, "battery-dying"},
 		}},
 		{"stops when the level leaves the band", []reading{
 			{0, 0, "battery-dying"},

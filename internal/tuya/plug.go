@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -15,6 +16,11 @@ import (
 const Port = "6668"
 
 const timeout = 5 * time.Second
+
+var errUnreached = errors.New("reach the plug")
+
+// confirmAfter is the wait before checking a switch whose reply was cut off.
+var confirmAfter = time.Second
 
 // powerDP is the plug's on/off switch. Only this one is ever written: 27 is the light ring.
 const powerDP = "1"
@@ -68,7 +74,16 @@ func (p *Plug) SetPower(ctx context.Context, on bool) error {
 	if err != nil {
 		return err
 	}
-	return p.exchange(ctx, f, func(cmd uint32, _ []byte) (bool, error) { return cmd == cmdControl, nil })
+	err = p.exchange(ctx, f, func(cmd uint32, _ []byte) (bool, error) { return cmd == cmdControl, nil })
+	if err == nil || errors.Is(err, errUnreached) {
+		return err
+	}
+	// The plug sometimes switches and then drops the connection instead of answering.
+	time.Sleep(confirmAfter)
+	if now, qerr := p.Power(ctx); qerr == nil && now == on {
+		return nil
+	}
+	return err
 }
 
 func (p *Plug) request(cmd uint32, m message) (frame, error) {
@@ -97,7 +112,7 @@ func (p *Plug) exchange(ctx context.Context, f frame, done func(cmd uint32, data
 	defer cancel()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", p.Addr)
 	if err != nil {
-		return fmt.Errorf("reach the plug: %w", err)
+		return fmt.Errorf("%w: %w", errUnreached, err)
 	}
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Now()) })

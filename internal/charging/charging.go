@@ -13,7 +13,7 @@ import (
 
 const (
 	// The battery reads 0 (empty) to 9 (full); charging starts at or under onAt and stops at or over offAt.
-	onAt, offAt = 3, 7
+	onAt, offAt = 2, 7
 	// stale is how long without a reading before the plug goes on so the display never dies.
 	stale = 2 * time.Hour
 	every = time.Minute

@@ -140,6 +140,8 @@ type fakePlug struct {
 	on     bool
 	writes chan map[string]bool
 	silent bool
+	// mute switches without answering, as the real plug sometimes does.
+	mute bool
 }
 
 func newFakePlug(t *testing.T, on, silent bool) *fakePlug {
@@ -192,6 +194,9 @@ func (p *fakePlug) handle(conn net.Conn) {
 	case cmdControl:
 		p.writes <- m.DPS
 		p.on = m.DPS["1"]
+		if p.mute {
+			return
+		}
 		_, _ = conn.Write(append(state(0, cmdStatus, bytes.Clone(versionHeader)), frame{seq: f.seq, cmd: cmdControl, payload: []byte{0, 0, 0, 0}}.encode()...))
 	}
 }
@@ -229,5 +234,18 @@ func TestPlugUnreachable(t *testing.T) {
 	ln.Close()
 	if err := (&Plug{ID: testID, Addr: addr, Key: testKey}).SetPower(context.Background(), true); err == nil || !strings.Contains(err.Error(), "reach the plug") {
 		t.Errorf("SetPower on a closed port = %v", err)
+	}
+}
+
+func TestSetPowerConfirmsACutOffReply(t *testing.T) {
+	confirmAfter = 0
+	fake := newFakePlug(t, true, false)
+	fake.mute = true
+	p := &Plug{ID: testID, Addr: fake.ln.Addr().String(), Key: testKey}
+	if err := p.SetPower(context.Background(), false); err != nil {
+		t.Fatalf("a switch that took = %v", err)
+	}
+	if got := <-fake.writes; got["1"] {
+		t.Errorf("wrote %v, want off", got)
 	}
 }
