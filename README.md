@@ -202,8 +202,12 @@ speaker was not connected (it then plays nothing rather than on the machine's ow
 shows it as `speaker` in the status and the Mosko tab warns.
 
 A bridge that can read the display's battery sends `0x42` and the level, 0 (empty) to 9 (full).
-The display only reports it over hands-free, to a gateway that answers `AT+XAPL` as an iPhone; the
-macOS bridge cannot, an ESP32 bridge with hands-free can. pixelhub shows it in the status
+The display only reports it over hands-free, to a gateway that answers `AT+XAPL` as an iPhone.
+pixelbridge does with `-handsfree <channel>` (the display's Hands-Free unit, `sdptool search --bdaddr
+<mac> 0x111e`; 3 on the Timebox Evo): it opens that channel 5 s after the link, keeps it open, and
+reopens it after 30 min without a report. PipeWire's own hands-free gateway answers `AT+XAPL` with a
+bare `OK` and holds the same channel, so take the `hfp_ag` and `hsp_ag` roles off WirePlumber's
+`bluez5.roles` on that host. The macOS bridge cannot read it. pixelhub shows it in the status
 (`battery`, `battery_at`) and on the display: a full battery once when it gets there, a low one
 (1 or 0) at once and every hour while it stays low.
 

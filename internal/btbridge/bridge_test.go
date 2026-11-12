@@ -249,3 +249,57 @@ func TestBusyDoesNotUseATry(t *testing.T) {
 		}
 	}
 }
+
+// fakeHandsFree is the display's hands-free unit: it says its lines, then keeps the channel open.
+type fakeHandsFree struct {
+	io.Reader
+	w *io.PipeWriter
+}
+
+func (f *fakeHandsFree) Write(p []byte) (int, error) { return len(p), nil }
+func (f *fakeHandsFree) Close() error                { return f.w.Close() }
+
+func TestHandsFreeBattery(t *testing.T) {
+	t.Parallel()
+	lr, lw := io.Pipe()
+	link := &fakeLink{Reader: lr, w: lw, written: make(chan []byte, 8)}
+	hr, hw := io.Pipe()
+	hf := &fakeHandsFree{Reader: hr, w: hw}
+	go hw.Write([]byte("AT+XAPL=ABCD-1234-0100,1\rAT+IPHONEACCEV=1,1,8\r"))
+	dialed := make(chan byte, 4)
+	b := New(func(_ [6]byte, ch byte) (io.ReadWriteCloser, error) {
+		dialed <- ch
+		if ch == 3 {
+			return hf, nil
+		}
+		return link, nil
+	}, slog.New(slog.DiscardHandler))
+	b.GreetAfter, b.HandsFree, b.HandsFreeAfter = time.Hour, 3, 10*time.Millisecond
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go b.Serve(ln)
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Write([]byte{opConnect, 0x01, 0x12, 0x23, 0x45, 0x56, 0x67, 0x01})
+	c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	got := make([]byte, 2)
+	if _, err := io.ReadFull(c, got); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, []byte{opBattery, 8}) {
+		t.Fatalf("got %x, want the battery at 8", got)
+	}
+	if first, second := <-dialed, <-dialed; first != 1 || second != 3 {
+		t.Errorf("dialed channels %d then %d, want the link (1) then hands-free (3)", first, second)
+	}
+	c.Write([]byte{opRelease, 0x01, 0x12, 0x23, 0x45, 0x56, 0x67})
+	if _, err := hr.Read(make([]byte, 1)); err == nil {
+		t.Error("hands-free still open after the release")
+	}
+}

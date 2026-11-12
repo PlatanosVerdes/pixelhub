@@ -13,6 +13,7 @@ import (
 
 func main() {
 	listen := flag.String("listen", "127.0.0.1:7777", "address pixelhub connects to")
+	handsFree := flag.Uint("handsfree", 0, "the display's hands-free RFCOMM channel, to read its battery; 0 for none")
 	flag.Parse()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	if os.Getenv("PIXELHUB_LOG_JSON") != "" {
@@ -25,6 +26,7 @@ func main() {
 	}
 	log.Info("listening", "address", ln.Addr())
 	bridge := btbridge.New(dialRFCOMM, log)
+	bridge.HandsFree = byte(*handsFree)
 	if sp := newSpeaker(log); sp != nil {
 		bridge.Chime, bridge.Say = sp.chime(), sp.say
 	}

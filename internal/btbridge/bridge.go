@@ -10,8 +10,11 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/PlatanosVerdes/pixelhub/internal/hfp"
 )
 
 const (
@@ -23,6 +26,8 @@ const (
 	opSay = 0x7d
 	// opSpeaker tells pixelhub, after a talk, whether the display's speaker played it (1) or was not there (0).
 	opSpeaker = 0x41
+	// opBattery tells pixelhub the display's battery level, 0 (empty) to 9 (full).
+	opBattery = 0x42
 	maxSay    = 8 << 20
 	cmdBright = 0x74
 	linkDown  = 0x96
@@ -50,6 +55,12 @@ type Bridge struct {
 	// Say, when set, plays wav on that speaker after a wait, until ctx ends; ErrNoSpeaker when the
 	// display's speaker is not connected.
 	Say func(ctx context.Context, mac [6]byte, wav []byte, after time.Duration) error
+	// HandsFree is the display's hands-free channel, 0 for none. While the link is up the bridge holds
+	// it open as an iPhone would, which is what makes the display report its battery.
+	HandsFree byte
+	// HandsFreeAfter is the wait after the link comes up, HandsFreeRetry the wait after hands-free fails
+	// or closes; a channel silent for HandsFreeRefresh is reopened, since some displays only report on connect.
+	HandsFreeAfter, HandsFreeRetry, HandsFreeRefresh time.Duration
 
 	ops     chan func()
 	cl      net.Conn
@@ -59,6 +70,7 @@ type Bridge struct {
 	greeted bool
 	mac     [6]byte
 	talk    *talk
+	hfStop  context.CancelFunc
 }
 
 // talk is a sound playing with its faces still to paint; anything else painted stops it.
@@ -73,7 +85,10 @@ type talk struct {
 func New(dial Dialer, log *slog.Logger) *Bridge {
 	// One try: a failed RFCOMM connect takes about 30 s, already as long as pixelhub waits for the
 	// greeting, and pixelhub retries with its own backoff; piled-up tries switched the display off.
-	return &Bridge{Dial: dial, Log: log, Pace: 15 * time.Millisecond, GreetAfter: 2 * time.Second, Tries: 1, Retry: 2 * time.Second}
+	return &Bridge{
+		Dial: dial, Log: log, Pace: 15 * time.Millisecond, GreetAfter: 2 * time.Second, Tries: 1, Retry: 2 * time.Second,
+		HandsFreeAfter: 5 * time.Second, HandsFreeRetry: 5 * time.Minute, HandsFreeRefresh: 30 * time.Minute,
+	}
 }
 
 // Serve takes one client at a time from ln, a new one replacing the last, until ln closes.
@@ -314,6 +329,11 @@ func (b *Bridge) linkUp(lk io.ReadWriteCloser) {
 	gen := b.gen
 	b.Log.Info("link up")
 	go b.readLink(lk, gen)
+	if b.HandsFree != 0 {
+		ctx, stop := context.WithCancel(context.Background())
+		b.hfStop = stop
+		go b.handsFree(ctx, b.mac, gen)
+	}
 	time.AfterFunc(b.GreetAfter, func() {
 		b.ops <- func() {
 			if b.gen == gen && b.lk != nil && !b.greeted {
@@ -349,6 +369,7 @@ func (b *Bridge) readLink(lk io.ReadWriteCloser, gen int) {
 				if b.gen == gen && b.lk != nil {
 					b.Log.Info("link down", "err", err)
 					b.stopTalk()
+					b.stopHandsFree()
 					b.lk.Close()
 					b.lk = nil
 					b.reply([]byte{linkDown})
@@ -377,11 +398,78 @@ func (b *Bridge) forward(frame []byte) {
 
 func (b *Bridge) close() {
 	b.stopTalk()
+	b.stopHandsFree()
 	if b.lk != nil {
 		b.gen++
 		b.lk.Close()
 		b.lk = nil
 	}
+}
+
+func (b *Bridge) stopHandsFree() {
+	if b.hfStop != nil {
+		b.hfStop()
+		b.hfStop = nil
+	}
+}
+
+// handsFree keeps the display's hands-free channel open until ctx ends, passing on each battery level.
+// Failed connects wait minutes, not seconds: piled-up Bluetooth connects have switched the display off.
+func (b *Bridge) handsFree(ctx context.Context, mac [6]byte, gen int) {
+	wait := b.HandsFreeAfter
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		wait = b.HandsFreeRetry
+		hf, err := b.Dial(mac, b.HandsFree)
+		if err != nil {
+			b.Log.Info("hands-free not opened", "err", err, "retry_in", wait.String())
+			continue
+		}
+		b.Log.Info("hands-free open")
+		err = b.serveHandsFree(ctx, hf, gen)
+		if ctx.Err() != nil {
+			return
+		}
+		b.Log.Info("hands-free closed", "err", err, "retry_in", wait.String())
+	}
+}
+
+func (b *Bridge) serveHandsFree(ctx context.Context, hf io.ReadWriteCloser, gen int) error {
+	var heard atomic.Int64
+	heard.Store(time.Now().UnixNano())
+	stop := context.AfterFunc(ctx, func() { hf.Close() })
+	defer stop()
+	refresh := time.NewTicker(b.HandsFreeRefresh)
+	defer refresh.Stop()
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case <-refresh.C:
+				if time.Since(time.Unix(0, heard.Load())) >= b.HandsFreeRefresh {
+					hf.Close()
+					return
+				}
+			}
+		}
+	}()
+	defer hf.Close()
+	return hfp.Serve(hf, time.Now, func(level int) {
+		heard.Store(time.Now().UnixNano())
+		b.ops <- func() {
+			if b.gen == gen {
+				b.Log.Info("battery", "level", level)
+				b.reply([]byte{opBattery, byte(level)})
+			}
+		}
+	})
 }
 
 // ErrNoSpeaker is a sound with nowhere to play: the display is linked but its speaker is not.
