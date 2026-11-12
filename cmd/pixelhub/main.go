@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/PlatanosVerdes/pixelhub/internal/bridge"
 	"github.com/PlatanosVerdes/pixelhub/internal/calendar"
+	"github.com/PlatanosVerdes/pixelhub/internal/charging"
 	"github.com/PlatanosVerdes/pixelhub/internal/config"
 	"github.com/PlatanosVerdes/pixelhub/internal/demo"
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
@@ -31,6 +33,7 @@ import (
 	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
 	"github.com/PlatanosVerdes/pixelhub/internal/talk"
+	"github.com/PlatanosVerdes/pixelhub/internal/tuya"
 	"github.com/PlatanosVerdes/pixelhub/internal/weather"
 )
 
@@ -144,6 +147,11 @@ func serve(ctx context.Context, cfg config.Config, sprites *sprite.Library, log 
 		return err
 	}
 	go session.Run(ctx)
+	if cfg.Plug != nil {
+		charger := charging.New(&tuya.Plug{ID: cfg.Plug.ID, Addr: net.JoinHostPort(cfg.Plug.IP, tuya.Port), Key: cfg.Plug.Key}, session, log)
+		h.Plug = charger
+		go charger.Run(ctx)
+	}
 	go h.Run(ctx)
 	go music.Run(ctx)
 	go station.Run(ctx)

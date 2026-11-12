@@ -95,6 +95,9 @@ The environment only says where the hardware is; everything else is state, edite
 | `PIXELHUB_CHIME` | | `1` asks pixelbridge for a chime when a calendar event starts, except 23:00-08:00, and lets Mosko talk; the ESP32 bridge cannot play sound |
 | `PIXELHUB_SPEECH` | | A [Wyoming](https://github.com/rhasspy/wyoming) text-to-speech server's `host:port`, such as `wyoming-piper`, for Mosko to read text |
 | `PIXELHUB_VOICE` | | One of that server's voices, e.g. `es_ES-davefx-medium`; its default otherwise |
+| `PIXELHUB_PLUG_ID` | | The Tuya plug the display charges from, see [Charging](#charging); all three plug variables or none |
+| `PIXELHUB_PLUG_IP` | | That plug's IP address |
+| `PIXELHUB_PLUG_KEY` | | That plug's 16-character local key |
 | `TZ` | | Time zone for scenes, the schedule and the sun, e.g. `Europe/London` |
 
 `state.json` is written atomically. A fresh install has one channel, `clock`, that shows every alert
@@ -214,8 +217,22 @@ pixelbridge does with `-handsfree <channel>` (the display's Hands-Free unit, `sd
 reopens it after 30 min without a report. PipeWire's own hands-free gateway answers `AT+XAPL` with a
 bare `OK` and holds the same channel, so take the `hfp_ag` and `hsp_ag` roles off WirePlumber's
 `bluez5.roles` on that host. The macOS bridge cannot read it. pixelhub shows it in the status
-(`battery`, `battery_at`) and on the display: a full battery once when it gets there, a low one
-(1 or 0) at once and every hour while it stays low.
+(`battery`, `battery_at`) and on the display, over anything picked by hand: at 1 a battery asking
+for the charger, then every 30 min while it stays there; at 0 a flashing skull every 5 min; at 8 or
+more a full battery with its plug out, on climbing there, then every 15 min while it stays. A battery
+already at 8 or more when pixelhub starts shows nothing until it drops below 8 and climbs back.
+
+### Charging
+
+With `PIXELHUB_PLUG_ID`, `PIXELHUB_PLUG_IP` and `PIXELHUB_PLUG_KEY` set, pixelhub switches the
+Tuya plug the display's charger hangs from (local protocol 3.3, TCP 6668, no cloud) to keep the
+battery around 30-80 %: on at level 3 or less, off at 7 or more, left as it is in between. With no
+reading for 2 hours (or none in the 2 hours since start) it switches the plug on so the display never
+dies. It reads the plug every minute, only writes when the wanted state changes, and switches back a
+plug turned the other way in the phone app at most every 10 min. Only the power switch (DP 1) is
+ever written. An unreachable plug is logged once and retried every minute. The status shows it as
+`plug` (`on`, `at` when last read, `error` while it cannot be reached). The ID and local key come
+from the Tuya developer platform or `tinytuya wizard`; give the plug a fixed IP on the router.
 
 ### Room sensors
 
@@ -290,7 +307,7 @@ The container needs a writable `/tmp` for ffmpeg.
 
 ## Sprites
 
-Built in: `heart`, `heartbeat`, `moon`, `sun`, `sunrise`, `lunch`, `coffee`, `zzz`, `alert`, `check`.
+Built in: `heart`, `heartbeat`, `moon`, `sun`, `sunrise`, `lunch`, `coffee`, `zzz`, `alert`, `check`, and the battery's `battery-charge`, `battery-dying` and `battery-unplug`.
 Any `/data/sprites/<name>.gif` or `.png` adds a sprite or replaces a built-in one of the same name;
 they are read at start. Pictures that are not 16x16 are resized (nearest neighbour). Animations keep
 their first 60 frames, fewer if they would not fit in 256 chunks.

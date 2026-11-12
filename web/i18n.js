@@ -372,6 +372,8 @@ const es = {
   "Amount": "Cantidad",
   "seconds": "segundos",
   "Battery": "Batería",
+  "Charger": "Cargador",
+  "Plug unreachable": "Enchufe sin conexión",
   "Auto power-off": "Apagado automático",
   "Never": "Nunca",
   "Volume": "Volumen",

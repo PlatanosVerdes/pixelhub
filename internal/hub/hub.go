@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/PlatanosVerdes/pixelhub/internal/charging"
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
 	"github.com/PlatanosVerdes/pixelhub/internal/sprite"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
@@ -39,9 +40,6 @@ const (
 	wakeLevel, wakeFor, wakeEvery = 5, 10 * time.Second, 30 * time.Second
 	// batteryPriority is above anything picked by hand: a dying display is worth knowing.
 	batteryPriority = 8
-	// The battery is full at the top of the 0-9 scale the display reports, and low at 1 or 0.
-	batteryFull, batteryLowLevel = 9, 1
-	batteryEvery                 = time.Hour
 	// showPriority puts something picked by hand over routine alerts but under urgent ones.
 	showPriority = 5
 	// talkPriority speaks over what was picked by hand, which would otherwise hold it back for minutes.
@@ -96,6 +94,8 @@ type Status struct {
 	Showing        string     `json:"showing"`
 	Brightness     int        `json:"brightness"`
 	PreviewVersion int        `json:"preview_version"`
+	// Plug is the charger's plug, when pixelhub switches it.
+	Plug *charging.Status `json:"plug,omitempty"`
 }
 
 type channel struct {
@@ -130,6 +130,8 @@ type Hub struct {
 	Weather Weather
 	// Lists, when set before Run, lets ambient rules and scenes show a list of pictures.
 	Lists ListPicker
+	// Plug, when set, adds the charger's plug to the status.
+	Plug interface{ Status() *charging.Status }
 
 	// write serialises every change to the state and the picture folders, so the disk work runs
 	// outside mu and never holds up alerts or the display tick.
@@ -140,9 +142,8 @@ type Hub struct {
 	lightAt, soundAt    time.Time
 	wokeAt, soundSeenAt time.Time
 
-	// battery is the last level seen and when the low one was last announced; only update uses it.
-	battery    int
-	batteryLow time.Time
+	// battery tells when to show the battery; only update uses it.
+	battery batteryWatch
 
 	// idle is when the picked tool was first seen at zero, and which tool that was.
 	idle     time.Time
@@ -514,6 +515,9 @@ func (h *Hub) Status() Status {
 		Status: h.display.Status(), Layer: h.layer, Showing: h.shown.Name, Brightness: h.shown.Brightness,
 		PreviewVersion: h.previewVersion,
 	}
+	if h.Plug != nil {
+		s.Plug = h.Plug.Status()
+	}
 	s.Channel, s.ChannelReason = h.activeChannel(h.now())
 	if h.override != nil && !h.override.until.IsZero() {
 		s.OverrideUntil = new(h.override.until)
@@ -705,38 +709,6 @@ func (h *Hub) toolDone(now time.Time) bool {
 		return false
 	}
 	return now.Sub(since) >= idleTool
-}
-
-// watchBattery puts a battery picture on screen when the level reaches full, and when it gets low,
-// again every hour while it stays low. A level already full at start is not news.
-func (h *Hub) watchBattery(now time.Time) {
-	reported := h.display.Status().Battery
-	if reported == nil {
-		return
-	}
-	level, last := *reported, h.battery
-	h.battery = level + 1 // 0 means none seen yet
-	sprite := ""
-	switch {
-	case level >= batteryFull && last != 0 && last-1 < batteryFull:
-		sprite = "battery-full"
-	case level <= batteryLowLevel && (h.batteryLow.IsZero() || now.Sub(h.batteryLow) >= batteryEvery):
-		sprite = "battery-low"
-		h.batteryLow = now
-	case level > batteryLowLevel:
-		h.batteryLow = time.Time{}
-	}
-	if sprite == "" {
-		return
-	}
-	c, ok := h.sprites.Get(sprite)
-	if !ok {
-		return
-	}
-	h.log.Info("battery alert", "level", level, "sprite", sprite)
-	h.mu.Lock()
-	h.alerts.push(Alert{Content: c, Priority: batteryPriority, Duration: 10 * time.Second, Source: "battery"}, now)
-	h.mu.Unlock()
 }
 
 // Sense records what the room's sensors report: light from 0 (dark) to 255, or a sound.

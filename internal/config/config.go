@@ -20,6 +20,12 @@ type Config struct {
 	// Speech is a Wyoming text-to-speech server's host:port, Voice one of its voices; both optional.
 	Speech string
 	Voice  string
+	// Plug is the Tuya plug the display charges from, nil when charging is not managed.
+	Plug *Plug
+}
+
+type Plug struct {
+	ID, IP, Key string
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -59,5 +65,21 @@ func Load(getenv func(string) string) (Config, error) {
 	if c.Port, err = strconv.Atoi(env("PIXELHUB_PORT", "8000")); err != nil || c.Port < 1 || c.Port > 65535 {
 		errs = append(errs, fmt.Errorf("PIXELHUB_PORT: want a port number"))
 	}
-	return c, errors.Join(errs...)
+	c.Plug, err = loadPlug(getenv)
+	return c, errors.Join(append(errs, err)...)
+}
+
+func loadPlug(getenv func(string) string) (*Plug, error) {
+	p := Plug{ID: getenv("PIXELHUB_PLUG_ID"), IP: getenv("PIXELHUB_PLUG_IP"), Key: getenv("PIXELHUB_PLUG_KEY")}
+	switch {
+	case p == Plug{}:
+		return nil, nil
+	case p.ID == "" || p.IP == "" || p.Key == "":
+		return nil, errors.New("PIXELHUB_PLUG_ID, PIXELHUB_PLUG_IP, PIXELHUB_PLUG_KEY: set all three to manage charging, or none")
+	case net.ParseIP(p.IP) == nil:
+		return nil, errors.New("PIXELHUB_PLUG_IP: want the plug's IP address like 192.0.2.20")
+	case len(p.Key) != 16:
+		return nil, errors.New("PIXELHUB_PLUG_KEY: want the plug's 16-character local key")
+	}
+	return &p, nil
 }
