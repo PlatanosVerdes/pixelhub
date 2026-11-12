@@ -1705,6 +1705,9 @@ class ConnectionCard extends LitElement {
         <dt>${t("Last answer")}</dt><dd>${ago(s.last_ack)}</dd>
         <dt>${t("Battery")}</dt><dd>${s.battery === undefined ? html`<span class="muted small">${t("This bridge cannot read it")}</span>`
           : html`${Math.min(100, (s.battery + 1) * 10)} %<span class="muted small">${ago(s.battery_at)}</span>`}</dd>
+        ${s.plug ? html`<dt>${t("Charger")}</dt><dd title=${s.plug.error ?? ""}>${s.plug.error
+          ? html`<span class="muted small">${t("Plug unreachable")}</span>`
+          : html`${s.plug.on ? t("On") : t("Off")}<span class="muted small">${ago(s.plug.at)}</span>`}</dd>` : nothing}
         ${s.volume !== undefined ? html`<dt>${t("Volume")}</dt><dd>${s.volume} %</dd>` : nothing}
         ${s.power_off_min !== undefined ? html`<dt>${t("Auto power-off")}</dt><dd>${powerOffLabel(s.power_off_min)}</dd>` : nothing}
         ${s.light !== undefined ? html`<dt>${t("Room light")}</dt><dd>${Math.round(s.light / 2.55)} %<span class="muted small">${ago(s.light_at)}</span></dd>` : nothing}

@@ -125,7 +125,7 @@ func newHub(t *testing.T, stateJSON string, ambient ambientDir) (*Hub, *fakeDisp
 		}
 	}
 	d := &fakeDisplay{}
-	h := New(d, st, &memorySaver{}, sprites{"zzz": true, "lunch": true, "heart": true, "battery-full": true, "battery-low": true}, ambient, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := New(d, st, &memorySaver{}, sprites{"zzz": true, "lunch": true, "heart": true, "battery-charge": true, "battery-dying": true, "battery-unplug": true}, ambient, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	now := friday(12, 0)
 	h.now = func() time.Time { return now }
 	return h, d, &now
@@ -782,24 +782,15 @@ func TestBatteryAlerts(t *testing.T) {
 		}
 		return ""
 	}
-	if got := report(9); got != "" {
-		t.Errorf("full when first seen is not news: %s", got)
+	if got := report(2); got != "" {
+		t.Errorf("between the bands: %s", got)
 	}
-	if got := report(8); got != "" {
-		t.Errorf("draining: %s", got)
+	if got := report(1); got != "battery-charge" {
+		t.Errorf("at 1: %q", got)
 	}
-	if got := report(9); got != "battery-full" {
-		t.Errorf("charged back to full: %q", got)
-	}
-	if got := report(1); got != "battery-low" {
-		t.Errorf("low: %q", got)
-	}
-	if got := report(1); got != "" {
-		t.Errorf("still low 20 s later shows again: %q", got)
-	}
-	*now = now.Add(time.Hour)
-	if got := report(0); got != "battery-low" {
-		t.Errorf("still low an hour later: %q", got)
+	*now = now.Add(time.Minute)
+	if got := report(0); got != "battery-dying" {
+		t.Errorf("at 0: %q", got)
 	}
 }
 
