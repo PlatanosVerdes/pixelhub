@@ -6,7 +6,7 @@ import (
 	"io/fs"
 )
 
-//go:embed index.html app.js i18n.js faces.js favicon.svg vendor
+//go:embed index.html app.js i18n.js faces.js favicon.svg apple-touch-icon.png vendor
 var files embed.FS
 
 // FS is the UI's files, rooted at index.html.

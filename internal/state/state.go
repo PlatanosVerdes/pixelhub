@@ -40,6 +40,8 @@ type State struct {
 	Talk Talk `json:"talk,omitzero"`
 	// PowerOffMin is the display's auto power-off in minutes; 0, the default, keeps it on for good.
 	PowerOffMin int `json:"power_off_min,omitempty"`
+	// Volume is the speaker's volume in percent; unset leaves the display's own.
+	Volume *int `json:"volume,omitempty"`
 }
 
 // Talk tunes Mosko. LagMS is how much later the speaker sounds than the display moves, measured by
@@ -245,7 +247,8 @@ func (s *State) ApplySettings(data []byte) error {
 		Clock       *display.View `json:"clock"`
 		Talk        *Talk         `json:"talk"`
 		PowerOffMin *int          `json:"power_off_min"`
-	}{PowerOffMin: &s.PowerOffMin, Talk: &s.Talk, Location: &s.Location, Brightness: &s.Brightness, ReleaseFor: &s.ReleaseFor, DefaultChannel: &s.DefaultChannel}
+		Volume      **int         `json:"volume"`
+	}{Volume: &s.Volume, PowerOffMin: &s.PowerOffMin, Talk: &s.Talk, Location: &s.Location, Brightness: &s.Brightness, ReleaseFor: &s.ReleaseFor, DefaultChannel: &s.DefaultChannel}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&settings); err != nil {
@@ -275,6 +278,9 @@ func (s State) Validate() error {
 	}
 	if lag := s.Talk.Lag(); lag < -2*time.Second || lag > 2*time.Second {
 		errs = append(errs, fmt.Errorf("talk.lag_ms: %d is outside -2000 to 2000", lag.Milliseconds()))
+	}
+	if s.Volume != nil && (*s.Volume < 0 || *s.Volume > 100) {
+		errs = append(errs, fmt.Errorf("volume: %d is outside 0-100", *s.Volume))
 	}
 	if s.PowerOffMin < 0 || s.PowerOffMin > maxPowerOff {
 		errs = append(errs, fmt.Errorf("power_off_min: %d is outside 0-%d", s.PowerOffMin, maxPowerOff))

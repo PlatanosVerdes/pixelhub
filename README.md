@@ -123,7 +123,7 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `POST /api/release`, `POST /api/claim` | Let the phone app have the display, and take it back (it comes back by itself after `release_for`) |
 | `POST /api/reconnect` | Look for the display now: the wait between connect attempts grows to a minute while it is away |
 | `GET /api/state` | Everything that is saved |
-| `PUT /api/settings` | Any of `location`, `brightness`, `release_for`, `default_channel`, `music`, `clock`, `power_off_min`; fields left out, nested ones too, stay as they are (`music` and `clock` are replaced whole) |
+| `PUT /api/settings` | Any of `location`, `brightness`, `release_for`, `default_channel`, `music`, `clock`, `power_off_min`, `volume`; fields left out, nested ones too, stay as they are (`music` and `clock` are replaced whole) |
 | `GET /api/weather` | The weather the clock shows: `celsius`, `sky`, when it was read, and an `error` if the last read failed |
 | `GET /api/channels`, `POST /api/channels` | List, create |
 | `PUT /api/channels/{name}` | Replace; a different `name` renames it, its schedule slots, its pictures and an override on it. A missing `name` or `ambient` keeps the channel's own |
@@ -194,6 +194,12 @@ pictures with 3 of the clock.
 `power_off_min` in the settings is the display's own auto power-off, in minutes (0, the default, never; up to
 720). pixelhub sets it on every connect and when it changes, then reads it back: the status shows what
 the display reports as `power_off_min`. The Divoom app sets the same value, so a change there lasts until the next connect.
+
+### Volume
+
+`volume` in the settings is the speaker's volume in percent; pixelhub sends it as the display's 0-15
+steps on every connect and when it changes. Unset, the display keeps its own. Either way the status
+shows the volume the display reports, read once per connection.
 
 ### Battery
 

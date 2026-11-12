@@ -136,6 +136,10 @@ func (f *fakeBridge) handle(conn net.Conn, op []byte) {
 			conn.Write([]byte{opLinkDown})
 			return
 		}
+		if cmd == 0x09 {
+			conn.Write(divoom.Message(0x04, []byte{cmd, 0x55, 0x08}))
+			return
+		}
 		f.ops <- fmt.Sprintf("frame:%02x", cmd)
 		conn.Write(divoom.Message(0x04, []byte{cmd, 0x55, 0x00}))
 	}
@@ -418,4 +422,25 @@ func TestRetryCutsTheWaitShort(t *testing.T) {
 	f.expectQuiet(300 * time.Millisecond)
 	s.Retry()
 	f.expect("frame:74", "frame:44", "frame:74")
+}
+
+func TestVolumeIsReadAndKept(t *testing.T) {
+	t.Parallel()
+	f := newFakeBridge(t, true)
+	s := startSession(t, f, new(picture(1)))
+	f.expect("frame:74", "frame:44", "frame:74")
+	waitFor(t, func() bool { v := s.Status().Volume; return v != nil && *v == 53 })
+	s.SetVolume(100)
+	f.expect("frame:08")
+}
+
+func waitFor(t *testing.T, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for !ok() {
+		if time.Now().After(deadline) {
+			t.Fatal("condition not met in 2 s")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

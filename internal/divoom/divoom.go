@@ -29,6 +29,10 @@ const (
 	cmdWeather    = 0x5f
 	cmdTool       = 0x72
 	cmdPowerOff   = 0xab
+	cmdVolume     = 0x08
+	cmdVolumeAt   = 0x09
+	// maxVolume is the display's loudest step; it clamps anything above.
+	maxVolume     = 15
 	cmdPowerOffAt = 0xac
 
 	viewClock      = 0x00
@@ -184,6 +188,26 @@ func ParsePowerOff(frame []byte) (int, bool) {
 	}
 	return int(binary.LittleEndian.Uint16(frame[6:8])), true
 }
+
+// Volume sets the speaker's volume from a percentage.
+func Volume(percent int) []byte {
+	return Message(cmdVolume, []byte{byte((clampPercent(percent)*maxVolume + 50) / 100)})
+}
+
+func VolumeQuery() []byte {
+	return Message(cmdVolumeAt, nil)
+}
+
+// ParseVolume reads the answer to VolumeQuery as a percentage.
+func ParseVolume(frame []byte) (int, bool) {
+	cmd, ok := Ack(frame)
+	if !ok || cmd != cmdVolumeAt || len(frame) < 6+1+3 {
+		return 0, false
+	}
+	return (min(int(frame[6]), maxVolume)*100 + maxVolume/2) / maxVolume, true
+}
+
+func clampPercent(p int) int { return min(max(p, 0), 100) }
 
 func TimeFormat24() []byte {
 	return Message(cmdTimeFormat, []byte{0x01})

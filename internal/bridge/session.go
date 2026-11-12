@@ -83,6 +83,7 @@ type Session struct {
 	releaseSent bool
 	status      display.Status
 	powerOff    *int
+	volume      *int
 
 	// said is the key of the last sound sent, so a repaint after a reconnect does not say it again.
 	said string
@@ -135,6 +136,16 @@ func (s *Session) SetPowerOff(minutes int) {
 	s.mu.Lock()
 	changed := s.powerOff == nil || *s.powerOff != minutes
 	s.powerOff = &minutes
+	s.mu.Unlock()
+	if changed {
+		poke(s.paint)
+	}
+}
+
+func (s *Session) SetVolume(percent int) {
+	s.mu.Lock()
+	changed := s.volume == nil || *s.volume != percent
+	s.volume = &percent
 	s.mu.Unlock()
 	if changed {
 		poke(s.paint)
@@ -237,7 +248,7 @@ func (s *Session) serve(ctx context.Context) (upSince time.Time, err error) {
 	defer close(done)
 	go read(conn, events, done)
 
-	link := &link{Session: s, ctx: ctx, conn: conn, events: events, powerOff: -1}
+	link := &link{Session: s, ctx: ctx, conn: conn, events: events, powerOff: -1, volume: -1}
 	up, err := link.probe()
 	if err != nil {
 		return time.Time{}, err
@@ -262,6 +273,9 @@ type link struct {
 	shown   display.Content
 	// powerOff is what this link last set, -1 before it has set anything.
 	powerOff int
+	// volume is what this link last set, -1 before; volumeAsked says the display was asked for its own.
+	volume      int
+	volumeAsked bool
 }
 
 // probe never reads silence as "not connected": the bridge always answers, and connecting while the
@@ -317,6 +331,9 @@ func (l *link) hold() error {
 		if err := l.keepPowerOff(); err != nil {
 			return err
 		}
+		if err := l.keepVolume(); err != nil {
+			return err
+		}
 		select {
 		case <-l.ctx.Done():
 			return nil
@@ -356,8 +373,11 @@ func (l *link) hold() error {
 			if m, ok := divoom.ParsePowerOff(ev.frame); ok {
 				l.powerOffReported(m)
 			}
+			if v, ok := divoom.ParseVolume(ev.frame); ok {
+				l.volumeReported(v)
+			}
 			if divoom.IsGreeting(ev.frame) {
-				l.painted, l.shown, l.powerOff = 0, display.Content{}, -1
+				l.painted, l.shown, l.powerOff, l.volume, l.volumeAsked = 0, display.Content{}, -1, -1, false
 			}
 		}
 	}
@@ -437,6 +457,25 @@ func (l *link) keepPowerOff() error {
 	}
 	time.Sleep(l.opt.ChunkPause)
 	return l.write(divoom.PowerOffQuery())
+}
+
+// keepVolume sets the volume when it differs from what this link set, and reads the display's own
+// once per link even when pixelhub leaves it alone.
+func (l *link) keepVolume() error {
+	l.mu.Lock()
+	want := l.Session.volume
+	l.mu.Unlock()
+	if want != nil && *want != l.volume {
+		l.volume = *want
+		if err := l.write(divoom.Volume(*want)); err != nil {
+			return err
+		}
+		time.Sleep(l.opt.ChunkPause)
+	} else if l.volumeAsked {
+		return nil
+	}
+	l.volumeAsked = true
+	return l.write(divoom.VolumeQuery())
 }
 
 // encode paints c. A talking clip goes whole, once, to a bridge that can play it; otherwise its last face shows.
@@ -546,7 +585,7 @@ func (s *Session) setConnected(up bool) {
 	s.mu.Lock()
 	s.status.Connected = up
 	if !up {
-		s.status.Device, s.status.PowerOff = nil, nil
+		s.status.Device, s.status.PowerOff, s.status.Volume = nil, nil, nil
 	}
 	s.mu.Unlock()
 }
@@ -586,6 +625,12 @@ func (s *Session) powerOffReported(minutes int) {
 	s.status.PowerOff = &minutes
 	s.mu.Unlock()
 	s.log.Info("auto power-off reported", "minutes", minutes)
+}
+
+func (s *Session) volumeReported(percent int) {
+	s.mu.Lock()
+	s.status.Volume = &percent
+	s.mu.Unlock()
 }
 
 func (s *Session) reported(v display.View) {
