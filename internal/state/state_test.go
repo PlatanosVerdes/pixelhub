@@ -439,7 +439,7 @@ func TestCloneKeepsPointersApart(t *testing.T) {
 }
 
 func TestClockOnlyAmbientTakesAnyLength(t *testing.T) {
-	s := Default()
+	s := Defaults()
 	s.Channels[0].Ambient = Ambient{Clock: Duration(time.Second)}
 	if err := s.Validate(); err != nil {
 		t.Fatal(err)
