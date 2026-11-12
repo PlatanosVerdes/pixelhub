@@ -94,6 +94,8 @@ type Status struct {
 	SpeakerAt time.Time `json:"speaker_at,omitzero"`
 	// PowerOff is the auto power-off in minutes the display last reported, 0 for never.
 	PowerOff *int `json:"power_off_min,omitempty"`
+	// Volume is the speaker's volume in percent as the display last reported it.
+	Volume *int `json:"volume,omitempty"`
 }
 
 // Display drives a physical screen. Show only records what should be on screen: the driver
@@ -108,5 +110,7 @@ type Display interface {
 	Chime()
 	// SetPowerOff keeps the display's auto power-off at minutes, 0 for never, across reconnects.
 	SetPowerOff(minutes int)
+	// SetVolume keeps the speaker at percent across reconnects.
+	SetVolume(percent int)
 	Status() Status
 }

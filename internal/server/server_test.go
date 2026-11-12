@@ -36,6 +36,7 @@ func (nullDisplay) Claim()                 {}
 func (nullDisplay) Retry()                 {}
 func (nullDisplay) Chime()                 {}
 func (nullDisplay) SetPowerOff(int)        {}
+func (nullDisplay) SetVolume(int)          {}
 func (nullDisplay) Status() display.Status { return display.Status{Address: "192.0.2.10:7777"} }
 
 type memorySaver struct{}
@@ -147,7 +148,7 @@ func TestEndpoints(t *testing.T) {
 		{"PUT", "/api/settings", `{"brightness":{"day":50,"dusk":20,"night":0}}`, 200, `"day":50`},
 		{"PUT", "/api/settings", `{"release_for":"30m"}`, 200, `"release_for":"30m0s"`},
 		{"PUT", "/api/settings", `{"brightness":{"night":3}}`, 200, `"brightness":{"day":80,"dusk":40,"night":3}`},
-		{"PUT", "/api/settings", `{"volume":3}`, 400, "unknown field"},
+		{"PUT", "/api/settings", `{"loudness":3}`, 400, "unknown field"},
 		{"PUT", "/api/settings", `{"release_for":"10s"}`, 400, "release_for"},
 		{"PUT", "/api/settings", `{"default_channel":"gym"}`, 400, "default_channel"},
 		{"PUT", "/api/settings", `{"location":{"latitude":95,"longitude":0}}`, 400, "location"},

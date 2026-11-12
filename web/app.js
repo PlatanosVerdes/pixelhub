@@ -254,7 +254,7 @@ const linkState = (s) => {
 
 // Every change saves at once; there is nothing to save or undo by hand.
 class SettingsCard extends LitElement {
-  static properties = { base: { attribute: false }, levels: { state: true }, query: { state: true }, places: { state: true }, busy: { state: true } };
+  static properties = { base: { attribute: false }, levels: { state: true }, volume: { state: true }, query: { state: true }, places: { state: true }, busy: { state: true } };
   static styles = [base, css`
     .grid { display: grid; gap: 22px; }
     h3 { font-size: 15px; margin: 0 0 4px; font-weight: 600; }
@@ -329,6 +329,14 @@ class SettingsCard extends LitElement {
           <h3>${t("Brightness")}</h3>
           <p class="hint">${t("It changes by itself with the sun.")}</p>
           ${level("day", t("Day"))}${level("dusk", t("Dusk"))}${level("night", t("Night"))}
+        </div>
+        <div>
+          <h3>${t("Volume")}</h3>
+          <p class="hint">${st.volume === undefined ? t("Not set: the display keeps its own until you move it.") : t("The display's speaker, for Mosko and the chime.")}</p>
+          <label class="level"><span>${t("Volume")}</span>
+            <input type="range" min="0" max="100" .value=${String(this.volume ?? st.volume ?? 50)} ?disabled=${this.busy}
+              @input=${(e) => { this.volume = Number(e.target.value); }}
+              @change=${() => { this.put({ volume: this.volume }); this.volume = undefined; }}><output>${this.volume ?? st.volume ?? "–"}</output></label>
         </div>
         <div>
           <h3>${t("Auto power-off")}</h3>
@@ -1697,6 +1705,7 @@ class ConnectionCard extends LitElement {
         <dt>${t("Last answer")}</dt><dd>${ago(s.last_ack)}</dd>
         <dt>${t("Battery")}</dt><dd>${s.battery === undefined ? html`<span class="muted small">${t("This bridge cannot read it")}</span>`
           : html`${Math.min(100, (s.battery + 1) * 10)} %<span class="muted small">${ago(s.battery_at)}</span>`}</dd>
+        ${s.volume !== undefined ? html`<dt>${t("Volume")}</dt><dd>${s.volume} %</dd>` : nothing}
         ${s.power_off_min !== undefined ? html`<dt>${t("Auto power-off")}</dt><dd>${powerOffLabel(s.power_off_min)}</dd>` : nothing}
         ${s.light !== undefined ? html`<dt>${t("Room light")}</dt><dd>${Math.round(s.light / 2.55)} %<span class="muted small">${ago(s.light_at)}</span></dd>` : nothing}
         <dt>${t("Bridge")}</dt><dd class="mono small">${s.address}</dd>

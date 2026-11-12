@@ -224,6 +224,7 @@ func TestApplySettings(t *testing.T) {
 				return time.Duration(s.ReleaseFor) == 30*time.Minute && s.DefaultChannel == "office"
 			}},
 		{"auto power-off", `{"power_off_min": 60}`, nil, func(s State) bool { return s.PowerOffMin == 60 }},
+		{"volume", `{"volume": 40}`, nil, func(s State) bool { return s.Volume != nil && *s.Volume == 40 }},
 		{"unknown key", `{"brightnes": {}}`, ErrInvalid, nil},
 		{"channels are not settings", `{"channels": []}`, ErrInvalid, nil},
 		{"bad duration", `{"release_for": "soon"}`, ErrInvalid, nil},
@@ -262,6 +263,7 @@ func TestValidateRejects(t *testing.T) {
 		{"scene without name", func(s *State) { s.Channels[1].Scenes[0].Name = "" }, "no name"},
 		{"level out of range", func(s *State) { s.Brightness.Night = 120 }, "brightness.night"},
 		{"power-off too long", func(s *State) { s.PowerOffMin = 721 }, "power_off_min"},
+		{"volume out of range", func(s *State) { v := 101; s.Volume = &v }, "volume"},
 		{"short release", func(s *State) { s.ReleaseFor = Duration(time.Second) }, "release_for"},
 		{"latitude", func(s *State) { s.Location.Latitude = 100 }, "location"},
 		{"bad mode", func(s *State) { s.Mode = display.View{Mode: "vj"} }, "mode:"},
@@ -418,5 +420,19 @@ func TestActiveAt(t *testing.T) {
 				t.Errorf("at %s = %v, want %v", tt.at.Format("Mon 15:04"), got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCloneKeepsPointersApart(t *testing.T) {
+	t.Parallel()
+	v, lag := 40, 100
+	st := Defaults()
+	st.Volume, st.Talk.LagMS = &v, &lag
+	clone := st.Clone()
+	if err := clone.ApplySettings([]byte(`{"volume": 90, "talk": {"lag_ms": 5}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if *st.Volume != 40 || *st.Talk.LagMS != 100 {
+		t.Errorf("a change to the clone reached the original: volume %d, lag %d", *st.Volume, *st.Talk.LagMS)
 	}
 }

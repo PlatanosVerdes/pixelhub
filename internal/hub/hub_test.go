@@ -33,6 +33,7 @@ func (d *fakeDisplay) Claim()          { d.released = false }
 func (d *fakeDisplay) Retry()          {}
 func (d *fakeDisplay) Chime()          {}
 func (d *fakeDisplay) SetPowerOff(int) {}
+func (d *fakeDisplay) SetVolume(int)   {}
 func (d *fakeDisplay) Status() display.Status {
 	d.mu.Lock()
 	defer d.mu.Unlock()

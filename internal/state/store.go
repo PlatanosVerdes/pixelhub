@@ -65,6 +65,8 @@ func (s State) Clone() State {
 	out := s
 	out.Schedule = append([]Slot{}, s.Schedule...)
 	out.Music.Devices = slices.Clone(s.Music.Devices)
+	out.Volume = clonePtr(s.Volume)
+	out.Talk.LagMS = clonePtr(s.Talk.LagMS)
 	out.Channels = make([]Channel, len(s.Channels))
 	for i, c := range s.Channels {
 		c.Sources = append([]string{}, c.Sources...)
@@ -72,4 +74,12 @@ func (s State) Clone() State {
 		out.Channels[i] = c
 	}
 	return out
+}
+
+func clonePtr[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
 }

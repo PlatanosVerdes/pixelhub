@@ -365,6 +365,24 @@ func TestPowerOff(t *testing.T) {
 	}
 }
 
+func TestVolume(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ percent, level int }{{0, 0}, {50, 8}, {100, 15}, {150, 15}, {-5, 0}} {
+		if got := Volume(tc.percent)[4]; int(got) != tc.level {
+			t.Errorf("Volume(%d) sends %d, want %d", tc.percent, got, tc.level)
+		}
+	}
+	for _, tc := range []struct{ level, percent int }{{8, 53}, {15, 100}, {0, 0}, {20, 100}} {
+		answer := []byte{0x01, 0x06, 0x00, 0x04, 0x09, 0x55, byte(tc.level), 0x00, 0x00, 0x02}
+		if p, ok := ParseVolume(answer); !ok || p != tc.percent {
+			t.Errorf("ParseVolume(level %d) = %d %v, want %d", tc.level, p, ok, tc.percent)
+		}
+	}
+	if _, ok := ParseVolume(VolumeQuery()); ok {
+		t.Error("a query is not a volume report")
+	}
+}
+
 func TestTools(t *testing.T) {
 	t.Parallel()
 	countdown := display.View{Mode: display.ModeCountdown, Seconds: 90, Running: true}
