@@ -608,12 +608,14 @@ func (h *Hub) update() {
 		content.Weather = weather
 	}
 	changed := !content.SamePicture(h.shown) || content.Brightness != h.shown.Brightness
+	powerOff := h.st.PowerOffMin
 	h.layer, h.shown = layer, content
 	if changed {
 		h.previewVersion++
 	}
 	h.mu.Unlock()
 
+	h.display.SetPowerOff(powerOff)
 	if claim {
 		h.display.Claim()
 		h.log.Info("display claimed after the release time")

@@ -348,6 +348,23 @@ func TestParseState(t *testing.T) {
 	}
 }
 
+func TestPowerOff(t *testing.T) {
+	t.Parallel()
+	if got, want := hex.EncodeToString(PowerOff(720)), "010500abd002820102"; got != want {
+		t.Errorf("PowerOff(720) = %s, want %s", got, want)
+	}
+	if got, want := hex.EncodeToString(PowerOffQuery()), "010300acaf0002"; got != want {
+		t.Errorf("PowerOffQuery() = %s, want %s", got, want)
+	}
+	answer, _ := hex.DecodeString("01080004ac551e00490102")
+	if m, ok := ParsePowerOff(answer); !ok || m != 30 {
+		t.Errorf("ParsePowerOff = %d %v, want 30", m, ok)
+	}
+	if _, ok := ParsePowerOff(PowerOff(30)); ok {
+		t.Error("a command is not a power-off report")
+	}
+}
+
 func TestTools(t *testing.T) {
 	t.Parallel()
 	countdown := display.View{Mode: display.ModeCountdown, Seconds: 90, Running: true}

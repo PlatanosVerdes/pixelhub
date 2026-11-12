@@ -223,6 +223,7 @@ func TestApplySettings(t *testing.T) {
 			func(s State) bool {
 				return time.Duration(s.ReleaseFor) == 30*time.Minute && s.DefaultChannel == "office"
 			}},
+		{"auto power-off", `{"power_off_min": 60}`, nil, func(s State) bool { return s.PowerOffMin == 60 }},
 		{"unknown key", `{"brightnes": {}}`, ErrInvalid, nil},
 		{"channels are not settings", `{"channels": []}`, ErrInvalid, nil},
 		{"bad duration", `{"release_for": "soon"}`, ErrInvalid, nil},
@@ -260,6 +261,7 @@ func TestValidateRejects(t *testing.T) {
 		{"short playlist", func(s *State) { s.Channels[0].Ambient = Ambient{Pictures: Duration(5 * time.Second)} }, "10s or more"},
 		{"scene without name", func(s *State) { s.Channels[1].Scenes[0].Name = "" }, "no name"},
 		{"level out of range", func(s *State) { s.Brightness.Night = 120 }, "brightness.night"},
+		{"power-off too long", func(s *State) { s.PowerOffMin = 721 }, "power_off_min"},
 		{"short release", func(s *State) { s.ReleaseFor = Duration(time.Second) }, "release_for"},
 		{"latitude", func(s *State) { s.Location.Latitude = 100 }, "location"},
 		{"bad mode", func(s *State) { s.Mode = display.View{Mode: "vj"} }, "mode:"},

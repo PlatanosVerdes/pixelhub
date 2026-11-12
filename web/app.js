@@ -330,6 +330,12 @@ class SettingsCard extends LitElement {
           <p class="hint">${t("It changes by itself with the sun.")}</p>
           ${level("day", t("Day"))}${level("dusk", t("Dusk"))}${level("night", t("Night"))}
         </div>
+        <div>
+          <h3>${t("Auto power-off")}</h3>
+          <p class="hint">${t("The display switches itself off after this long, even plugged in.")}</p>
+          <select aria-label=${t("Auto power-off")} ?disabled=${this.busy} @change=${(e) => this.put({ power_off_min: Number(e.target.value) })}>
+            ${POWER_OFF.map(([m, label]) => html`<option value=${m} ?selected=${m === (st.power_off_min ?? 0)}>${t(label)}</option>`)}</select>
+        </div>
         ${st.channels.length > 1 ? html`<div>
           <h3>${t("Default profile")}</h3>
           <select aria-label=${t("Default profile")} .value=${st.default_channel} ?disabled=${this.busy} @change=${(e) => this.put({ default_channel: e.target.value })}>
@@ -340,6 +346,9 @@ class SettingsCard extends LitElement {
   }
 }
 customElements.define("ph-settings", SettingsCard);
+
+const POWER_OFF = [[0, "Never"], [30, "30 min"], [60, "1 h"], [180, "3 h"], [360, "6 h"], [720, "12 h"]];
+const powerOffLabel = (m) => t(POWER_OFF.find(([v]) => v === m)?.[1] ?? `${m} min`);
 
 // The display drawn as what it is: a grid of round LEDs, lit from the preview, dark where off.
 const LED_SIZE = 16;
@@ -1688,6 +1697,7 @@ class ConnectionCard extends LitElement {
         <dt>${t("Last answer")}</dt><dd>${ago(s.last_ack)}</dd>
         <dt>${t("Battery")}</dt><dd>${s.battery === undefined ? html`<span class="muted small">${t("This bridge cannot read it")}</span>`
           : html`${Math.min(100, (s.battery + 1) * 10)} %<span class="muted small">${ago(s.battery_at)}</span>`}</dd>
+        ${s.power_off_min !== undefined ? html`<dt>${t("Auto power-off")}</dt><dd>${powerOffLabel(s.power_off_min)}</dd>` : nothing}
         ${s.light !== undefined ? html`<dt>${t("Room light")}</dt><dd>${Math.round(s.light / 2.55)} %<span class="muted small">${ago(s.light_at)}</span></dd>` : nothing}
         <dt>${t("Bridge")}</dt><dd class="mono small">${s.address}</dd>
       </dl>

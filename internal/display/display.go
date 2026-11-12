@@ -92,6 +92,8 @@ type Status struct {
 	// Speaker says whether the display's speaker played the last talk, when the bridge can tell.
 	Speaker   *bool     `json:"speaker,omitempty"`
 	SpeakerAt time.Time `json:"speaker_at,omitzero"`
+	// PowerOff is the auto power-off in minutes the display last reported, 0 for never.
+	PowerOff *int `json:"power_off_min,omitempty"`
 }
 
 // Display drives a physical screen. Show only records what should be on screen: the driver
@@ -104,5 +106,7 @@ type Display interface {
 	Retry()
 	// Chime plays a short sound on the display's speaker, where the driver can.
 	Chime()
+	// SetPowerOff keeps the display's auto power-off at minutes, 0 for never, across reconnects.
+	SetPowerOff(minutes int)
 	Status() Status
 }
