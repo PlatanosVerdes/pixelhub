@@ -12,7 +12,8 @@ import (
 const (
 	// flipFor is how long the music layer plays the half turn to a new cover before the idle one.
 	flipFor   = 2 * time.Second
-	flipFrame = 40 * time.Millisecond
+	// The Evo draws each frame far slower than 40 ms, so the turn uses few frames at a pace it keeps.
+	flipFrame = 100 * time.Millisecond
 	flipHold  = 5 * time.Second
 	// idleTurn is how long the cover stays still before it turns round twice on its own, idlePause
 	// the short stop between those two full turns.
@@ -41,10 +42,10 @@ func idle(cover image.Image) []display.Frame {
 func halfTurn(old, cover image.Image) []display.Frame {
 	size := cover.Bounds().Dx()
 	var frames []display.Frame
-	for _, deg := range []float64{22, 45, 66, 84} {
+	for _, deg := range []float64{45, 80} {
 		frames = append(frames, display.Frame{Image: turned(old, size, deg), Delay: flipFrame})
 	}
-	for _, deg := range []float64{84, 66, 45, 22} {
+	for _, deg := range []float64{80, 45} {
 		frames = append(frames, display.Frame{Image: turned(cover, size, -deg), Delay: flipFrame})
 	}
 	return frames
