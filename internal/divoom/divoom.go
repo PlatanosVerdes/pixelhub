@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"math/bits"
+	"slices"
 	"time"
 
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
@@ -249,6 +250,10 @@ func Encode(c display.Content) ([][]byte, error) {
 // Animation keeps the first frames that fit: at most MaxFrames, and no more chunks than the one-byte
 // chunk index can number.
 func Animation(frames []display.Frame) [][]byte {
+	return animation(evenDelays(frames))
+}
+
+func animation(frames []display.Frame) [][]byte {
 	var all []byte
 	for _, f := range frames[:min(len(frames), MaxFrames)] {
 		frame := Frame(f.Image, f.Delay)
@@ -265,6 +270,34 @@ func Animation(frames []display.Frame) [][]byte {
 		msgs = append(msgs, Message(cmdAnimation, append(payload, chunk...)))
 	}
 	return msgs
+}
+
+// evenDelays gives every frame the same delay, repeating frames to keep their times: the Evo plays
+// the whole animation at one frame's delay. The step is the shortest delay, lengthened until the
+// repeats fit in MaxFrames.
+func evenDelays(frames []display.Frame) []display.Frame {
+	frames = frames[:min(len(frames), MaxFrames)]
+	if len(frames) < 2 || !slices.ContainsFunc(frames, func(f display.Frame) bool { return f.Delay != frames[0].Delay }) {
+		return frames
+	}
+	var step time.Duration
+	for _, f := range frames {
+		if f.Delay > 0 && (step == 0 || f.Delay < step) {
+			step = f.Delay
+		}
+	}
+	for {
+		var out []display.Frame
+		for _, f := range frames {
+			for range max(1, int((f.Delay+step/2)/step)) {
+				out = append(out, display.Frame{Image: f.Image, Delay: step})
+			}
+		}
+		if len(out) <= MaxFrames {
+			return out
+		}
+		step = step*time.Duration(len(out))/MaxFrames + time.Millisecond
+	}
 }
 
 func Frame(img image.Image, delay time.Duration) []byte {

@@ -127,6 +127,15 @@ func (f *fakeBridge) handle(conn net.Conn, op []byte) {
 		f.ops <- fmt.Sprintf("say:%d sound after %d, %d faces after %d", wav, binary.LittleEndian.Uint16(body[0:2]), faces, binary.LittleEndian.Uint16(body[2:4]))
 	default:
 		cmd := op[3]
+		// The volume query goes out once per link, whenever it fits; it is answered, never reported.
+		if cmd == 0x09 && !f.silent {
+			if f.linked {
+				conn.Write(divoom.Message(0x04, []byte{cmd, 0x55, 0x08}))
+			} else {
+				conn.Write([]byte{opLinkDown})
+			}
+			return
+		}
 		if f.silent {
 			f.ops <- fmt.Sprintf("unanswered:%02x", cmd)
 			return
@@ -134,10 +143,6 @@ func (f *fakeBridge) handle(conn net.Conn, op []byte) {
 		if !f.linked {
 			f.ops <- fmt.Sprintf("dropped:%02x", cmd)
 			conn.Write([]byte{opLinkDown})
-			return
-		}
-		if cmd == 0x09 {
-			conn.Write(divoom.Message(0x04, []byte{cmd, 0x55, 0x08}))
 			return
 		}
 		f.ops <- fmt.Sprintf("frame:%02x", cmd)
