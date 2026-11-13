@@ -87,7 +87,7 @@ func New(dial Dialer, log *slog.Logger) *Bridge {
 	// greeting, and pixelhub retries with its own backoff; piled-up tries switched the display off.
 	return &Bridge{
 		Dial: dial, Log: log, Pace: 15 * time.Millisecond, GreetAfter: 2 * time.Second, Tries: 1, Retry: 2 * time.Second,
-		HandsFreeAfter: 5 * time.Second, HandsFreeRetry: 5 * time.Minute, HandsFreeRefresh: 30 * time.Minute,
+		HandsFreeAfter: 5 * time.Second, HandsFreeRetry: 5 * time.Minute, HandsFreeRefresh: 15 * time.Minute,
 	}
 }
 
@@ -434,35 +434,25 @@ func (b *Bridge) handsFree(ctx context.Context, mac [6]byte, gen int) {
 		if ctx.Err() != nil {
 			return
 		}
+		if errors.Is(err, errQuiet) {
+			wait = b.HandsFreeAfter
+		}
 		b.Log.Info("hands-free closed", "err", err, "retry_in", wait.String())
 	}
 }
 
 func (b *Bridge) serveHandsFree(ctx context.Context, hf io.ReadWriteCloser, gen int) error {
-	var heard atomic.Int64
-	heard.Store(time.Now().UnixNano())
 	stop := context.AfterFunc(ctx, func() { hf.Close() })
 	defer stop()
-	refresh := time.NewTicker(b.HandsFreeRefresh)
-	defer refresh.Stop()
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		for {
-			select {
-			case <-done:
-				return
-			case <-refresh.C:
-				if time.Since(time.Unix(0, heard.Load())) >= b.HandsFreeRefresh {
-					hf.Close()
-					return
-				}
-			}
-		}
-	}()
+	var quiet atomic.Bool
+	reopen := time.AfterFunc(b.HandsFreeRefresh, func() {
+		quiet.Store(true)
+		hf.Close()
+	})
+	defer reopen.Stop()
 	defer hf.Close()
-	return hfp.Serve(hf, time.Now, func(level int) {
-		heard.Store(time.Now().UnixNano())
+	err := hfp.Serve(hf, time.Now, func(level int) {
+		reopen.Reset(b.HandsFreeRefresh)
 		b.ops <- func() {
 			if b.gen == gen {
 				b.Log.Info("battery", "level", level)
@@ -470,7 +460,14 @@ func (b *Bridge) serveHandsFree(ctx context.Context, hf io.ReadWriteCloser, gen 
 			}
 		}
 	})
+	if quiet.Load() {
+		return errQuiet
+	}
+	return err
 }
+
+// errQuiet is a hands-free channel closed on purpose after a silent while, to be reopened at once.
+var errQuiet = errors.New("no battery level for a while, reopening")
 
 // ErrNoSpeaker is a sound with nowhere to play: the display is linked but its speaker is not.
 var ErrNoSpeaker = errors.New("the display's speaker is not connected")
