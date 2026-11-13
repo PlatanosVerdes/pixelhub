@@ -775,7 +775,10 @@ func TestChoosingByHandReplacesTheShown(t *testing.T) {
 		replaces bool
 	}{
 		{"mode", func(h *Hub) error {
-			_, err := h.Update(func(s *state.State) error { s.Mode = display.View{Mode: display.ModeLight, Color: "#ffffff"}; return nil })
+			_, err := h.Update(func(s *state.State) error {
+				s.Mode = display.View{Mode: display.ModeLight, Color: "#ffffff"}
+				return nil
+			})
 			return err
 		}, true},
 		{"ambient", func(h *Hub) error {

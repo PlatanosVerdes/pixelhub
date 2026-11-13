@@ -69,7 +69,7 @@ func TestMatchesPythonReference(t *testing.T) {
 			return Animation([]display.Frame{{Image: heart, Delay: beat}, {Image: small, Delay: beat}}), nil
 		}},
 		{"four frames in two chunks", "heartbeat_twice_animation", func() ([][]byte, error) {
-			return Animation([]display.Frame{
+			return animation([]display.Frame{
 				{Image: heart, Delay: beat}, {Image: small, Delay: beat},
 				{Image: heart, Delay: 250 * time.Millisecond}, {Image: small, Delay: 250 * time.Millisecond},
 			}), nil
@@ -436,5 +436,49 @@ func TestCountdownResumes(t *testing.T) {
 	v.Since = at.Unix() - 600
 	if got := View(v, 50)[0]; !bytes.Equal(got, Message(cmdTool, []byte{toolCountdown, 1, 0, 0})) {
 		t.Errorf("an ended countdown: %x", got)
+	}
+}
+
+func TestAnimationEvensDelays(t *testing.T) {
+	t.Parallel()
+	pic := func(v uint8) *image.NRGBA {
+		img := image.NewNRGBA(image.Rect(0, 0, Size, Size))
+		img.Set(0, 0, color.NRGBA{v, 0, 0, 255})
+		return img
+	}
+	a, b, c := pic(1), pic(2), pic(3)
+	for _, tt := range []struct {
+		name   string
+		frames []display.Frame
+		want   []time.Duration
+	}{
+		{"even stay", []display.Frame{{Image: a, Delay: time.Second}, {Image: b, Delay: time.Second}}, []time.Duration{time.Second, time.Second}},
+		{"long hold repeats", []display.Frame{{Image: a, Delay: 300 * time.Millisecond}, {Image: b, Delay: 100 * time.Millisecond}, {Image: c, Delay: 100 * time.Millisecond}},
+			[]time.Duration{100, 100, 100, 100, 100}},
+		{"too many repeats stretch the step", []display.Frame{{Image: a, Delay: 20 * time.Second}, {Image: b, Delay: 100 * time.Millisecond}}, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := evenDelays(tt.frames)
+			if len(got) > MaxFrames {
+				t.Fatalf("%d frames, more than %d", len(got), MaxFrames)
+			}
+			var total time.Duration
+			for _, f := range got {
+				if f.Delay != got[0].Delay {
+					t.Fatalf("uneven delays: %v and %v", got[0].Delay, f.Delay)
+				}
+				total += f.Delay
+			}
+			if tt.want != nil && len(got) != len(tt.want) {
+				t.Errorf("%d frames, want %d", len(got), len(tt.want))
+			}
+			var asked time.Duration
+			for _, f := range tt.frames {
+				asked += f.Delay
+			}
+			if diff := total - asked; diff < -asked/10 || diff > asked/10 {
+				t.Errorf("plays %v, asked %v", total, asked)
+			}
+		})
 	}
 }

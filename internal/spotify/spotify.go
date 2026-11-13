@@ -438,7 +438,7 @@ func shrink(src image.Image, size int) *image.NRGBA {
 }
 
 // Content is the cover of the current track and its device; playing is false while paused. The
-// cover turns half way round now and then, and from the old one for a moment after it changes.
+// cover stands still, turning from the old one for a moment after it changes.
 func (a *Account) Content() (display.Content, string, bool) {
 	p, playing := a.Now()
 	if p.Cover == nil {
