@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"log/slog"
+	"reflect"
 	"maps"
 	"slices"
 	"strings"
@@ -201,13 +202,17 @@ func (h *Hub) build(st state.State) (map[string]channel, map[string]bool) {
 
 // Update applies change to a copy of the state, checks it, saves it and makes it live.
 func (h *Hub) Update(change func(*state.State) error) (state.State, error) {
+	return h.apply(change, true)
+}
+
+func (h *Hub) apply(change func(*state.State) error, byHand bool) (state.State, error) {
 	h.write.Lock()
 	defer h.write.Unlock()
 	next, channels, err := h.prepare(change)
 	if err != nil {
 		return state.State{}, err
 	}
-	return h.commit(next, channels, "", "")
+	return h.commitBy(next, channels, "", "", byHand)
 }
 
 // AddChannel creates a channel; pictures left behind by an old channel of that name go first.
@@ -341,10 +346,18 @@ func (h *Hub) prepare(change func(*state.State) error) (state.State, map[string]
 
 // commit saves next and makes it live; an override follows a rename from -> to and ends with its channel.
 func (h *Hub) commit(next state.State, channels map[string]channel, from, to string) (state.State, error) {
+	return h.commitBy(next, channels, from, to, true)
+}
+
+func (h *Hub) commitBy(next state.State, channels map[string]channel, from, to string, byHand bool) (state.State, error) {
 	if err := h.store.Save(next); err != nil {
 		return state.State{}, err
 	}
 	h.mu.Lock()
+	// Picking a mode or changing a channel by hand takes over from what was shown by hand.
+	if byHand && (!reflect.DeepEqual(next.Mode, h.st.Mode) || !reflect.DeepEqual(next.Channels, h.st.Channels)) {
+		h.alerts.drop(shownSource, h.now())
+	}
 	h.st, h.channels = next, channels
 	if o := h.override; o != nil {
 		if o.channel == from {
@@ -462,6 +475,7 @@ func (h *Hub) SetChannel(name string, d time.Duration) error {
 		o.until = now.Add(d)
 	}
 	h.override = o
+	h.alerts.drop(shownSource, now)
 	h.mu.Unlock()
 	h.log.Info("channel set", "channel", name, "for", d.String())
 	h.poke()
@@ -557,7 +571,7 @@ func (h *Hub) update() {
 	h.pullSensors()
 	h.wakeOnSound(now)
 	if h.toolDone(now) {
-		if _, err := h.Update(func(s *state.State) error { s.Mode = display.View{}; return nil }); err != nil {
+		if _, err := h.apply(func(s *state.State) error { s.Mode = display.View{}; return nil }, false); err != nil {
 			h.log.Warn("idle tool not cleared", "err", err)
 		}
 		h.log.Info("tool left at zero, back to automatic")

@@ -767,6 +767,44 @@ func TestShowReplacesTheLastShown(t *testing.T) {
 	}
 }
 
+func TestChoosingByHandReplacesTheShown(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name     string
+		choose   func(h *Hub) error
+		replaces bool
+	}{
+		{"mode", func(h *Hub) error {
+			_, err := h.Update(func(s *state.State) error { s.Mode = display.View{Mode: display.ModeLight, Color: "#ffffff"}; return nil })
+			return err
+		}, true},
+		{"ambient", func(h *Hub) error {
+			_, err := h.Update(func(s *state.State) error { s.Channels[0].Ambient.Clock = state.Duration(2 * time.Minute); return nil })
+			return err
+		}, true},
+		{"channel", func(h *Hub) error { return h.SetChannel(h.State().Channels[0].Name, 0) }, true},
+		{"volume", func(h *Hub) error {
+			_, err := h.Update(func(s *state.State) error { v := 40; s.Volume = &v; return nil })
+			return err
+		}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h, _, now := newHub(t, oneChannel("0s", "1m"), nil)
+			*now = friday(10, 0)
+			h.Show(display.Content{Kind: display.Picture, Name: "Mosko"}, time.Hour)
+			h.update()
+			if err := tt.choose(h); err != nil {
+				t.Fatal(err)
+			}
+			h.update()
+			if still := h.Status().Showing == "Mosko"; still == tt.replaces {
+				t.Errorf("still showing Mosko: %v, want %v", still, !tt.replaces)
+			}
+		})
+	}
+}
+
 func TestBatteryAlerts(t *testing.T) {
 	t.Parallel()
 	h, d, now := newHub(t, oneChannel("0s", "1m"), nil)

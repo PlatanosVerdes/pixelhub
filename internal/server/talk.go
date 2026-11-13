@@ -39,10 +39,11 @@ type Decoder interface {
 // talking lets one clip be made at a time: the Pi has no room for two speech runs at once.
 type talking struct{ sync.Mutex }
 
-// idleFor is how long Mosko waits on the display; the page asks again while it stays open.
+// idleFor is how long Mosko waits on the display; the page asks again while it stays open,
+// and asks for the most when it closes so Mosko stays until something else is picked.
 const (
 	idleFor    = 2 * time.Minute
-	maxIdleFor = 10 * time.Minute
+	maxIdleFor = 12 * time.Hour
 )
 
 type talkRequest struct {
