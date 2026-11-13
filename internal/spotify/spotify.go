@@ -438,7 +438,7 @@ func shrink(src image.Image, size int) *image.NRGBA {
 }
 
 // Content is the cover of the current track and its device; playing is false while paused. The
-// cover stands still, turning from the old one for a moment after it changes.
+// cover turns a full turn every turnEvery, and from the old one for a moment after it changes.
 func (a *Account) Content() (display.Content, string, bool) {
 	p, playing := a.Now()
 	if p.Cover == nil {
@@ -448,14 +448,21 @@ func (a *Account) Content() (display.Content, string, bool) {
 	c := display.Content{Kind: display.Picture, Name: "♪ " + cmp.Or(p.Album, p.Track), Key: "idle"}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.previous != nil && time.Since(a.flipAt) < flipFor {
+	since := time.Since(a.flipAt)
+	switch {
+	case a.previous != nil && since < flipFor:
 		c.Key = "flip"
+	case since%turnEvery >= turnEvery-turnFor:
+		c.Key = "turn"
 	}
 	if a.anim.cover != p.Cover || a.anim.key != c.Key {
 		a.anim.cover, a.anim.key = p.Cover, c.Key
-		if c.Key == "flip" {
+		switch c.Key {
+		case "flip":
 			a.anim.frames = reduce(flip(a.previous, p.Cover))
-		} else {
+		case "turn":
+			a.anim.frames = reduce(fullTurn(p.Cover))
+		default:
 			a.anim.frames = reduce(idle(p.Cover))
 		}
 	}
