@@ -303,3 +303,42 @@ func TestHandsFreeBattery(t *testing.T) {
 		t.Error("hands-free still open after the release")
 	}
 }
+
+func TestHandsFreeReopensWhenQuiet(t *testing.T) {
+	t.Parallel()
+	lr, lw := io.Pipe()
+	link := &fakeLink{Reader: lr, w: lw, written: make(chan []byte, 8)}
+	levels := []byte{8, 7}
+	opened := 0
+	b := New(func(_ [6]byte, ch byte) (io.ReadWriteCloser, error) {
+		if ch != 3 {
+			return link, nil
+		}
+		hr, hw := io.Pipe()
+		go hw.Write([]byte("AT+IPHONEACCEV=1,1," + string('0'+levels[min(opened, len(levels)-1)]) + "\r"))
+		opened++
+		return &fakeHandsFree{Reader: hr, w: hw}, nil
+	}, slog.New(slog.DiscardHandler))
+	b.GreetAfter, b.HandsFree, b.HandsFreeAfter = time.Hour, 3, 10*time.Millisecond
+	b.HandsFreeRetry, b.HandsFreeRefresh = time.Hour, 50*time.Millisecond
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go b.Serve(ln)
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Write([]byte{opConnect, 0x01, 0x12, 0x23, 0x45, 0x56, 0x67, 0x01})
+	c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	got := make([]byte, 4)
+	if _, err := io.ReadFull(c, got); err != nil {
+		t.Fatalf("a quiet channel should be reopened without the hour-long retry: %v", err)
+	}
+	if !bytes.Equal(got, []byte{opBattery, 8, opBattery, 7}) {
+		t.Errorf("got %x, want 8 then 7", got)
+	}
+}

@@ -214,7 +214,7 @@ A bridge that can read the display's battery sends `0x42` and the level, 0 (empt
 The display only reports it over hands-free, to a gateway that answers `AT+XAPL` as an iPhone.
 pixelbridge does with `-handsfree <channel>` (the display's Hands-Free unit, `sdptool search --bdaddr
 <mac> 0x111e`; 3 on the Timebox Evo): it opens that channel 5 s after the link, keeps it open, and
-reopens it after 30 min without a report. PipeWire's own hands-free gateway answers `AT+XAPL` with a
+reopens it 15 min after the last report. PipeWire's own hands-free gateway answers `AT+XAPL` with a
 bare `OK` and holds the same channel, so take the `hfp_ag` and `hsp_ag` roles off WirePlumber's
 `bluez5.roles` on that host. The macOS bridge cannot read it. pixelhub shows it in the status
 (`battery`, `battery_at`) and on the display, over anything picked by hand: at 1 a battery asking
