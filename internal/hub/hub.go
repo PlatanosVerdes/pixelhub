@@ -145,6 +145,8 @@ type Hub struct {
 
 	// battery tells when to show the battery; only update uses it.
 	battery batteryWatch
+	// notChargingAt is when the not-charging picture last showed, zero while charging is fine.
+	notChargingAt time.Time
 
 	// idle is when the picked tool was first seen at zero, and which tool that was.
 	idle     time.Time

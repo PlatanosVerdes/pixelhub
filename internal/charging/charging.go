@@ -19,6 +19,11 @@ const (
 	every = time.Minute
 	// reassert is how often, at most, the wanted state is sent again to a plug switched by hand.
 	reassert = 10 * time.Minute
+	// stuck is how long the plug can be on with the battery not climbing before it is not charging:
+	// a 10 % step takes well under it, so the display is most likely not on the plug.
+	stuck = time.Hour
+	// fresh is how old a reading can be to say the battery is still not climbing.
+	fresh = 30 * time.Minute
 )
 
 type Power int
@@ -66,6 +71,8 @@ type Status struct {
 	On    bool      `json:"on"`
 	At    time.Time `json:"at,omitzero"`
 	Error string    `json:"error,omitempty"`
+	// NotCharging is the plug on for a while with the battery not climbing.
+	NotCharging bool `json:"not_charging,omitempty"`
 }
 
 type Charger struct {
@@ -78,6 +85,10 @@ type Charger struct {
 	// want is the state the battery last called for, Unknown until it has; sentAt when it was last sent.
 	want   Power
 	sentAt time.Time
+	// top is the highest level seen since the plug went on, and topAt when it was reached or the plug
+	// went on; the zero topAt is the plug not on.
+	top   int
+	topAt time.Time
 
 	mu     sync.Mutex
 	status *Status
@@ -124,6 +135,7 @@ func (c *Charger) step(ctx context.Context) {
 	if st.Battery == nil {
 		since = c.started
 	}
+	c.watchCharge(now, on, st)
 	want := Want(st.Battery, since, now, c.want)
 	if want == Unknown || want == powerOf(on) {
 		c.want = want
@@ -144,6 +156,27 @@ func (c *Charger) step(ctx context.Context) {
 		level = *st.Battery
 	}
 	c.log.Info("charger switched", "on", want == On, "battery", level, "battery_at", st.BatteryAt)
+}
+
+// watchCharge flags the plug on for a while with fresh readings that do not climb.
+func (c *Charger) watchCharge(now time.Time, on bool, st display.Status) {
+	level := -1
+	if st.Battery != nil {
+		level = *st.Battery
+	}
+	switch {
+	case !on:
+		c.topAt = time.Time{}
+	case c.topAt.IsZero() || level > c.top:
+		c.top, c.topAt = level, now
+	}
+	stalled := on && st.Battery != nil && level < offAt && now.Sub(c.topAt) >= stuck && now.Sub(st.BatteryAt) < fresh
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if stalled && !c.status.NotCharging {
+		c.log.Warn("plug on but the battery is not climbing", "battery", level, "since", c.topAt)
+	}
+	c.status.NotCharging = stalled
 }
 
 func (c *Charger) seen(now time.Time, on bool) {

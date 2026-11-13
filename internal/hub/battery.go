@@ -39,6 +39,9 @@ func (w *batteryWatch) see(level int, now time.Time) string {
 	return sprite
 }
 
+// notChargingEvery is how often the plug-on-but-not-charging picture repeats while it lasts.
+const notChargingEvery = 15 * time.Minute
+
 // watchBattery puts the battery's picture on screen, above anything picked by hand.
 func (h *Hub) watchBattery(now time.Time) {
 	reported := h.display.Status().Battery
@@ -46,6 +49,15 @@ func (h *Hub) watchBattery(now time.Time) {
 		return
 	}
 	sprite := h.battery.see(*reported, now)
+	if sprite == "" && h.Plug != nil {
+		if st := h.Plug.Status(); st != nil && st.NotCharging {
+			if h.notChargingAt.IsZero() || now.Sub(h.notChargingAt) >= notChargingEvery {
+				h.notChargingAt, sprite = now, "battery-not-charging"
+			}
+		} else {
+			h.notChargingAt = time.Time{}
+		}
+	}
 	if sprite == "" {
 		return
 	}

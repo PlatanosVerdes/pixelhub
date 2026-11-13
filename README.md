@@ -231,7 +231,9 @@ reading for 2 hours (or none in the 2 hours since start) it switches the plug on
 dies. It reads the plug every minute, only writes when the wanted state changes, and switches back a
 plug turned the other way in the phone app at most every 10 min. Only the power switch (DP 1) is
 ever written. An unreachable plug is logged once and retried every minute. The status shows it as
-`plug` (`on`, `at` when last read, `error` while it cannot be reached). The ID and local key come
+`plug` (`on`, `at` when last read, `error` while it cannot be reached, `not_charging` when the plug
+has been on for an hour with fresh readings and the battery has not climbed, most likely the display
+not on the plug; the display then shows `battery-not-charging` every 15 min). The ID and local key come
 from the Tuya developer platform or `tinytuya wizard`; give the plug a fixed IP on the router.
 
 ### Room sensors

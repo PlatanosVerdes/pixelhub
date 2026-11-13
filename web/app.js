@@ -1707,6 +1707,7 @@ class ConnectionCard extends LitElement {
           : html`${Math.min(100, (s.battery + 1) * 10)} %<span class="muted small">${ago(s.battery_at)}</span>`}</dd>
         ${s.plug ? html`<dt>${t("Charger")}</dt><dd title=${s.plug.error ?? ""}>${s.plug.error
           ? html`<span class="muted small">${t("Plug unreachable")}</span>`
+          : s.plug.not_charging ? html`<span style="color: var(--warn)">${t("On, but not charging")}</span>`
           : html`${s.plug.on ? t("On") : t("Off")}<span class="muted small">${ago(s.plug.at)}</span>`}</dd>` : nothing}
         ${s.volume !== undefined ? html`<dt>${t("Volume")}</dt><dd>${s.volume} %</dd>` : nothing}
         ${s.power_off_min !== undefined ? html`<dt>${t("Auto power-off")}</dt><dd>${powerOffLabel(s.power_off_min)}</dd>` : nothing}

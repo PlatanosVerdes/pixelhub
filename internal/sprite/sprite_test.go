@@ -25,7 +25,7 @@ func TestBuiltins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"alert", "battery-charge", "battery-dying", "battery-unplug", "check", "coffee", "heart", "heartbeat", "lunch", "moon", "sun", "sunrise", "zzz"}
+	want := []string{"alert", "battery-charge", "battery-dying", "battery-not-charging", "battery-unplug", "check", "coffee", "heart", "heartbeat", "lunch", "moon", "sun", "sunrise", "zzz"}
 	if got := lib.Names(); !slices.Equal(got, want) {
 		t.Errorf("names %v, want %v", got, want)
 	}
