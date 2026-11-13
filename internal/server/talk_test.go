@@ -142,9 +142,9 @@ func TestIdleAndKeptSpeech(t *testing.T) {
 		}
 	}
 	rec = httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest("POST", "/api/talk/idle?for=1h", nil))
+	srv.ServeHTTP(rec, httptest.NewRequest("POST", "/api/talk/idle?for=13h", nil))
 	if rec.Code != 400 {
-		t.Errorf("idle for an hour: %d %s", rec.Code, rec.Body)
+		t.Errorf("idle for 13 hours: %d %s", rec.Code, rec.Body)
 	}
 
 	for i, want := range []string{"¡Hola!", ""} {

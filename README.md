@@ -115,7 +115,7 @@ Plain HTTP and JSON, no auth: it is only reachable on the LAN and Tailscale. Err
 | `GET /healthz` | 200 while the process runs, even with the display unreachable |
 | `GET /api/status` | Channel and why (`override` or `schedule`), layer, what is showing, `preview_version`, connection, last ack, `released_until` |
 | `POST /api/notify` | Show an alert: `sprite` or `color`, `priority` 0-10, `duration` up to `1h`, `source` |
-| `POST /api/talk/idle?for=` | Mosko waiting on the display, blinking, for up to 10 minutes (2 by default); the page shows him while his tab is open |
+| `POST /api/talk/idle?for=` | Mosko waiting on the display, blinking, for up to 12 hours (2 minutes by default); his tab shows him while it is open and leaves him on when it closes, until a mode, channel or picture is picked |
 | `GET /api/talk/phrases` | The quick phrases the Mosko tab offers |
 | `POST /api/talk/warm` | Read the quick phrases now, for a speech server that was away at start; they are read at start too |
 | `POST /api/talk/noise` | Mosko makes a noise now, `{"kind": "fart"}`: `fart`, `burp`, `scream` or `sound`, one of a few CC0 recordings of each (`internal/talk/noises`) |

@@ -2072,7 +2072,7 @@ class MoskoTab extends LitElement {
   }
   disconnectedCallback() {
     super.disconnectedCallback(); this.stopRecording(true); this.discard(); this.clear(); clearTimeout(this.saving); clearTimeout(this.waiting); clearTimeout(this.pranksTick);
-    api("DELETE", "show?key=mosko-idle", undefined, { keepalive: true }).then(() => send(this, "refresh")).catch(() => {});
+    api("POST", "talk/idle?for=12h", undefined, { keepalive: true }).catch(() => {});
   }
   willUpdate(c) {
     if (c.has("state") && this.state && !this.editing) {
