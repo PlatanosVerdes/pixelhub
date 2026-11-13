@@ -183,6 +183,18 @@ func TestSignInFollowsPlayback(t *testing.T) {
 	if c, _, _ := a.Content(); c.Key != "idle" || !sameImage(c.Frames[0].Image, cover) {
 		t.Errorf("after the half turn: key %q, want the cover idling again", c.Key)
 	}
+	a.mu.Lock()
+	a.flipAt = time.Now().Add(-turnEvery + turnFor/2)
+	a.mu.Unlock()
+	c, _, _ = a.Content()
+	if c.Key != "turn" || len(c.Frames) < 2 || !sameImage(c.Frames[len(c.Frames)-1].Image, cover) {
+		t.Errorf("near the end of each %v: key %q with %d frames, want a full turn back to the cover", turnEvery, c.Key, len(c.Frames))
+	}
+	for _, f := range c.Frames {
+		if f.Delay != c.Frames[0].Delay {
+			t.Fatalf("the turn mixes delays %v and %v, the Evo plays one", c.Frames[0].Delay, f.Delay)
+		}
+	}
 }
 
 func TestPausedShowsNothing(t *testing.T) {

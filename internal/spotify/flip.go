@@ -14,7 +14,10 @@ const (
 	flipFor = 2 * time.Second
 	// The Evo draws each frame far slower than 40 ms, so the turn uses few frames at a pace it keeps.
 	flipFrame = 100 * time.Millisecond
-	flipHold  = 5 * time.Second
+	// turnEvery is how often the still cover turns a full turn round, for turnFor: the Evo plays an
+	// animation at one frame delay, so the hub sends the turn on its own and the still cover after it.
+	turnEvery = 20 * time.Second
+	turnFor   = 2 * time.Second
 	// distance is how far the eye is from the cover, in cover widths: closer gives more perspective.
 	distance = 1.6
 	// samples per pixel side, averaged so the turning edges come out smooth.
@@ -23,13 +26,26 @@ const (
 
 // flip turns the old cover half a turn about its vertical axis and brings the new one round.
 func flip(old, cover image.Image) []display.Frame {
-	return append(halfTurn(old, cover), display.Frame{Image: cover, Delay: flipHold})
+	return hold(halfTurn(old, cover), cover, flipFor)
 }
 
-// idle is the cover standing still: turning it now and then needs uneven frame times, which the Evo
-// cannot play.
+// idle is the cover standing still.
 func idle(cover image.Image) []display.Frame {
 	return []display.Frame{{Image: cover}}
+}
+
+// fullTurn turns the cover a full turn round; the hold until turnFor keeps a late swap to the still
+// cover from starting the turn again.
+func fullTurn(cover image.Image) []display.Frame {
+	return hold(append(halfTurn(cover, cover), halfTurn(cover, cover)...), cover, turnFor)
+}
+
+// hold pads a turn with the still cover until it lasts d, all frames at one delay.
+func hold(frames []display.Frame, cover image.Image, d time.Duration) []display.Frame {
+	for range int(d/flipFrame) - len(frames) {
+		frames = append(frames, display.Frame{Image: cover, Delay: flipFrame})
+	}
+	return frames
 }
 
 func halfTurn(old, cover image.Image) []display.Frame {
