@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PlatanosVerdes/pixelhub/internal/charging"
 	"github.com/PlatanosVerdes/pixelhub/internal/display"
 	"github.com/PlatanosVerdes/pixelhub/internal/state"
 )
@@ -125,7 +126,7 @@ func newHub(t *testing.T, stateJSON string, ambient ambientDir) (*Hub, *fakeDisp
 		}
 	}
 	d := &fakeDisplay{}
-	h := New(d, st, &memorySaver{}, sprites{"zzz": true, "lunch": true, "heart": true, "battery-charge": true, "battery-dying": true, "battery-unplug": true}, ambient, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := New(d, st, &memorySaver{}, sprites{"zzz": true, "lunch": true, "heart": true, "battery-charge": true, "battery-dying": true, "battery-not-charging": true, "battery-unplug": true}, ambient, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	now := friday(12, 0)
 	h.now = func() time.Time { return now }
 	return h, d, &now
@@ -877,5 +878,42 @@ func TestSensors(t *testing.T) {
 	h.update()
 	if st := h.Status(); st.Layer == LayerAlert {
 		t.Errorf("woken again within %s: %s", wakeEvery, st.Showing)
+	}
+}
+
+type plugStatus struct{ st *charging.Status }
+
+func (p *plugStatus) Status() *charging.Status { return p.st }
+
+func TestNotChargingAlert(t *testing.T) {
+	t.Parallel()
+	h, d, now := newHub(t, oneChannel("0s", "1m"), nil)
+	plug := &plugStatus{st: &charging.Status{On: true}}
+	h.Plug = plug
+	*now = friday(10, 0)
+	level := 3
+	d.mu.Lock()
+	d.battery = &level
+	d.mu.Unlock()
+	showing := func(after time.Duration) string {
+		*now = now.Add(after)
+		h.update()
+		if st := h.Status(); st.Layer == LayerAlert {
+			return st.Showing
+		}
+		return ""
+	}
+	if got := showing(time.Second); got != "" {
+		t.Errorf("charging fine: %q", got)
+	}
+	plug.st = &charging.Status{On: true, NotCharging: true}
+	if got := showing(time.Second); got != "battery-not-charging" {
+		t.Errorf("not charging: %q, want the picture", got)
+	}
+	if got := showing(time.Minute); got != "" {
+		t.Errorf("a minute later: %q, want it quiet until %v pass", got, notChargingEvery)
+	}
+	if got := showing(notChargingEvery); got != "battery-not-charging" {
+		t.Errorf("after %v: %q, want it again", notChargingEvery, got)
 	}
 }

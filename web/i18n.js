@@ -374,6 +374,7 @@ const es = {
   "Battery": "Batería",
   "Charger": "Cargador",
   "Plug unreachable": "Enchufe sin conexión",
+  "On, but not charging": "Encendido, pero no carga",
   "Auto power-off": "Apagado automático",
   "Never": "Nunca",
   "Volume": "Volumen",

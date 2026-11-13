@@ -147,3 +147,60 @@ func TestCharger(t *testing.T) {
 		})
 	}
 }
+
+func TestNotCharging(t *testing.T) {
+	t.Parallel()
+	m := time.Minute
+	type reading struct {
+		at     time.Duration
+		level  int
+		plugOn bool
+		want   bool
+	}
+	tests := []struct {
+		name  string
+		steps []reading
+	}{
+		{"on and stuck for an hour", []reading{
+			{0, 3, true, false}, {30 * m, 3, true, false}, {stuck - m, 2, true, false}, {stuck, 2, true, true},
+		}},
+		{"climbing restarts the wait", []reading{
+			{0, 3, true, false}, {50 * m, 4, true, false}, {stuck, 4, true, false}, {50*m + stuck, 4, true, true},
+		}},
+		{"off is not stuck", []reading{
+			{0, 3, false, false}, {stuck, 3, false, false}, {2 * stuck, 3, false, false},
+		}},
+		{"switching on starts the wait", []reading{
+			{0, 3, false, false}, {stuck, 3, true, false}, {2*stuck - m, 3, true, false}, {2 * stuck, 3, true, true},
+		}},
+		{"full enough is not stuck", []reading{
+			{0, offAt, true, false}, {stuck, offAt, true, false},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := &Charger{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+			for i, r := range tt.steps {
+				now := t0.Add(r.at)
+				c.seen(now, r.plugOn)
+				c.watchCharge(now, r.plugOn, display.Status{Battery: new(r.level), BatteryAt: now})
+				if got := c.Status().NotCharging; got != r.want {
+					t.Errorf("step %d at %v: not charging %v, want %v", i, r.at, got, r.want)
+				}
+			}
+		})
+	}
+}
+
+func TestNotChargingNeedsAFreshReading(t *testing.T) {
+	t.Parallel()
+	c := &Charger{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	for _, at := range []time.Duration{0, stuck} {
+		c.seen(t0.Add(at), true)
+		c.watchCharge(t0.Add(at), true, display.Status{Battery: new(3), BatteryAt: t0})
+	}
+	if c.Status().NotCharging {
+		t.Error("a reading an hour old flagged the battery as not climbing")
+	}
+}
